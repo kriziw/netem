@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.5.0](https://github.com/kriziw/netem/compare/v0.4.0...v0.5.0) (2026-10-08)
+
+
+### Features
+
+* add contextual documentation mapping ([b52df91](https://github.com/kriziw/netem/commit/b52df911b0d3449dba267315733690780f82be63))
+* add contextual guide link to operational pages ([b808e59](https://github.com/kriziw/netem/commit/b808e598708ce59930a40c7b8d7aede4667b044d))
+* add documentation navigation icon ([ff30901](https://github.com/kriziw/netem/commit/ff30901acedaa42446a233284f862ad994b4dc30))
+* add in-app documentation design system ([d1a80ec](https://github.com/kriziw/netem/commit/d1a80ec4d7b9f2a471f99f45574dab01d5830887))
+* add in-app documentation routes and navigation ([9269a7e](https://github.com/kriziw/netem/commit/9269a7e25d6a56a9b847fc06123e8811df4ccf5f))
+* add in-app wiki article layout ([5a35f14](https://github.com/kriziw/netem/commit/5a35f149e5b213929b0d96fd42c5a68b11edb22d))
+* add searchable documentation home ([40ced68](https://github.com/kriziw/netem/commit/40ced6844769f6df54f337801affe674f1835999))
+* add searchable in-app documentation wiki ([58039a6](https://github.com/kriziw/netem/commit/58039a604d3c5e73fb7b472d048414d960011377))
+
+
+### Documentation
+
+* add analytics sla guide ([6400ad6](https://github.com/kriziw/netem/commit/6400ad6e7cdbd8ac6bc6322fdcd5cdf853a47841))
+* add architecture guide ([79b00da](https://github.com/kriziw/netem/commit/79b00daeb9c87bb427f50706abed31120000fe7a))
+* add getting started guide ([eaece83](https://github.com/kriziw/netem/commit/eaece8339f0d9cfbf23bdbb7d9fb0d9c046bd0a4))
+* add integrations api guide ([6557c3a](https://github.com/kriziw/netem/commit/6557c3a0e868b23785a381187474a834f729b083))
+* add overview guide ([a28c7c8](https://github.com/kriziw/netem/commit/a28c7c8f8cb11499bed2bee3e5355ac4365415e2))
+* add reference guide ([61cf406](https://github.com/kriziw/netem/commit/61cf406ca731f888f2fb19f8fd054bc6fb803e62))
+* add scenarios guide ([9051d9a](https://github.com/kriziw/netem/commit/9051d9aec04195570a55d527392a5fc2bd641dfb))
+* add topology profiles guide ([8506ee9](https://github.com/kriziw/netem/commit/8506ee99cae33f06fbd756c43d0355d2a3d26ed9))
+* add traffic security guide ([34477d0](https://github.com/kriziw/netem/commit/34477d0f844426c08ebd3d12f121e16aefa1b3bc))
+* add troubleshooting guide ([4ca2d67](https://github.com/kriziw/netem/commit/4ca2d67678c196275b1e1e53182baef64d7d3df4))
+* add updates releases guide ([1a5efb0](https://github.com/kriziw/netem/commit/1a5efb007ee24d315e858d1acbd0567b36d15c80))
+* add wan links guide ([9e1767f](https://github.com/kriziw/netem/commit/9e1767f94adba06f8863669ee4c54ae431bc75df))
+* document in-app wiki and contextual help ([3c9ccbd](https://github.com/kriziw/netem/commit/3c9ccbd226ee1c6bd43ab6c0e50a1be63e8dc8c5))
+
 ## [0.4.0](https://github.com/kriziw/netem/compare/v0.3.0...v0.4.0) (2026-10-08)
 
 
