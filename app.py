@@ -273,6 +273,19 @@ DEFAULT_SCENARIOS = [
             {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
         ],
     },
+    {
+        "id": "availability_stress",
+        "name": "Availability stress / DDoS impact",
+        "description": "Safely emulates the WAN impact of a saturation event without generating attack traffic.",
+        "steps": [
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
+            {"after": 8, "action": "quality", "value": 60, "label": "Congestion begins"},
+            {"after": 8, "action": "quality", "value": 30, "label": "Heavy saturation impact"},
+            {"after": 12, "action": "quality", "value": 10, "label": "Severe availability impact"},
+            {"after": 15, "action": "quality", "value": 70, "label": "Attack subsides"},
+            {"after": 10, "action": "quality", "value": 100, "label": "Recovered"},
+        ],
+    },
 ]
 
 
@@ -989,6 +1002,7 @@ def run_scenario(link_id: str, scenario: dict):
         return
 
     original = copy.deepcopy(link)
+    runtime_profile = copy.deepcopy(original)
     try:
         for index, step in enumerate(scenario.get("steps", []), start=1):
             if SCENARIO_STOP.wait(max(0, int(step.get("after", 0)))):
@@ -1000,20 +1014,24 @@ def run_scenario(link_id: str, scenario: dict):
 
             action = step.get("action")
             if action == "quality":
-                transient = copy.deepcopy(original)
-                transient["mode"] = "quality"
-                transient["quality"] = int(step.get("value", 100))
-                transient.pop("custom_profile", None)
-                apply_selected_profile(transient, presets)
+                runtime_profile = copy.deepcopy(original)
+                runtime_profile["mode"] = "quality"
+                runtime_profile["quality"] = int(step.get("value", 100))
+                runtime_profile.pop("custom_profile", None)
+                apply_selected_profile(runtime_profile, presets)
                 ACTIVE_FAULTS.pop(link_id, None)
                 log_event(
                     "scenario",
                     f'{scenario["name"]}: {step.get("label", "quality")}',
                     link_id=link_id,
-                    quality=transient["quality"],
+                    quality=runtime_profile["quality"],
                 )
             elif action == "fault":
-                apply_runtime_fault(original, step.get("value", "normal"), presets)
+                apply_runtime_fault(
+                    runtime_profile,
+                    step.get("value", "normal"),
+                    presets,
+                )
 
     finally:
         apply_selected_profile(original, presets)
@@ -1343,6 +1361,40 @@ def prometheus_metrics():
                 f'{counters["tx_bytes"]}'
             )
     return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
+
+
+@app.route("/lab/security/eicar.txt")
+def security_eicar():
+    """
+    Serve the standard harmless EICAR anti-malware test string.
+
+    This is intentionally a detection test artifact, not malware.
+    """
+    payload = (
+        "X5O!P%@AP[4\\PZX54(P^)7CC)7}$"
+        "EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    )
+    log_event("security-test", "EICAR test artifact requested")
+    return Response(
+        payload + "\n",
+        mimetype="text/plain",
+        headers={"Content-Disposition": 'attachment; filename="eicar.com.txt"'},
+    )
+
+
+@app.route("/lab/security/beacon", methods=["GET", "POST"])
+def security_beacon():
+    """
+    Benign callback sink for C2-like beacon visibility testing.
+    It accepts no commands and returns no executable content.
+    """
+    log_event(
+        "security-test",
+        "Benign beacon received",
+        method=request.method,
+        user_agent=(request.headers.get("User-Agent") or "")[:120],
+    )
+    return ("", 204)
 
 
 @app.route("/updates", methods=["GET", "POST"])
