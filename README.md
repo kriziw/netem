@@ -10,9 +10,9 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
   - Optional automatic recreation of configured Linux bridges when the application starts.
   - Prevents WAN paths disappearing after a VM reboot.
 
-- **Optional shaping persistence**
-  - The last applied impairment settings can be restored automatically at startup.
-  - This is intentionally separate from bridge persistence so a reboot can still return the lab to clean links when preferred.
+- **Persistent WAN profile state**
+  - WAN aliases, selected access preset and quality level are stored per link.
+  - The selected profile can be reapplied automatically after reboot.
 
 - **WAN technology presets**
   - DIA
@@ -21,17 +21,24 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
   - 4G
   - 5G
   - Satellite
-  - Degraded
-  - Dead / outage
+
+- **One quality control per WAN**
+  - Each technology preset represents nominal 100% conditions.
+  - A 0–100% quality slider progressively worsens latency, jitter, loss and available bandwidth.
+  - Status is shown as Excellent, Good, Fair, Poor, Critical or Down.
 
 - **Asymmetric bandwidth simulation**
-  - Independent download and upload limits.
+  - Independent nominal download and upload capacity per preset.
   - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
+
+- **GUI preset editor**
+  - Preset baseline values can be edited from a dedicated Presets menu.
+  - Project defaults can be restored from the same screen.
 
 - **Safer service behavior**
   - Flask debug mode is disabled for normal application startup.
 
-The technology presets are representative lab profiles rather than claims about any specific ISP or carrier. They are intended as useful starting points and can be adjusted with the normal sliders.
+The technology presets are representative lab profiles rather than claims about any specific ISP or carrier. They are intended as useful starting points. Edit their nominal values in the Presets menu, then change each WAN's simulated condition with the quality slider.
 
 ---
 
@@ -201,9 +208,9 @@ The Setup page includes two independent options:
 
 Recommended for persistent labs. Linux bridges are runtime objects and otherwise disappear after a reboot.
 
-**Restore the last applied shaping profile on startup**
+**Restore selected presets and quality on startup**
 
-Optional. Enable this if the VM should return with the same impairment profile after restarting. Leave it disabled if you prefer a clean/unimpaired startup.
+Recommended for repeatable labs. When enabled, each WAN's persisted access preset and quality level are reapplied after reboot. Disable it if you want the topology restored but the links to start without shaping.
 
 ---
 
@@ -211,7 +218,7 @@ Optional. Enable this if the VM should return with the same impairment profile a
 
 The Dashboard includes representative presets:
 
-| Profile | Delay | Jitter | Loss | Download | Upload |
+| Profile | Nominal delay | Nominal jitter | Nominal loss | Download | Upload |
 | --- | ---: | ---: | ---: | ---: | ---: |
 | DIA | 5 ms | 1 ms | 0% | 1000 Mbit/s | 1000 Mbit/s |
 | DSL | 25 ms | 8 ms | 0.1% | 100 Mbit/s | 20 Mbit/s |
@@ -219,12 +226,27 @@ The Dashboard includes representative presets:
 | 4G | 45 ms | 20 ms | 0.5% | 80 Mbit/s | 20 Mbit/s |
 | 5G | 20 ms | 8 ms | 0.2% | 300 Mbit/s | 50 Mbit/s |
 | Satellite | 300 ms | 30 ms | 0.5% | 100 Mbit/s | 20 Mbit/s |
-| Degraded | 100 ms | 40 ms | 2% | 20 Mbit/s | 5 Mbit/s |
-| Dead | 1000 ms | 200 ms | 100% | 1 Mbit/s | 1 Mbit/s |
 
 These values are deliberately generic. Actual broadband, cellular and satellite performance varies significantly by provider, access technology, RF conditions, congestion, geography and service tier.
 
 For example, a GEO satellite profile will generally need far more delay than LEO satellite service. The preset should therefore be treated as a quick starting point rather than a standards-based definition.
+
+### Quality model
+
+The preset table defines the **100% / nominal** state. The Dashboard stores one quality value per WAN:
+
+| Quality | Status |
+| ---: | --- |
+| 90–100% | Excellent |
+| 75–89% | Good |
+| 50–74% | Fair |
+| 25–49% | Poor |
+| 1–24% | Critical |
+| 0% | Down |
+
+As quality is reduced, the emulator progressively increases latency, jitter and packet loss and reduces both downstream and upstream capacity. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
+
+The Presets menu lets you change the 100% baseline values used by this calculation.
 
 ---
 
@@ -249,15 +271,14 @@ tc qdisc add dev <outer-nic> root netem
 tc qdisc add dev <outer-nic> parent ... tbf rate <upload>
 ```
 
-The GUI exposes:
+The Dashboard exposes:
 
-- Delay
-- Jitter
-- Packet loss
-- Download rate
-- Upload rate
+- Access preset
+- Quality slider
+- Derived quality status
+- Derived latency, jitter, packet loss, download and upload values
 
-The current settings are stored when successfully applied. They are only restored after restart if **Restore the last applied shaping profile on startup** is enabled.
+The Presets menu exposes the editable nominal values for each access technology. WAN aliases, the selected preset and the quality level are stored in `config.json`. When startup profile restoration is enabled, those selections are reapplied after restart.
 
 ---
 
@@ -307,7 +328,7 @@ Original author/project: Techkarma / techkarma-no
 
 The original project established the WAN emulator concept, Flask interface, bridge handling and Linux `tc/netem` implementation on which this fork is based.
 
-This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, asymmetric bandwidth shaping, and additional WAN simulation profiles.
+This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, persisted WAN identities, editable access-technology presets, a per-WAN quality model, and asymmetric bandwidth shaping.
 
 If you are looking for the original project or its appliance offering, please refer to the upstream repository and Techkarma documentation.
 
