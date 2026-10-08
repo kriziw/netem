@@ -89,6 +89,20 @@
       width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
       color: var(--text); background: rgba(2,6,23,.8); font-size: .88rem; margin-bottom: 16px;
     }
+    .bandwidth-box {
+      margin: -4px 0 16px; padding: 11px; border: 1px solid var(--border);
+      border-radius: 12px; background: rgba(2,6,23,.42);
+    }
+    .bandwidth-head {
+      display:flex; justify-content:space-between; gap:10px; align-items:baseline;
+      margin-bottom:8px;
+    }
+    .bandwidth-title { font-size:.74rem; color:var(--muted); }
+    .bandwidth-tag { font-size:.64rem; color:#64748b; }
+    .bandwidth-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+    .bandwidth-grid select { margin-bottom:0; }
+    .bandwidth-grid label { font-size:.67rem; }
+    .bandwidth-note { margin-top:7px; color:#64748b; font-size:.66rem; line-height:1.3; }
     .quality-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
     .quality-value { font-weight: 700; font-size: .92rem; }
     .quality-control { transition: opacity .15s ease; }
@@ -192,6 +206,49 @@
               </option>
             {% endfor %}
           </select>
+
+          <div class="bandwidth-box">
+            <div class="bandwidth-head">
+              <div class="bandwidth-title">Nominal WAN bandwidth</div>
+              <div class="bandwidth-tag">independent of quality/custom state</div>
+            </div>
+            <div class="bandwidth-grid">
+              <div>
+                <label>Download</label>
+                <select name="bandwidth_download_mbit" data-role="base-download">
+                  <option value="" {% if nic.bandwidth_download_mbit is none %}selected{% endif %}
+                          data-role="profile-download-option">
+                    Profile default ({{ presets[nic.preset_id].download_mbit|int }} Mbit/s)
+                  </option>
+                  {% if nic.bandwidth_download_mbit is not none and nic.bandwidth_download_mbit not in bandwidth_options %}
+                    <option value="{{ nic.bandwidth_download_mbit }}" selected>{{ nic.bandwidth_download_mbit }} Mbit/s</option>
+                  {% endif %}
+                  {% for rate in bandwidth_options %}
+                    <option value="{{ rate }}" {% if nic.bandwidth_download_mbit == rate %}selected{% endif %}>{{ rate }} Mbit/s</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Upload</label>
+                <select name="bandwidth_upload_mbit" data-role="base-upload">
+                  <option value="" {% if nic.bandwidth_upload_mbit is none %}selected{% endif %}
+                          data-role="profile-upload-option">
+                    Profile default ({{ presets[nic.preset_id].upload_mbit|int }} Mbit/s)
+                  </option>
+                  {% if nic.bandwidth_upload_mbit is not none and nic.bandwidth_upload_mbit not in bandwidth_options %}
+                    <option value="{{ nic.bandwidth_upload_mbit }}" selected>{{ nic.bandwidth_upload_mbit }} Mbit/s</option>
+                  {% endif %}
+                  {% for rate in bandwidth_options %}
+                    <option value="{{ rate }}" {% if nic.bandwidth_upload_mbit == rate %}selected{% endif %}>{{ rate }} Mbit/s</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+            <div class="bandwidth-note">
+              Overrides only the nominal line rate. The selected access profile still defines latency, jitter, loss and degradation behaviour.
+              Changing these values does not switch the WAN to Custom.
+            </div>
+          </div>
 
           <div class="quality-control {% if nic.mode == 'custom' %}custom{% endif %}" data-role="quality-control">
             <div class="quality-row">
@@ -354,7 +411,7 @@ function curveValue(q, points) {
   return Number(ordered[ordered.length - 1][1]);
 }
 
-function effective(preset, q) {
+function effective(preset, q, baseDownload, baseUpload) {
   if (q === 0) {
     return {
       delay_ms: Math.max(Number(preset.delay_ms || 0), 1000),
@@ -372,13 +429,15 @@ function effective(preset, q) {
   const lossAdd = curveValue(q, curves.loss_add);
   const downloadFactor = curveValue(q, curves.download_factor);
   const uploadFactor = curveValue(q, curves.upload_factor);
+  const nominalDownload = Number(baseDownload ?? preset.download_mbit ?? 0);
+  const nominalUpload = Number(baseUpload ?? preset.upload_mbit ?? 0);
 
   return {
     delay_ms: Math.round(Number(preset.delay_ms || 0) * delayFactor * 10) / 10,
     jitter_ms: Math.round(Number(preset.jitter_ms || 0) * jitterFactor * 10) / 10,
     loss_pct: Math.round(Math.min(100, Number(preset.loss_pct || 0) + lossAdd) * 1000) / 1000,
-    download_mbit: Math.max(1, Math.round(Number(preset.download_mbit || 0) * downloadFactor)),
-    upload_mbit: Math.max(1, Math.round(Number(preset.upload_mbit || 0) * uploadFactor))
+    download_mbit: Math.max(1, Math.round(nominalDownload * downloadFactor)),
+    upload_mbit: Math.max(1, Math.round(nominalUpload * uploadFactor))
   };
 }
 
@@ -389,6 +448,10 @@ document.querySelectorAll(".wan-card").forEach(card => {
   const qualityControl = card.querySelector('[data-role="quality-control"]');
   const status = card.querySelector('[data-role="status"]');
   const mode = card.querySelector('[data-role="mode"]');
+  const baseDownload = card.querySelector('[data-role="base-download"]');
+  const baseUpload = card.querySelector('[data-role="base-upload"]');
+  const profileDownloadOption = card.querySelector('[data-role="profile-download-option"]');
+  const profileUploadOption = card.querySelector('[data-role="profile-upload-option"]');
 
   const fields = {
     delay_ms: card.querySelector('[data-role="delay"]'),
@@ -422,10 +485,24 @@ document.querySelectorAll(".wan-card").forEach(card => {
     refreshValueLabels();
   };
 
+  const selectedBase = (select, fallback) => {
+    if (!select || select.value === "") return Number(fallback || 0);
+    return Number(select.value);
+  };
+
+  const refreshProfileBandwidthLabels = () => {
+    const p = presets[presetSelect.value];
+    if (!p) return;
+    profileDownloadOption.textContent = "Profile default (" + Math.round(Number(p.download_mbit || 0)) + " Mbit/s)";
+    profileUploadOption.textContent = "Profile default (" + Math.round(Number(p.upload_mbit || 0)) + " Mbit/s)";
+  };
+
   const showQualityMode = () => {
     const q = Number(quality.value);
     const p = presets[presetSelect.value];
     if (!p) return;
+
+    refreshProfileBandwidthLabels();
 
     mode.value = "quality";
     qualityControl.classList.remove("custom");
@@ -435,7 +512,12 @@ document.querySelectorAll(".wan-card").forEach(card => {
     status.textContent = statusText;
     status.className = "status " + statusText.toLowerCase();
 
-    writeFields(effective(p, q));
+    writeFields(effective(
+      p,
+      q,
+      selectedBase(baseDownload, p.download_mbit),
+      selectedBase(baseUpload, p.upload_mbit)
+    ));
   };
 
   const showCustomMode = () => {
@@ -458,7 +540,21 @@ document.querySelectorAll(".wan-card").forEach(card => {
   // everything from the selected technology + new quality value.
   quality.addEventListener("input", showQualityMode);
 
-  // Selecting another technology also returns to its quality-derived state.
+  // Nominal bandwidth is a baseline override, not a manual impairment.
+  // In quality mode it immediately recalculates the effective bandwidth while
+  // preserving the normal quality/status state.
+  [baseDownload, baseUpload].forEach(control => {
+    control.addEventListener("change", () => {
+      refreshProfileBandwidthLabels();
+      if (mode.value !== "custom") {
+        showQualityMode();
+      }
+    });
+  });
+
+  // Selecting another technology returns to its quality-derived state. Any
+  // explicit bandwidth override remains selected; "Profile default" follows
+  // the new technology automatically.
   presetSelect.addEventListener("change", showQualityMode);
 
   if (mode.value === "custom") {
