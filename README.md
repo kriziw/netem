@@ -24,9 +24,11 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 
 - **Quality control + custom overrides per WAN**
   - Each technology preset represents nominal 100% conditions.
-  - A 0–100% quality slider progressively worsens latency, jitter, loss and available bandwidth.
+  - A 0–100% quality slider uses staged, access-specific degradation curves rather than reducing every metric linearly.
+  - DIA, DSL, fixed broadband, mobile and satellite links can therefore deteriorate in different ways.
   - Status is shown as Excellent, Good, Fair, Poor, Critical or Down.
-  - Any individual parameter can still be edited directly. Doing so switches that WAN to **Custom** mode.
+  - Latency, jitter, packet loss, download and upload are adjustable with sliders.
+  - Moving any individual parameter slider switches that WAN to **Custom** mode.
   - In Custom mode the quality slider is visually muted but still usable; moving it again removes the manual overrides and returns to quality-derived values.
 
 - **Asymmetric bandwidth simulation**
@@ -35,7 +37,13 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 
 - **GUI preset editor**
   - Preset baseline values can be edited from a dedicated Presets menu.
+  - Each preset can select its degradation behaviour: DIA, DSL, broadband, mobile or satellite.
   - Project defaults can be restored from the same screen.
+
+- **In-app updates**
+  - A dedicated Updates page checks the configured Git remote.
+  - Updates are fast-forward only and refuse to run when tracked files have local changes.
+  - After updating, the process restarts through systemd.
 
 - **Safer service behavior**
   - Flask debug mode is disabled for normal application startup.
@@ -246,9 +254,17 @@ The preset table defines the **100% / nominal** state. The Dashboard stores one 
 | 1–24% | Critical |
 | 0% | Down |
 
-As quality is reduced, the emulator progressively increases latency, jitter and packet loss and reduces both downstream and upstream capacity. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
+As quality is reduced, the emulator uses a **staged, access-specific curve**. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
 
-The Presets menu lets you change the 100% baseline values used by this calculation.
+The model deliberately avoids changing every metric at the same time or by the same percentage. For example:
+
+- DIA remains nearly unchanged at high and medium quality; jitter moves before meaningful packet loss or bandwidth loss.
+- DSL can show rising jitter/errors before a substantial line-rate reduction.
+- Shared broadband tends to show queueing/jitter before material loss.
+- 4G/5G capacity and jitter typically move earlier as RF conditions or congestion worsen; sustained loss becomes prominent later.
+- Satellite degradation emphasizes latency variation/jitter first, then capacity, with sharper loss at poor quality.
+
+These are lab-oriented heuristics, not carrier SLAs or standards-defined mappings. The Presets menu lets you change both the 100% baseline values and the degradation behaviour used by a preset.
 
 ---
 
@@ -278,12 +294,38 @@ The Dashboard exposes:
 - Access preset
 - Quality slider
 - Derived quality status
-- Editable latency, jitter, packet loss, download and upload values
+- Manual sliders for latency, jitter, packet loss, download and upload
 - Automatic **Custom** mode when any individual value is changed
+- Integer Mbit/s bandwidth values for compatibility with the traffic shaper
 
 For example, a WAN can remain on the 5G preset at 100% quality, then have only jitter manually increased. The WAN becomes Custom while the remaining values stay at their current derived values. Moving the quality slider again deliberately discards those custom values and recalculates the full profile from the selected preset and quality.
 
 The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
+
+---
+
+## In-app updates
+
+The **Updates** page can check and install updates from the Git repository configured as `origin`.
+
+The updater:
+
+- follows the currently checked-out branch
+- fetches that branch from `origin`
+- refuses to update when tracked files have local modifications
+- refuses diverged histories
+- installs only a Git fast-forward
+- exits the application after a successful update so systemd can restart it
+
+For automatic restart after an in-app update, the service should use:
+
+```ini
+Restart=on-failure
+```
+
+or `Restart=always`.
+
+Untracked runtime files such as `config.json` and `.venv/` are ignored by Git and are not replaced by application updates.
 
 ---
 
@@ -333,7 +375,7 @@ Original author/project: Techkarma / techkarma-no
 
 The original project established the WAN emulator concept, Flask interface, bridge handling and Linux `tc/netem` implementation on which this fork is based.
 
-This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, persisted WAN identities, editable access-technology presets, a per-WAN quality model, and asymmetric bandwidth shaping.
+This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, persisted WAN identities, editable access-technology presets, staged access-specific quality models, manual impairment sliders, asymmetric bandwidth shaping, and in-app updates.
 
 If you are looking for the original project or its appliance offering, please refer to the upstream repository and Techkarma documentation.
 
