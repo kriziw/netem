@@ -296,8 +296,8 @@ def apply_selected_profile(link: dict, presets: dict):
             "delay_ms": max(0.0, float(custom.get("delay_ms", 0.0))),
             "jitter_ms": max(0.0, float(custom.get("jitter_ms", 0.0))),
             "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
-            "download_mbit": max(0.0, float(custom.get("download_mbit", 0.0))),
-            "upload_mbit": max(0.0, float(custom.get("upload_mbit", 0.0))),
+            "download_mbit": int(round(max(0.0, float(custom.get("download_mbit", 0.0))))),
+            "upload_mbit": int(round(max(0.0, float(custom.get("upload_mbit", 0.0))))),
         }
     else:
         effective = calculate_profile(preset, quality)
@@ -503,7 +503,8 @@ def apply_netem(ifname: str, delay_ms: float, jitter_ms: float,
         return False, f"Failed to apply netem: {err or out or 'unknown error'}"
 
     if rate_mbit and rate_mbit > 0:
-        rate_str = f"{rate_mbit:.3f}mbit"
+        rate_value = int(round(rate_mbit))
+        rate_str = f"{rate_value}mbit"
         tbf_cmd = (
             f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
             f"rate {rate_str} buffer 3200 limit 32768"
@@ -589,6 +590,7 @@ def inject_nav():
         "nav_items": [
             {"id": "dashboard", "label": "Dashboard", "endpoint": "index"},
             {"id": "presets", "label": "Presets", "endpoint": "presets"},
+            {"id": "updates", "label": "Updates", "endpoint": "updates"},
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
         ],
         "config": cfg,
@@ -923,6 +925,11 @@ def presets():
                     or existing.get("name")
                     or preset_id
                 ).strip(),
+                "quality_model": (
+                    request.form.get(f"{preset_id}_quality_model")
+                    if request.form.get(f"{preset_id}_quality_model") in QUALITY_MODELS
+                    else existing.get("quality_model", "broadband")
+                ),
                 "delay_ms": field_float("delay_ms", existing.get("delay_ms", 0.0)),
                 "jitter_ms": field_float(
                     "jitter_ms", existing.get("jitter_ms", 0.0)
@@ -953,6 +960,7 @@ def presets():
         "presets.html",
         page="presets",
         presets=current,
+        quality_models=QUALITY_MODELS,
     )
 
 
