@@ -119,13 +119,17 @@
       <span class="status good" id="overview-live-status">Streaming</span>
     </div>
     <div class="card-pad">
-      <div class="chart">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          {% for link in links %}
-          <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
-          {% endfor %}
-        </svg>
-        <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
+      <div class="chart-frame">
+        <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+        <div class="chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            {% for link in links %}
+            <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
+            {% endfor %}
+          </svg>
+          <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
+        </div>
+        <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
       </div>
       <div class="chart-legend">
         {% for link in links %}
@@ -211,9 +215,30 @@ NetEmUI.createLiveClient({
         throughput.textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
       }
 
-      const path = document.querySelector('[data-chart="' + link.id + '-down"]');
-      if (h && path) NetEmUI.setPath(path, h.down);
     });
+
+    const overviewPaths = [];
+    const overviewSeries = [];
+    let overviewTimestamps = [];
+    (state.links || []).forEach(link => {
+      const h = history[link.id];
+      const path = document.querySelector('[data-chart="' + link.id + '-down"]');
+      if (h && path) {
+        overviewPaths.push(path);
+        overviewSeries.push(h.down);
+        if (h.timestamps.length > overviewTimestamps.length) overviewTimestamps = h.timestamps;
+      }
+    });
+    NetEmUI.renderSeries(
+      overviewPaths,
+      overviewSeries,
+      {
+        axis: document.getElementById("overview-throughput-y"),
+        timeAxis: document.getElementById("overview-throughput-x"),
+        timestamps: overviewTimestamps,
+        unit: " Mb/s"
+      }
+    );
 
     document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
     document.getElementById("overview-faults").textContent = faults;
