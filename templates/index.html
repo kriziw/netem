@@ -750,10 +750,13 @@
 
               <!-- Profiles -->
               <div class="profile-row">
-                <button type="button" class="profile-pill" data-profile="good">good</button>
-                <button type="button" class="profile-pill" data-profile="degraded">degraded</button>
-                <button type="button" class="profile-pill" data-profile="bad">bad</button>
-                <button type="button" class="profile-pill" data-profile="dead">dead</button>
+                <button type="button" class="profile-pill" data-profile="dia">DIA</button>
+                <button type="button" class="profile-pill" data-profile="broadband">Broadband</button>
+                <button type="button" class="profile-pill" data-profile="4g">4G</button>
+                <button type="button" class="profile-pill" data-profile="5g">5G</button>
+                <button type="button" class="profile-pill" data-profile="satellite">Satellite</button>
+                <button type="button" class="profile-pill" data-profile="degraded">Degraded</button>
+                <button type="button" class="profile-pill" data-profile="dead">Dead</button>
               </div>
 
               <!-- Actions -->
@@ -859,12 +862,20 @@
       // Profiles
       const applyProfile = (profile) => {
         if (!delay || !jitter || !loss || !rate) return;
-        if (profile === "good") {
-          delay.value = 20; jitter.value = 5; loss.value = 0.1; rate.value = 100;
+        // The presets are intentionally representative rather than carrier-specific.
+        // Values model one-way impairment on the shaped interface.
+        if (profile === "dia") {
+          delay.value = 5; jitter.value = 1; loss.value = 0; rate.value = 1000;
+        } else if (profile === "broadband") {
+          delay.value = 15; jitter.value = 5; loss.value = 0.1; rate.value = 300;
+        } else if (profile === "4g") {
+          delay.value = 45; jitter.value = 20; loss.value = 0.5; rate.value = 80;
+        } else if (profile === "5g") {
+          delay.value = 20; jitter.value = 8; loss.value = 0.2; rate.value = 300;
+        } else if (profile === "satellite") {
+          delay.value = 300; jitter.value = 30; loss.value = 0.5; rate.value = 100;
         } else if (profile === "degraded") {
-          delay.value = 80; jitter.value = 30; loss.value = 1; rate.value = 50;
-        } else if (profile === "bad") {
-          delay.value = 200; jitter.value = 80; loss.value = 3; rate.value = 10;
+          delay.value = 100; jitter.value = 40; loss.value = 2; rate.value = 20;
         } else if (profile === "dead") {
           delay.value = 1000; jitter.value = 200; loss.value = 100; rate.value = 1;
         }
