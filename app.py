@@ -936,16 +936,42 @@ def restore_runtime_state():
 
 # ---------- Lab runtime / observability ----------
 
+def load_event_history():
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    if not EVENT_LOG_PATH.exists():
+        return
+    try:
+        lines = EVENT_LOG_PATH.read_text().splitlines()[-500:]
+        for line in lines:
+            try:
+                EVENT_LOG.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        pass
+    del EVENT_LOG[:-500]
+
+
 def log_event(kind: str, message: str, **details):
-    EVENT_LOG.append(
-        {
-            "timestamp": time.time(),
-            "kind": kind,
-            "message": message,
-            "details": details,
-        }
-    )
-    del EVENT_LOG[:-200]
+    event = {
+        "timestamp": time.time(),
+        "kind": kind,
+        "message": message,
+        "details": details,
+    }
+    EVENT_LOG.append(event)
+    del EVENT_LOG[:-500]
+
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        with EVENT_LOG_PATH.open("a") as handle:
+            handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+    except OSError:
+        # History persistence must never break the lab control path.
+        pass
+
+
+load_event_history()
 
 
 def get_link(cfg: dict, link_id: str):
