@@ -422,11 +422,12 @@ def get_sla_profile(cfg: dict):
     }
 
 
-def evaluate_sla(effective: dict, sla: dict):
+def evaluate_sla(effective: dict, sla: dict, fault="normal"):
     checks = {
         "latency": float(effective.get("delay_ms", 0.0)) <= sla["latency_ms"],
         "jitter": float(effective.get("jitter_ms", 0.0)) <= sla["jitter_ms"],
         "loss": float(effective.get("loss_pct", 0.0)) <= sla["loss_pct"],
+        "data_plane": fault == "normal",
     }
     return {
         "pass": all(checks.values()),
@@ -1476,6 +1477,7 @@ def lab_tools():
     for link in links:
         link_id = link.get("id") or link.get("bridge")
         effective = get_effective_profile(link, presets)
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
         telemetry.append(
             {
                 "id": link_id,
@@ -1484,14 +1486,14 @@ def lab_tools():
                 "outer": link.get("outer"),
                 "bridge": link.get("bridge"),
                 "quality": int(link.get("quality", 100)),
-                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+                "fault": fault,
                 "mtu": {
                     "inner": get_interface_mtu(link.get("inner")),
                     "outer": get_interface_mtu(link.get("outer")),
                     "bridge": get_interface_mtu(link.get("bridge")),
                 },
                 "effective": effective,
-                "sla": evaluate_sla(effective, sla_profile),
+                "sla": evaluate_sla(effective, sla_profile, fault),
             }
         )
     return render_template(
@@ -1822,9 +1824,13 @@ def lab_capture_download():
 @app.route("/api/v1/state")
 def api_state():
     cfg = load_config()
+    presets = get_presets(cfg)
+    sla_profile = get_sla_profile(cfg)
     links = []
     for link in cfg.get("wan_links", []):
         link_id = link.get("id") or link.get("bridge")
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
+        effective = get_effective_profile(link, presets)
         links.append(
             {
                 "id": link_id,
@@ -1835,7 +1841,14 @@ def api_state():
                 "preset": link.get("preset", "broadband"),
                 "quality": int(link.get("quality", 100)),
                 "mode": link.get("mode", "quality"),
-                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+                "fault": fault,
+                "mtu": {
+                    "inner": get_interface_mtu(link.get("inner")),
+                    "outer": get_interface_mtu(link.get("outer")),
+                    "bridge": get_interface_mtu(link.get("bridge")),
+                },
+                "effective": effective,
+                "sla": evaluate_sla(effective, sla_profile, fault),
             }
         )
     return jsonify(
@@ -1844,6 +1857,8 @@ def api_state():
             "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
+            "capture": capture_snapshot(),
+            "sla_profile": sla_profile,
         }
     )
 
