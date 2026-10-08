@@ -2,570 +2,338 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>techkarma · WAN lab · setup</title>
-  <!-- Same CSS as index -->
+  <title>NetEm · Setup</title>
   <style>
     :root {
-      --bg: #020617;
-      --card-bg: rgba(15, 23, 42, 0.96);
-      --border-subtle: #1f2937;
-      --accent: #22e6b8;
-      --accent-soft: rgba(34, 230, 184, 0.12);
-      --text-main: #e5e7eb;
-      --text-muted: #9ca3af;
-      --danger: #f97373;
-      --danger-soft: rgba(239, 68, 68, 0.16);
+      --bg:#020617;
+      --card:rgba(15,23,42,.96);
+      --border:#1f2937;
+      --accent:#22e6b8;
+      --accent-soft:rgba(34,230,184,.12);
+      --text:#e5e7eb;
+      --muted:#9ca3af;
+      --danger:#ef4444;
     }
-
-    * { box-sizing: border-box; }
-
+    * { box-sizing:border-box; }
     body {
-      margin: 0;
-      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      margin:0;
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(34, 230, 184, 0.18), transparent 60%),
-        radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.18), transparent 60%),
+        radial-gradient(circle at top left,rgba(34,230,184,.16),transparent 60%),
+        radial-gradient(circle at bottom right,rgba(37,99,235,.15),transparent 60%),
         var(--bg);
-      color: var(--text-main);
+      color:var(--text);
     }
-
-    a { color: inherit; text-decoration: none; }
-
-    .layout {
-      display: flex;
-      min-height: 100vh;
-    }
-
+    a { color:inherit; text-decoration:none; }
+    .layout { display:flex; min-height:100vh; }
     .sidebar {
-      width: 250px;
-      padding: 22px 20px;
-      border-right: 1px solid var(--border-subtle);
-      background:
-        radial-gradient(circle at top, rgba(34, 230, 184, 0.12), transparent 65%),
-        #020617;
-      display: flex;
-      flex-direction: column;
+      width:250px; padding:22px 20px; border-right:1px solid var(--border);
+      background:#020617; display:flex; flex-direction:column;
     }
-
-    .sidebar-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 26px;
+    .sidebar-header { margin-bottom:26px; }
+    .brand { font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    .brand span { color:var(--accent); }
+    .brand-sub {
+      margin-top:3px; font-size:.76rem; color:var(--muted);
+      letter-spacing:.12em; text-transform:uppercase;
     }
-
-    .sidebar-logo-box {
-      width: 30px;
-      height: 30px;
-      border-radius: 9px;
-      background: radial-gradient(circle at 30% 20%, #22e6b8, #0ea5e9);
-      box-shadow: 0 0 18px rgba(34, 230, 184, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #020617;
+    .nav-title {
+      font-size:.72rem; color:var(--muted); text-transform:uppercase;
+      letter-spacing:.12em; margin-bottom:7px;
     }
-
-    .sidebar-title {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .logo-wordmark {
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      font-size: 0.98rem;
-      text-transform: uppercase;
-    }
-
-    .logo-tech { color: #f9fafb; }
-    .logo-karma { color: var(--accent); }
-
-    .sidebar-title-sub {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-
-    .nav-section-title {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-
-    .nav-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-
-    .nav-item { margin-bottom: 4px; }
-
+    .nav-list { list-style:none; padding:0; margin:0; }
+    .nav-item { margin-bottom:4px; }
     .nav-link {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 0.85rem;
-      color: #cbd5e1;
-      transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
+      display:flex; gap:9px; align-items:center; padding:8px 10px;
+      border-radius:999px; color:#cbd5e1; font-size:.86rem;
     }
-
-    .nav-link:hover {
-      background: rgba(15, 23, 42, 0.92);
-      transform: translateX(1px);
-    }
-
-    .nav-link-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #475569;
-    }
-
+    .nav-dot { width:7px; height:7px; border-radius:50%; background:#475569; }
     .nav-item-active .nav-link {
-      background: var(--accent-soft);
-      color: var(--accent);
-      font-weight: 600;
+      background:var(--accent-soft); color:var(--accent); font-weight:600;
     }
+    .nav-item-active .nav-dot { background:var(--accent); }
+    .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
 
-    .nav-item-active .nav-link-dot {
-      background: var(--accent);
-      box-shadow: 0 0 10px rgba(34, 230, 184, 0.7);
+    .main { flex:1; padding:24px; }
+    .top {
+      display:flex; justify-content:space-between; align-items:flex-start;
+      gap:18px; margin-bottom:18px;
     }
-
-    .sidebar-footer {
-      margin-top: auto;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      border-top: 1px solid #1e293b;
-      padding-top: 10px;
+    .title {
+      font-size:1.12rem; text-transform:uppercase;
+      letter-spacing:.12em; color:var(--muted);
     }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: rgba(15, 23, 42, 0.9);
-      font-size: 0.7rem;
-      color: #9ca3af;
-      gap: 4px;
+    .subtitle {
+      margin-top:5px; max-width:820px; font-size:.86rem;
+      line-height:1.45; color:var(--muted);
     }
-
-    .pill-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      background: #22e6b8;
-    }
-
-    .main {
-      flex: 1;
-      padding: 20px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .top-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 4px;
-    }
-
-    .top-left {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .top-title {
-      font-size: 1.1rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .top-sub {
-      font-size: 0.86rem;
-      color: var(--text-muted);
-    }
-
-    .top-sub code {
-      font-size: 0.8rem;
-      padding: 1px 6px;
-      border-radius: 6px;
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid #1f2937;
-    }
-
-    .top-right {
-      display: flex;
-      align-items: center;
-      gap: 8px;
+    code {
+      font-size:.8rem; padding:1px 6px; border-radius:6px;
+      background:rgba(15,23,42,.9); border:1px solid var(--border);
     }
 
     .btn {
-      border-radius: 999px;
-      padding: 6px 14px;
-      font-size: 0.82rem;
-      border: 1px solid transparent;
-      background: rgba(15, 23, 42, 0.9);
-      color: #cbd5e1;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+      border-radius:999px; padding:7px 14px; border:1px solid var(--border);
+      background:rgba(15,23,42,.95); color:#cbd5e1;
+      cursor:pointer; font-size:.82rem;
     }
-
+    .btn-primary {
+      background:var(--accent); color:#020617;
+      border-color:var(--accent); font-weight:700;
+    }
     .btn-danger {
-      border-color: rgba(239, 68, 68, 0.9);
-      color: #fecaca;
-      background: var(--danger-soft);
+      color:#fecaca; border-color:rgba(239,68,68,.6);
+      background:rgba(239,68,68,.08);
     }
 
-    .btn-danger:hover {
-      background: rgba(239, 68, 68, 0.22);
-    }
-
-    .btn-icon { font-size: 0.95rem; }
-
-    .flash-area { margin-bottom: 4px; }
     .flash {
-      margin-bottom: 6px;
-      padding: 7px 10px;
-      border-radius: 10px;
-      font-size: 0.82rem;
-      border: 1px solid transparent;
+      margin-bottom:10px; padding:9px 11px; border-radius:10px;
+      font-size:.82rem; border:1px solid var(--border);
     }
     .flash.success {
-      background: rgba(34, 197, 94, 0.08);
-      border-color: rgba(34, 197, 94, 0.7);
-      color: #bbf7d0;
+      border-color:rgba(34,197,94,.7); color:#bbf7d0;
+      background:rgba(34,197,94,.08);
     }
     .flash.error {
-      background: rgba(248, 113, 113, 0.08);
-      border-color: rgba(248, 113, 113, 0.85);
-      color: #fecaca;
+      border-color:rgba(239,68,68,.7); color:#fecaca;
+      background:rgba(239,68,68,.08);
     }
     .flash.info {
-      background: rgba(59, 130, 246, 0.08);
-      border-color: rgba(59, 130, 246, 0.85);
-      color: #bfdbfe;
+      border-color:rgba(59,130,246,.7); color:#bfdbfe;
+      background:rgba(59,130,246,.08);
     }
 
     .card {
+      max-width:900px; padding:18px; border-radius:18px;
+      border:1px solid rgba(51,65,85,.85);
       background:
-        radial-gradient(circle at top left, rgba(34, 230, 184, 0.18), transparent 65%),
-        var(--card-bg);
-      border-radius: 18px;
-      border: 1px solid rgba(15, 23, 42, 0.96);
-      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.75);
-      padding: 18px 20px 18px;
-      margin-top: 8px;
-      max-width: 720px;
+        radial-gradient(circle at top left,rgba(34,230,184,.10),transparent 55%),
+        var(--card);
+      box-shadow:0 20px 44px rgba(0,0,0,.48);
     }
-
-    .card-title {
-      font-size: 0.98rem;
-      font-weight: 600;
-      margin-bottom: 4px;
-    }
-
+    .card-title { font-size:1rem; font-weight:700; margin-bottom:4px; }
     .card-sub {
-      font-size: 0.82rem;
-      color: var(--text-muted);
-      margin-bottom: 12px;
+      font-size:.8rem; color:var(--muted); line-height:1.4; margin-bottom:16px;
     }
 
     .wan-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 18px;
+      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px;
+    }
+    .wan-panel {
+      border:1px solid var(--border); border-radius:14px;
+      padding:14px; background:rgba(2,6,23,.48);
+    }
+    .wan-heading {
+      font-size:.9rem; font-weight:700; margin-bottom:12px;
+      display:flex; justify-content:space-between; align-items:center;
+    }
+    .wan-id {
+      color:#64748b; font-size:.7rem; font-family:ui-monospace,monospace;
+      font-weight:400;
     }
 
     label {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      display: block;
-      margin-bottom: 4px;
+      display:block; color:var(--muted); font-size:.76rem; margin-bottom:4px;
     }
-
-    select {
-      width: 100%;
-      padding: 6px 10px;
-      border-radius: 10px;
-      border: 1px solid #1f2937;
-      background: rgba(15, 23, 42, 0.96);
-      color: var(--text-main);
-      font-size: 0.85rem;
-      margin-bottom: 10px;
-    }
-
-    input[type="text"] {
-      width: 100%;
-      padding: 6px 10px;
-      border-radius: 10px;
-      border: 1px solid #1f2937;
-      background: rgba(15, 23, 42, 0.96);
-      color: var(--text-main);
-      font-size: 0.85rem;
-      margin-bottom: 10px;
+    input[type="text"], select {
+      width:100%; padding:8px 9px; border-radius:9px;
+      border:1px solid var(--border); background:rgba(15,23,42,.9);
+      color:var(--text); margin-bottom:11px; font-size:.84rem;
     }
 
     .option-block {
-      margin-top: 16px;
-      padding-top: 14px;
-      border-top: 1px solid #1f2937;
+      margin-top:16px; padding-top:14px; border-top:1px solid var(--border);
     }
-
+    .option-title { font-size:.86rem; font-weight:700; margin-bottom:7px; }
     .check-row {
-      display: flex;
-      align-items: flex-start;
-      gap: 9px;
-      margin: 9px 0;
-      font-size: 0.82rem;
-      color: #cbd5e1;
+      display:flex; align-items:flex-start; gap:9px;
+      margin:10px 0; color:#cbd5e1; font-size:.82rem;
     }
-
-    .check-row input {
-      margin-top: 2px;
-    }
-
+    .check-row input { margin-top:2px; }
     .check-help {
-      display: block;
-      margin-top: 2px;
-      color: var(--text-muted);
-      font-size: 0.75rem;
-      line-height: 1.35;
+      display:block; margin-top:2px; color:var(--muted);
+      font-size:.73rem; line-height:1.35;
     }
 
-    .btn-primary {
-      background: var(--accent);
-      color: #020617;
-      font-weight: 600;
-      border-color: rgba(34, 230, 184, 0.55);
-      margin-top: 6px;
+    .form-actions {
+      margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
+    }
+    .warning-note {
+      margin-top:14px; max-width:900px; color:var(--muted);
+      font-size:.74rem; line-height:1.45;
     }
 
-    .btn-primary:hover {
-      background: #3af0c4;
-      transform: translateY(-0.5px);
-    }
-
-    .footer {
-      margin-top: auto;
-      font-size: 0.74rem;
-      color: var(--text-muted);
-      text-align: right;
-      padding-top: 8px;
-    }
-
-    @media (max-width: 900px) {
-      .layout { flex-direction: column; }
-      .sidebar {
-        width: 100%;
-        flex-direction: row;
-        align-items: center;
-        gap: 18px;
-      }
-      .sidebar-footer { display: none; }
-      .nav-section-title { display: none; }
-      .nav-list { display: flex; gap: 4px; }
-      .nav-item { margin-bottom: 0; }
-      .main { padding: 16px 14px; }
+    @media (max-width:900px) {
+      .layout { flex-direction:column; }
+      .sidebar { width:100%; }
+      .sidebar-footer { display:none; }
+      .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
+      .main { padding:16px; }
+      .top { flex-direction:column; }
+      .wan-grid { grid-template-columns:1fr; }
     }
   </style>
 </head>
 <body>
-  <div class="layout">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-logo-box">tk</div>
-        <div class="sidebar-title">
-          <div class="logo-wordmark">
-            <span class="logo-tech">tech</span><span class="logo-karma">karma</span>
-          </div>
-          <div class="sidebar-title-sub">network · wan emulator</div>
-        </div>
-      </div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">NetEm <span>WAN Lab</span></div>
+      <div class="brand-sub">SD-WAN impairment emulator</div>
+    </div>
 
+    <div class="nav-title">Navigation</div>
+    <ul class="nav-list">
+      {% for item in nav_items %}
+      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
+        <a class="nav-link" href="{{ url_for(item.endpoint) }}">
+          <span class="nav-dot"></span>{{ item.label }}
+        </a>
+      </li>
+      {% endfor %}
+    </ul>
+
+    <div class="sidebar-footer">powered by Linux tc/netem</div>
+  </aside>
+
+  <main class="main">
+    <div class="top">
       <div>
-        <div class="nav-section-title">Navigation</div>
-        <ul class="nav-list">
-          {% for item in nav_items %}
-            <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
-              <a href="{{ url_for(item.endpoint) }}" class="nav-link">
-                <span class="nav-link-dot"></span>
-                <span>{{ item.label }}</span>
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="sidebar-footer">
-        <div style="margin-bottom:6px;">Session</div>
-        <div class="pill">
-          <span class="pill-dot"></span>
-          <span>Running</span>
-        </div>
-      </div>
-    </aside>
-
-    <!-- Main -->
-    <main class="main">
-      <div class="top-bar">
-        <div class="top-left">
-          <div class="top-title">Setup</div>
-          <div class="top-sub">
-            Select which Linux interfaces should form <strong>WAN 1</strong> and <strong>WAN 2</strong>.
-            Each WAN link uses an <strong>inner</strong> (towards test device) and an
-            <strong>outer</strong> (towards ISP/WAN). Bridges (<code>br-wan1</code>, <code>br-wan2</code>)
-            are created automatically.
-          </div>
-        </div>
-        <div class="top-right">
-          <form method="post" action="{{ url_for('reset_config') }}"
-                onsubmit="return confirm('Reset configuration, delete bridges and clear qdiscs?');">
-            <button class="btn btn-danger" type="submit">
-              <span class="btn-icon">⟳</span>
-              Reset configuration
-            </button>
-          </form>
+        <div class="title">Setup</div>
+        <div class="subtitle">
+          Define the transparent interface pair for each WAN. The application creates
+          <code>br-wan1</code> and <code>br-wan2</code> and can restore both the bridges
+          and the selected simulation state after restart.
         </div>
       </div>
 
-      <div class="flash-area">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="flash {{ category }}">{{ message }}</div>
-            {% endfor %}
-          {% endif %}
-        {% endwith %}
-      </div>
-
-      <form method="post">
-        <div class="card">
-          <div class="card-title">WAN links</div>
-          <div class="card-sub">
-            You can configure up to two links here. Leave a pair empty if you only need one WAN.
-          </div>
-
-          <div class="wan-grid">
-            <div>
-              <h3 style="margin:0 0 8px;font-size:0.9rem;">WAN 1</h3>
-
-              <label for="wan1_name">Link alias (optional)</label>
-              <input
-                id="wan1_name"
-                name="wan1_name"
-                type="text"
-                value="{{ wan1.get('name', '') }}"
-                placeholder="e.g. Starlink, Fiber primary"
-              />
-
-              <label for="wan1_inner">Inner interface (towards test device)</label>
-              <select id="wan1_inner" name="wan1_inner">
-                <option value="">-- not used --</option>
-                {% for nic in all_nics %}
-                  <option value="{{ nic }}" {% if wan1.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
-                {% endfor %}
-              </select>
-
-              <label for="wan1_outer">Outer interface (towards WAN)</label>
-              <select id="wan1_outer" name="wan1_outer">
-                <option value="">-- not used --</option>
-                {% for nic in all_nics %}
-                  <option value="{{ nic }}" {% if wan1.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
-                {% endfor %}
-              </select>
-            </div>
-
-            <div>
-              <h3 style="margin:0 0 8px;font-size:0.9rem;">WAN 2</h3>
-
-              <label for="wan2_name">Link alias (optional)</label>
-              <input
-                id="wan2_name"
-                name="wan2_name"
-                type="text"
-                value="{{ wan2.get('name', '') }}"
-                placeholder="e.g. Backup 5G"
-              />
-
-              <label for="wan2_inner">Inner interface (towards test device)</label>
-              <select id="wan2_inner" name="wan2_inner">
-                <option value="">-- not used --</option>
-                {% for nic in all_nics %}
-                  <option value="{{ nic }}" {% if wan2.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
-                {% endfor %}
-              </select>
-
-              <label for="wan2_outer">Outer interface (towards WAN)</label>
-              <select id="wan2_outer" name="wan2_outer">
-                <option value="">-- not used --</option>
-                {% for nic in all_nics %}
-                  <option value="{{ nic }}" {% if wan2.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
-                {% endfor %}
-              </select>
-            </div>
-          </div>
-
-          <div class="option-block">
-            <div class="card-title" style="margin-bottom:8px;">Startup persistence</div>
-
-            <label class="check-row">
-              <input
-                type="checkbox"
-                name="restore_bridges_on_startup"
-                {% if config.get('restore_bridges_on_startup', true) %}checked{% endif %}>
-              <span>
-                Restore WAN bridges when the application starts
-                <span class="check-help">
-                  Recommended. Recreates the saved br-wan1/br-wan2 topology after a VM reboot.
-                </span>
-              </span>
-            </label>
-
-            <label class="check-row">
-              <input
-                type="checkbox"
-                name="restore_shaping_on_startup"
-                {% if config.get('restore_shaping_on_startup', true) %}checked{% endif %}>
-              <span>
-                Restore selected presets and quality on startup
-                <span class="check-help">
-                  Recommended for repeatable labs. Reapplies each WAN's saved access profile and quality after reboot.
-                </span>
-              </span>
-            </label>
-          </div>
-
-          <button class="btn btn-primary" type="submit">
-            <span class="btn-icon">✔</span>
-            Save & create bridges
-          </button>
-        </div>
+      <form method="post" action="{{ url_for('reset_config') }}"
+            onsubmit="return confirm('Reset configuration, delete bridges and clear qdiscs?');">
+        <button class="btn btn-danger" type="submit">Reset configuration</button>
       </form>
+    </div>
 
-      <div class="footer">
-        techkarma · wan lab · powered by tc/netem
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form method="post">
+      <div class="card">
+        <div class="card-title">WAN links</div>
+        <div class="card-sub">
+          Configure one or two transparent WAN paths. The inner interface faces the firewall/test device;
+          the outer interface faces the ISP/upstream side.
+        </div>
+
+        <div class="wan-grid">
+          <div class="wan-panel">
+            <div class="wan-heading">
+              <span>WAN 1</span>
+              <span class="wan-id">br-wan1</span>
+            </div>
+
+            <label for="wan1_name">Link alias</label>
+            <input
+              id="wan1_name"
+              name="wan1_name"
+              type="text"
+              value="{{ wan1.get('name', '') }}"
+              placeholder="e.g. Primary DIA"
+            />
+
+            <label for="wan1_inner">Inner interface · toward test device</label>
+            <select id="wan1_inner" name="wan1_inner">
+              <option value="">-- not used --</option>
+              {% for nic in all_nics %}
+                <option value="{{ nic }}" {% if wan1.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="wan1_outer">Outer interface · toward WAN</label>
+            <select id="wan1_outer" name="wan1_outer">
+              <option value="">-- not used --</option>
+              {% for nic in all_nics %}
+                <option value="{{ nic }}" {% if wan1.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="wan-panel">
+            <div class="wan-heading">
+              <span>WAN 2</span>
+              <span class="wan-id">br-wan2</span>
+            </div>
+
+            <label for="wan2_name">Link alias</label>
+            <input
+              id="wan2_name"
+              name="wan2_name"
+              type="text"
+              value="{{ wan2.get('name', '') }}"
+              placeholder="e.g. Backup 5G"
+            />
+
+            <label for="wan2_inner">Inner interface · toward test device</label>
+            <select id="wan2_inner" name="wan2_inner">
+              <option value="">-- not used --</option>
+              {% for nic in all_nics %}
+                <option value="{{ nic }}" {% if wan2.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
+              {% endfor %}
+            </select>
+
+            <label for="wan2_outer">Outer interface · toward WAN</label>
+            <select id="wan2_outer" name="wan2_outer">
+              <option value="">-- not used --</option>
+              {% for nic in all_nics %}
+                <option value="{{ nic }}" {% if wan2.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="option-block">
+          <div class="option-title">Startup persistence</div>
+
+          <label class="check-row">
+            <input
+              type="checkbox"
+              name="restore_bridges_on_startup"
+              {% if config.get('restore_bridges_on_startup', true) %}checked{% endif %}>
+            <span>
+              Restore WAN bridges when the application starts
+              <span class="check-help">
+                Recreates the saved transparent WAN topology after a VM or service restart.
+              </span>
+            </span>
+          </label>
+
+          <label class="check-row">
+            <input
+              type="checkbox"
+              name="restore_shaping_on_startup"
+              {% if config.get('restore_shaping_on_startup', true) %}checked{% endif %}>
+            <span>
+              Restore selected presets, quality and custom state on startup
+              <span class="check-help">
+                Reapplies each WAN's saved access profile and simulation state after restart.
+              </span>
+            </span>
+          </label>
+        </div>
+
+        <div class="form-actions">
+          <button class="btn btn-primary" type="submit">Save & create bridges</button>
+        </div>
       </div>
-    </main>
-  </div>
+    </form>
+
+    <div class="warning-note">
+      Reset configuration removes the saved WAN mapping, deletes the NetEm bridges and clears active qdiscs.
+      Preset defaults can be managed separately from the Presets page.
+    </div>
+  </main>
+</div>
 </body>
 </html>
