@@ -1116,10 +1116,20 @@ load_event_history()
 def load_session_history():
     if not SESSIONS_PATH.exists():
         return
+    changed = False
     try:
         raw = json.loads(SESSIONS_PATH.read_text())
         if isinstance(raw, list):
-            LAB_SESSIONS.extend(raw[-100:])
+            for item in raw[-100:]:
+                # A process restart cannot safely resume an in-memory lab
+                # session. Mark any previously-active record as interrupted.
+                if item.get("status") == "active" and not item.get("ended_at"):
+                    item["status"] = "interrupted"
+                    item["ended_at"] = time.time()
+                    changed = True
+                LAB_SESSIONS.append(item)
+            if changed:
+                save_session_history()
     except (OSError, json.JSONDecodeError):
         pass
 
@@ -1976,6 +1986,33 @@ def quick_wan_action():
             )
         else:
             flash("Failed to apply runtime fault: " + msg, "error")
+
+    elif action == "bandwidth":
+        try:
+            download = max(1, min(100000, int(request.form.get("download_mbit", "1"))))
+            upload = max(1, min(100000, int(request.form.get("upload_mbit", "1"))))
+        except ValueError:
+            flash("Bandwidth values must be whole-number Mbit/s values.", "error")
+            return redirect_after("overview")
+
+        link["bandwidth_download_mbit"] = download
+        link["bandwidth_upload_mbit"] = upload
+        ok, msg, _effective = apply_selected_profile(link, presets)
+        if ok:
+            save_config(cfg)
+            log_event(
+                "bandwidth",
+                f'{link.get("name", link_id)} line rate set to {download}/{upload} Mbit/s',
+                link_id=link_id,
+                download_mbit=download,
+                upload_mbit=upload,
+            )
+            flash(
+                f'{link.get("name", "WAN")} nominal rate set to {download}/{upload} Mbit/s.',
+                "success",
+            )
+        else:
+            flash("Failed to apply bandwidth limit: " + msg, "error")
 
     elif action == "mtu":
         try:
