@@ -16,12 +16,17 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 
 - **WAN technology presets**
   - DIA
+  - DSL
   - Broadband
   - 4G
   - 5G
   - Satellite
   - Degraded
   - Dead / outage
+
+- **Asymmetric bandwidth simulation**
+  - Independent download and upload limits.
+  - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
 
 - **Safer service behavior**
   - Flask debug mode is disabled for normal application startup.
@@ -206,15 +211,16 @@ Optional. Enable this if the VM should return with the same impairment profile a
 
 The Dashboard includes representative presets:
 
-| Profile | Delay | Jitter | Loss | Rate |
-| --- | ---: | ---: | ---: | ---: |
-| DIA | 5 ms | 1 ms | 0% | 1000 Mbit/s |
-| Broadband | 15 ms | 5 ms | 0.1% | 300 Mbit/s |
-| 4G | 45 ms | 20 ms | 0.5% | 80 Mbit/s |
-| 5G | 20 ms | 8 ms | 0.2% | 300 Mbit/s |
-| Satellite | 300 ms | 30 ms | 0.5% | 100 Mbit/s |
-| Degraded | 100 ms | 40 ms | 2% | 20 Mbit/s |
-| Dead | 1000 ms | 200 ms | 100% | 1 Mbit/s |
+| Profile | Delay | Jitter | Loss | Download | Upload |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DIA | 5 ms | 1 ms | 0% | 1000 Mbit/s | 1000 Mbit/s |
+| DSL | 25 ms | 8 ms | 0.1% | 100 Mbit/s | 20 Mbit/s |
+| Broadband | 15 ms | 5 ms | 0.1% | 300 Mbit/s | 50 Mbit/s |
+| 4G | 45 ms | 20 ms | 0.5% | 80 Mbit/s | 20 Mbit/s |
+| 5G | 20 ms | 8 ms | 0.2% | 300 Mbit/s | 50 Mbit/s |
+| Satellite | 300 ms | 30 ms | 0.5% | 100 Mbit/s | 20 Mbit/s |
+| Degraded | 100 ms | 40 ms | 2% | 20 Mbit/s | 5 Mbit/s |
+| Dead | 1000 ms | 200 ms | 100% | 1 Mbit/s | 1 Mbit/s |
 
 These values are deliberately generic. Actual broadband, cellular and satellite performance varies significantly by provider, access technology, RF conditions, congestion, geography and service tier.
 
@@ -224,13 +230,23 @@ For example, a GEO satellite profile will generally need far more delay than LEO
 
 ## How shaping works
 
-Shaping is currently applied to the configured **inner interface**.
+Delay, jitter and packet loss are applied on the configured **inner interface**.
+
+Bandwidth is directional:
+
+- **Download** is limited on inner-interface egress, toward the firewall/test device.
+- **Upload** is limited on outer-interface egress, toward the WAN/upstream router.
 
 Conceptually:
 
 ```bash
+# Impairment + download limit
 tc qdisc add dev <inner-nic> root netem delay ...
-tc qdisc add dev <inner-nic> parent ... tbf rate ...
+tc qdisc add dev <inner-nic> parent ... tbf rate <download>
+
+# Independent upload limit
+tc qdisc add dev <outer-nic> root netem
+tc qdisc add dev <outer-nic> parent ... tbf rate <upload>
 ```
 
 The GUI exposes:
@@ -238,7 +254,8 @@ The GUI exposes:
 - Delay
 - Jitter
 - Packet loss
-- Rate limit
+- Download rate
+- Upload rate
 
 The current settings are stored when successfully applied. They are only restored after restart if **Restore the last applied shaping profile on startup** is enabled.
 
@@ -290,7 +307,7 @@ Original author/project: Techkarma / techkarma-no
 
 The original project established the WAN emulator concept, Flask interface, bridge handling and Linux `tc/netem` implementation on which this fork is based.
 
-This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery and additional WAN simulation profiles.
+This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, asymmetric bandwidth shaping, and additional WAN simulation profiles.
 
 If you are looking for the original project or its appliance offering, please refer to the upstream repository and Techkarma documentation.
 
