@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.title }} · Documentation · NetEm WAN Lab{% endblock %}
+{% block crumb %}Documentation / {{ doc.title }}{% endblock %}
+
+{% block content %}
+<div class="docs-shell">
+  <aside class="docs-side">
+    <div class="docs-side-search">
+      <input id="docs-nav-search" type="text" placeholder="Filter guides…" autocomplete="off">
+    </div>
+    <a class="docs-side-link" href="{{ url_for('documentation') }}">← Documentation home</a>
+    {% for group in docs_pages|groupby('category') %}
+      <div class="docs-side-group" data-doc-nav-group>
+        <div class="docs-side-title">{{ group.grouper }}</div>
+        {% for item in group.list %}
+          <a class="docs-side-link {% if item.slug == doc.slug %}active{% endif %}"
+             data-doc-nav-link
+             data-search="{{ (item.title ~ ' ' ~ item.summary ~ ' ' ~ item.keywords)|lower }}"
+             href="{{ url_for('documentation_page', slug=item.slug) }}">{{ item.title }}</a>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </aside>
+
+  <article class="docs-article">
+    <div class="docs-article-head">
+      <div class="eyebrow">{{ doc.category }}</div>
+      <h1>{{ doc.title }}</h1>
+      <p class="page-description">{{ doc.summary }}</p>
+    </div>
+
+    {% include doc.template %}
+
+    <nav class="docs-page-nav">
+      <div>
+        {% if previous_doc %}
+        <a href="{{ url_for('documentation_page', slug=previous_doc.slug) }}">
+          <div class="docs-page-nav-label">Previous</div>
+          <div class="docs-page-nav-title">← {{ previous_doc.title }}</div>
+        </a>
+        {% endif %}
+      </div>
+      <div>
+        {% if next_doc %}
+        <a href="{{ url_for('documentation_page', slug=next_doc.slug) }}">
+          <div class="docs-page-nav-label">Next</div>
+          <div class="docs-page-nav-title">{{ next_doc.title }} →</div>
+        </a>
+        {% endif %}
+      </div>
+    </nav>
+  </article>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const input = document.getElementById("docs-nav-search");
+  const links = [...document.querySelectorAll("[data-doc-nav-link]")];
+  const groups = [...document.querySelectorAll("[data-doc-nav-group]")];
+
+  function filter() {
+    const query = input.value.trim().toLowerCase();
+    links.forEach(link => {
+      link.style.display = !query || link.dataset.search.includes(query) ? "" : "none";
+    });
+    groups.forEach(group => {
+      const visible = [...group.querySelectorAll("[data-doc-nav-link]")].some(link => link.style.display !== "none");
+      group.style.display = visible ? "" : "none";
+    });
+  }
+  input.addEventListener("input", filter);
+
+  document.querySelectorAll(".docs-article h2[id], .docs-article h3[id]").forEach(heading => {
+    heading.classList.add("docs-anchor");
+    heading.addEventListener("click", () => {
+      history.replaceState(null, "", "#" + heading.id);
+      heading.scrollIntoView({behavior:"smooth", block:"start"});
+    });
+  });
+})();
+</script>
+{% endblock %}
