@@ -714,31 +714,11 @@ def configure():
         flash("Unknown WAN link.", "error")
         return redirect(url_for("index"))
 
-    inner = link.get("inner")
-    outer = link.get("outer")
-    if not inner:
-        flash("WAN link has no inner interface.", "error")
-        return redirect(url_for("index"))
+    link["preset"] = preset_id
+    link["quality"] = quality
+    ok, msg, _effective = apply_selected_profile(link, presets)
 
-    effective = calculate_profile(preset, quality)
-
-    ok_down, msg_down = apply_netem(
-        inner,
-        effective["delay_ms"],
-        effective["jitter_ms"],
-        effective["loss_pct"],
-        effective["download_mbit"],
-    )
-
-    ok_up, msg_up = True, "not configured"
-    if outer:
-        ok_up, msg_up = apply_netem(
-            outer, 0.0, 0.0, 0.0, effective["upload_mbit"]
-        )
-
-    if ok_down and ok_up:
-        link["preset"] = preset_id
-        link["quality"] = quality
+    if ok:
         save_config(cfg)
         flash(
             f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
@@ -746,12 +726,7 @@ def configure():
             "success",
         )
     else:
-        details = []
-        if not ok_down:
-            details.append(f"download/impairment: {msg_down}")
-        if not ok_up:
-            details.append(f"upload: {msg_up}")
-        flash("Failed to apply WAN profile: " + "; ".join(details), "error")
+        flash("Failed to apply WAN profile: " + msg, "error")
 
     return redirect(url_for("index"))
 
