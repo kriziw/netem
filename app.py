@@ -1716,6 +1716,7 @@ def overview():
         capture_state=capture_snapshot(),
         session_state=session_snapshot(),
         presets=get_presets(cfg),
+        quality_curves=QUALITY_CURVES,
     )
 
 
