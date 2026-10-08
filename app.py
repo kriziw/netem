@@ -1221,11 +1221,18 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
         return False, "WAN has no inner interface."
 
     if fault == "normal":
+        mtu_ok, mtu_msg = apply_mtu_limit(link, 0)
         ok, msg, _ = apply_selected_profile(link, presets)
-        if ok:
+        if ok and mtu_ok:
             ACTIVE_FAULTS.pop(link_id, None)
             log_event("fault", f"{link_id} restored to normal", link_id=link_id)
-        return ok, msg
+            return True, "OK"
+        details = []
+        if not mtu_ok:
+            details.append(mtu_msg)
+        if not ok:
+            details.append(msg)
+        return False, "; ".join(details)
 
     # First restore the configured state so one-way faults leave the opposite
     # direction in its normal configured condition.
@@ -1296,8 +1303,11 @@ def run_scenario(link_id: str, scenario: dict):
                     step.get("value", "normal"),
                     presets,
                 )
+            elif action == "mtu":
+                apply_mtu_limit(runtime_profile, int(step.get("value", 0)))
 
     finally:
+        apply_mtu_limit(original, 0)
         apply_selected_profile(original, presets)
         ACTIVE_FAULTS.pop(link_id, None)
         log_event("scenario", f'{scenario["name"]} finished', link_id=link_id)
