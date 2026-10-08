@@ -1,0 +1,235 @@
+{% extends "base.html" %}
+{% block title %}Overview · NetEm WAN Lab{% endblock %}
+{% block crumb %}Overview{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Live operations</div>
+    <h1>Network resilience overview</h1>
+    <p class="page-description">Monitor both WAN paths, injected conditions, expected SLA state and live traffic from one operational view.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('analytics') }}">Open analytics</a>
+    <a class="btn btn-primary" href="{{ url_for('scenarios') }}">Run scenario</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:14px">
+  <div class="stat">
+    <div class="stat-label">WAN health</div>
+    <div class="stat-value {% if healthy_links == links|length %}good{% elif healthy_links %}warn{% else %}bad{% endif %}" id="overview-health">{{ healthy_links }}/{{ links|length }}</div>
+    <div class="stat-sub">links within expected SLA</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Active impairments</div>
+    <div class="stat-value {% if global_runtime.active_fault_count %}bad{% else %}good{% endif %}" id="overview-faults">{{ global_runtime.active_fault_count }}</div>
+    <div class="stat-sub">runtime faults / MTU constraints</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Scenario</div>
+    <div class="stat-value" style="font-size:16px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div>
+    <div class="stat-sub" id="overview-scenario-sub">{% if scenario_state.active %}{{ scenario_state.link_id }} · {{ scenario_state.step_label }}{% else %}no scenario running{% endif %}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Packet capture</div>
+    <div class="stat-value" style="font-size:16px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div>
+    <div class="stat-sub" id="overview-capture-sub">{{ capture_state.interface if capture_state.active else "diagnostics ready" }}</div>
+  </div>
+</div>
+
+<div class="grid grid-3">
+  <section class="card span-2">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Live path topology</div>
+        <div class="card-sub">The impairment is applied transparently between the appliance under test and upstream networks.</div>
+      </div>
+      <a class="btn btn-sm" href="{{ url_for('wan_links') }}">Manage WANs</a>
+    </div>
+    <div class="card-pad">
+      <div class="topology">
+        <div class="topo-endpoint">
+          <svg class="topo-endpoint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>
+          <div><strong>SD-WAN / Firewall</strong><div class="card-sub">appliance under test</div></div>
+        </div>
+
+        <div class="topo-links">
+          {% for link in links %}
+          {% set state_class = 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else '') %}
+          <div class="topo-link {{ state_class }}" data-link-card="{{ link.id }}">
+            <div>
+              <div class="topo-name">{{ link.label }}</div>
+              <div class="topo-tech">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+            </div>
+            <div class="topo-metrics">
+              <span><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong> ms<br>latency</span>
+              <span><strong data-live="{{ link.id }}-jitter">{{ link.effective.jitter_ms }}</strong> ms<br>jitter</span>
+              <span><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong>%<br>loss</span>
+            </div>
+            <div class="topo-state">
+              <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
+                {{ "Fault" if link.fault != "normal" else ("SLA fail" if not link.sla.pass else link.quality_status) }}
+              </span>
+              <div class="topo-tech" data-live="{{ link.id }}-throughput">waiting for traffic sample</div>
+            </div>
+          </div>
+          {% endfor %}
+        </div>
+
+        <div class="topo-endpoint">
+          <svg class="topo-endpoint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18a4 4 0 0 1 .8-7.9A6 6 0 0 1 18.3 9a4.5 4.5 0 0 1-.8 9z"/></svg>
+          <div><strong>Upstream</strong><div class="card-sub">ISP / Internet</div></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Recent events</div>
+        <div class="card-sub">Runtime changes and scenario activity</div>
+      </div>
+      <a class="btn btn-sm" href="{{ url_for('analytics') }}">History</a>
+    </div>
+    <div class="card-pad">
+      <div class="timeline" id="overview-events">
+        {% if events %}
+          {% for event in events[:8] %}
+          <div class="timeline-item">
+            <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+            <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+            <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state"><strong>No runtime events yet</strong>Start a scenario or change a WAN condition.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card span-2">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Live throughput</div>
+        <div class="card-sub">Rolling browser view from Linux interface counters · last ~3 minutes</div>
+      </div>
+      <span class="status good" id="overview-live-status">Streaming</span>
+    </div>
+    <div class="card-pad">
+      <div class="chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          {% for link in links %}
+          <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
+          {% endfor %}
+        </svg>
+        <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
+      </div>
+      <div class="chart-legend">
+        {% for link in links %}
+        <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }} downstream</span>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">WAN summary</div>
+        <div class="card-sub">Configured vs effective state</div>
+      </div>
+    </div>
+    <div class="card-pad" style="display:grid;gap:13px">
+      {% for link in links %}
+      <div>
+        <div class="wan-head">
+          <div><div class="wan-name" style="font-size:13px">{{ link.label }}</div><div class="wan-tech">{{ link.preset_name }} · {{ link.mode|capitalize }}</div></div>
+          <span class="status {{ 'bad' if not link.sla.pass else 'good' }}">{{ "SLA FAIL" if not link.sla.pass else "SLA PASS" }}</span>
+        </div>
+        <div class="metric-row" style="margin-top:8px">
+          <div class="metric-box"><div class="metric-label">Quality</div><div class="metric-value" data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</div></div>
+          <div class="metric-box"><div class="metric-label">Effective down</div><div class="metric-value">{{ link.effective.download_mbit }} <span class="metric-unit">Mbit</span></div></div>
+          <div class="metric-box"><div class="metric-label">Effective up</div><div class="metric-value">{{ link.effective.upload_mbit }} <span class="metric-unit">Mbit</span></div></div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => {
+  el.textContent = NetEmUI.eventTime(el.dataset.ts);
+});
+
+const linkOrder = {{ links | map(attribute='id') | list | tojson }};
+
+NetEmUI.createLiveClient({
+  interval: 1500,
+  maxPoints: 120,
+  onStatus(ok) {
+    const status = document.getElementById("overview-live-status");
+    if (!status) return;
+    status.className = "status " + (ok ? "good" : "bad");
+    status.textContent = ok ? "Streaming" : "Disconnected";
+  },
+  onSample({state, history}) {
+    let healthy = 0;
+    let faults = 0;
+
+    (state.links || []).forEach(link => {
+      if (link.sla?.pass) healthy++;
+      if (link.fault && link.fault !== "normal") faults++;
+
+      const latency = document.querySelector('[data-live="' + link.id + '-latency"]');
+      const jitter = document.querySelector('[data-live="' + link.id + '-jitter"]');
+      const loss = document.querySelector('[data-live="' + link.id + '-loss"]');
+      const quality = document.querySelector('[data-live="' + link.id + '-quality"]');
+      const status = document.querySelector('[data-live="' + link.id + '-status"]');
+      const throughput = document.querySelector('[data-live="' + link.id + '-throughput"]');
+
+      if (latency) latency.textContent = NetEmUI.formatNumber(link.effective?.delay_ms || 0, 1);
+      if (jitter) jitter.textContent = NetEmUI.formatNumber(link.effective?.jitter_ms || 0, 1);
+      if (loss) loss.textContent = NetEmUI.formatNumber(link.effective?.loss_pct || 0, 2);
+      if (quality) quality.textContent = Number(link.quality ?? 100) + "%";
+
+      if (status) {
+        const cls = NetEmUI.statusClass(link);
+        status.className = "status " + cls;
+        status.textContent = link.fault !== "normal" ? "Fault" : (link.sla?.pass ? (Number(link.quality) >= 90 ? "Excellent" : Number(link.quality) >= 75 ? "Good" : Number(link.quality) >= 50 ? "Fair" : "Poor") : "SLA fail");
+      }
+
+      const h = history[link.id];
+      if (h && throughput && h.down.length) {
+        const i = h.down.length - 1;
+        throughput.textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
+      }
+
+      const path = document.querySelector('[data-chart="' + link.id + '-down"]');
+      if (h && path) NetEmUI.setPath(path, h.down);
+    });
+
+    document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
+    document.getElementById("overview-faults").textContent = faults;
+    document.getElementById("throughput-empty").style.display =
+      Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
+
+    const scenario = state.scenario || {};
+    document.getElementById("overview-scenario").textContent = scenario.active ? scenario.scenario_name : "Idle";
+    document.getElementById("overview-scenario-sub").textContent = scenario.active
+      ? scenario.link_id + " · " + (scenario.step_label || "running")
+      : "no scenario running";
+
+    const capture = state.capture || {};
+    document.getElementById("overview-capture").textContent = capture.active ? "Active" : "Idle";
+    document.getElementById("overview-capture-sub").textContent = capture.active ? capture.interface : "diagnostics ready";
+  }
+});
+</script>
+{% endblock %}
