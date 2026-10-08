@@ -1704,6 +1704,14 @@ DOCS_PAGES = [
         "keywords": "debug troubleshoot telemetry zero throughput permission qdisc tbf tcpdump cap_net_raw service",
     },
     {
+        "slug": "roadmap",
+        "title": "Product roadmap",
+        "category": "Reference",
+        "summary": "Prioritized next capabilities for measurement, evidence, vendor correlation, orchestration and scale.",
+        "template": "docs/articles/roadmap.html",
+        "keywords": "roadmap future active probes sqlite reports adapter assertions conditional traffic generator scale",
+    },
+    {
         "slug": "reference",
         "title": "Reference & limits",
         "category": "Reference",
