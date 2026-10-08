@@ -36,6 +36,7 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 - **Asymmetric bandwidth simulation**
   - Independent nominal download and upload capacity per preset.
   - Each WAN can override its nominal download/upload line rate without changing the selected access technology.
+  - A **Reset to profile defaults** control clears both per-WAN bandwidth overrides in one action.
   - Bandwidth overrides remain part of the normal profile state; they do **not** put the WAN into Custom mode.
   - Quality degradation is calculated from the selected WAN line rate, while the profile continues to define latency, jitter, loss and degradation behaviour.
   - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
