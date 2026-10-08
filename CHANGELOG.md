@@ -1,5 +1,45 @@
 # Changelog
 
+## [0.3.0](https://github.com/kriziw/netem/compare/v0.2.0...v0.3.0) (2026-10-08)
+
+
+### Features
+
+* add consolidated settings hub ([286b664](https://github.com/kriziw/netem/commit/286b6642b013106252bc41de1a9ca79d45503afc))
+* add enterprise UI design system ([7f52c67](https://github.com/kriziw/netem/commit/7f52c67ff98a2c506e62de8abb27441e5bca2dcc))
+* add future-ready UI routes and runtime view model ([ef20a4d](https://github.com/kriziw/netem/commit/ef20a4dd37e146fedef97c962ae5966254abdcbb))
+* add live enterprise overview dashboard ([ec63a7c](https://github.com/kriziw/netem/commit/ec63a7ce45b5482dfb942f6e0de202c79e60727e))
+* add rolling live analytics workspace ([bc79e07](https://github.com/kriziw/netem/commit/bc79e073943c8df5787be48619078db46b5bcf8e))
+* add scenario library and orchestration workspace ([880d0d1](https://github.com/kriziw/netem/commit/880d0d1b0d88d12c99879cf811e27ba2d084c0fa))
+* add shared application shell ([99c3a12](https://github.com/kriziw/netem/commit/99c3a1299e0774117e2d0c8e6dc0ebcc8793a7d2))
+* add shared live telemetry UI client ([695be4a](https://github.com/kriziw/netem/commit/695be4af97c933e6dce4748ffe1a7cc18803509e))
+* add traffic and security workspace ([bad7637](https://github.com/kriziw/netem/commit/bad7637582f644caec6f9d637921545d8cd732a0))
+* add vendor-neutral integrations workspace ([ce44798](https://github.com/kriziw/netem/commit/ce44798b8ae4a46bb95eb2e860ef95d2685d9569))
+* add WAN control cards and configuration drawers ([b457e3a](https://github.com/kriziw/netem/commit/b457e3aeee52dbb76745d21b5c0530cee3fc0f4d))
+* redesign access profile settings ([3dc7db9](https://github.com/kriziw/netem/commit/3dc7db9dbdf6ea791d864535cf4f4f402ccdfd32))
+* redesign NetEm as an enterprise resilience operations UI ([0befc65](https://github.com/kriziw/netem/commit/0befc650eb8497e5cd217822549c1211d3550fd7))
+* redesign release and update settings ([556a791](https://github.com/kriziw/netem/commit/556a7910737410d735aa144da9d3533becf7c6fc))
+* redesign topology settings page ([6d2eaaa](https://github.com/kriziw/netem/commit/6d2eaaabf2d39c0fc686e007bdc2156effd4eb69))
+
+
+### Bug Fixes
+
+* iterate navigation item list explicitly ([d289a70](https://github.com/kriziw/netem/commit/d289a70594478a8222f686b1c00f5ca23ca7eeaa))
+* return WAN actions to redesigned control page ([341937e](https://github.com/kriziw/netem/commit/341937e9a1bcb13901967699fecb8056b1f5af25))
+
+
+### Refactoring
+
+* group administrative pages under settings navigation ([eb22cf5](https://github.com/kriziw/netem/commit/eb22cf5c6f3f0a9fccfc915f036ac0cecdb85ef2))
+* remove superseded Lab Tools template ([de3555b](https://github.com/kriziw/netem/commit/de3555ba0f0ecf452669f2924165d887153dec07))
+* remove superseded legacy dashboard template ([0264b32](https://github.com/kriziw/netem/commit/0264b32a86b6bf97d4d31964c1d13264cce44e4c))
+
+
+### Documentation
+
+* document enterprise UI architecture and roadmap ([7ec3984](https://github.com/kriziw/netem/commit/7ec398498b4cf5d0d49a6c73bbe2af6be46309da))
+* document redesigned enterprise UI ([f8d045f](https://github.com/kriziw/netem/commit/f8d045fe823608dbbcf54aa18d95ee1ba90b3dcb))
+
 ## [0.2.0](https://github.com/kriziw/netem/compare/v0.1.0...v0.2.0) (2026-10-08)
 
 
