@@ -1,0 +1,262 @@
+{% extends "base.html" %}
+{% block title %}Analytics · NetEm WAN Lab{% endblock %}
+{% block crumb %}Analytics{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Live analytics</div>
+    <h1>Performance &amp; event analytics</h1>
+    <p class="page-description">Correlate live Linux interface traffic with the condition NetEm is injecting. Historical event exports remain available while persistent time-series storage is reserved for a later release.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('lab_history_json') }}">Export events · JSON</a>
+    <a class="btn" href="{{ url_for('lab_history_csv') }}">Export events · CSV</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:14px">
+  {% for link in links %}
+  <div class="stat">
+    <div class="stat-label">{{ link.label }} · expected SLA</div>
+    <div class="stat-value {{ 'good' if link.sla.pass else 'bad' }}" data-summary-sla="{{ link.id }}">{{ "PASS" if link.sla.pass else "FAIL" }}</div>
+    <div class="stat-sub">{{ link.preset_name }} · quality <span data-summary-quality="{{ link.id }}">{{ link.runtime_quality }}%</span></div>
+  </div>
+  {% endfor %}
+  <div class="stat">
+    <div class="stat-label">SLA profile</div>
+    <div class="stat-value" style="font-size:15px">{{ sla_profile.name }}</div>
+    <div class="stat-sub">{{ sla_profile.latency_ms }} ms · {{ sla_profile.jitter_ms }} ms · {{ sla_profile.loss_pct }}% loss</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Telemetry mode</div>
+    <div class="stat-value good" style="font-size:15px" id="analytics-live">Live</div>
+    <div class="stat-sub">browser rolling window · 1.5s sampling</div>
+  </div>
+</div>
+
+<section class="card" style="margin-bottom:14px">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Live analysis target</div>
+      <div class="card-sub">Select the WAN whose time-series should be shown below.</div>
+    </div>
+    <div style="width:min(280px,45vw)">
+      <select id="analytics-link" style="margin:0">
+        {% for link in links %}<option value="{{ link.id }}">{{ link.label }} · {{ link.preset_name }}</option>{% endfor %}
+      </select>
+    </div>
+  </div>
+</section>
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Throughput</div><div class="card-sub">Actual traffic across the selected WAN</div></div>
+      <div class="card-actions"><span class="top-pill" id="live-throughput-value">—</span></div>
+    </div>
+    <div class="card-pad">
+      <div class="chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="chart-line primary" id="chart-down"></path>
+          <path class="chart-line secondary" id="chart-up"></path>
+        </svg>
+        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot"></span>Downstream</span>
+        <span class="legend-item"><span class="legend-dot blue"></span>Upstream</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Packet rate</div><div class="card-sub">Packets per second through the selected path</div></div>
+      <div class="card-actions"><span class="top-pill" id="live-pps-value">—</span></div>
+    </div>
+    <div class="card-pad">
+      <div class="chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="chart-line primary" id="chart-rxpps"></path>
+          <path class="chart-line secondary" id="chart-txpps"></path>
+        </svg>
+        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot"></span>RX PPS</span>
+        <span class="legend-item"><span class="legend-dot blue"></span>TX PPS</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Latency &amp; jitter</div><div class="card-sub">Impairment currently applied by NetEm</div></div>
+      <div class="card-actions"><span class="top-pill" id="live-delay-value">—</span></div>
+    </div>
+    <div class="card-pad">
+      <div class="chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="chart-line primary" id="chart-latency"></path>
+          <path class="chart-line warning" id="chart-jitter"></path>
+        </svg>
+        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot"></span>Latency</span>
+        <span class="legend-item"><span class="legend-dot warning"></span>Jitter</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Packet loss &amp; quality</div><div class="card-sub">Injected loss and relative technology quality</div></div>
+      <div class="card-actions"><span class="top-pill" id="live-loss-value">—</span></div>
+    </div>
+    <div class="card-pad">
+      <div class="chart">
+        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+          <path class="chart-line danger" id="chart-loss"></path>
+          <path class="chart-line secondary" id="chart-quality"></path>
+        </svg>
+        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      </div>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span>Loss %</span>
+        <span class="legend-item"><span class="legend-dot blue"></span>Quality %</span>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-2" style="margin-top:14px">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Generic SLA evaluator</div><div class="card-sub">Expected pass/fail based on injected conditions, independent of vendor telemetry</div></div>
+    </div>
+    <div class="card-pad">
+      <form method="post" action="{{ url_for('lab_sla') }}">
+        <input type="hidden" name="return_to" value="analytics">
+        <label>Profile name</label>
+        <input type="text" name="name" value="{{ sla_profile.name }}">
+        <div class="form-grid-3">
+          <div><label>Max latency · ms</label><input type="number" min="0" step="0.1" name="latency_ms" value="{{ sla_profile.latency_ms }}"></div>
+          <div><label>Max jitter · ms</label><input type="number" min="0" step="0.1" name="jitter_ms" value="{{ sla_profile.jitter_ms }}"></div>
+          <div><label>Max loss · %</label><input type="number" min="0" max="100" step="0.1" name="loss_pct" value="{{ sla_profile.loss_pct }}"></div>
+        </div>
+        <div class="actions"><button class="btn btn-primary" type="submit">Save SLA profile</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Injected vs observed</div><div class="card-sub">Reserved for SD-WAN vendor adapters</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <table>
+        <thead><tr><th>Metric</th><th>NetEm injected</th><th>Appliance observed</th></tr></thead>
+        <tbody>
+          <tr><td>Latency</td><td id="compare-latency">—</td><td>Awaiting integration</td></tr>
+          <tr><td>Jitter</td><td id="compare-jitter">—</td><td>Awaiting integration</td></tr>
+          <tr><td>Packet loss</td><td id="compare-loss">—</td><td>Awaiting integration</td></tr>
+          <tr><td>SLA state</td><td id="compare-sla">—</td><td>Awaiting integration</td></tr>
+        </tbody>
+      </table>
+      <div class="field-help" style="margin-top:10px">Future adapters can add detection delay, failover convergence and recovery timing without changing the NetEm impairment engine.</div>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head">
+    <div><div class="card-title">Event timeline</div><div class="card-sub">Persistent application events · newest first</div></div>
+    <div class="card-actions">
+      <a class="btn btn-sm" href="{{ url_for('lab_history_json') }}">JSON</a>
+      <a class="btn btn-sm" href="{{ url_for('lab_history_csv') }}">CSV</a>
+    </div>
+  </div>
+  <div class="card-pad">
+    <div class="timeline" id="analytics-events">
+      {% if events %}
+        {% for event in events[:30] %}
+        <div class="timeline-item">
+          <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+          <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+          <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state"><strong>No persistent events yet</strong>Events will appear as the lab is operated.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
+
+const selector = document.getElementById("analytics-link");
+let lastState = null;
+
+function render(history, state) {
+  const id = selector.value;
+  const h = history[id];
+  const link = (state.links || []).find(item => item.id === id);
+  if (!h || !link) return;
+
+  NetEmUI.setPath(document.getElementById("chart-down"), h.down);
+  NetEmUI.setPath(document.getElementById("chart-up"), h.up);
+  NetEmUI.setPath(document.getElementById("chart-rxpps"), h.rxpps);
+  NetEmUI.setPath(document.getElementById("chart-txpps"), h.txpps);
+  NetEmUI.setPath(document.getElementById("chart-latency"), h.latency);
+  NetEmUI.setPath(document.getElementById("chart-jitter"), h.jitter);
+  NetEmUI.setPath(document.getElementById("chart-loss"), h.loss, 100);
+  NetEmUI.setPath(document.getElementById("chart-quality"), h.quality, 100);
+
+  const i = h.down.length - 1;
+  if (i >= 0) {
+    document.getElementById("live-throughput-value").textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
+    document.getElementById("live-pps-value").textContent = Math.round(h.rxpps[i]) + " RX · " + Math.round(h.txpps[i]) + " TX";
+    document.getElementById("live-delay-value").textContent = NetEmUI.formatNumber(h.latency[i],1) + " ms · " + NetEmUI.formatNumber(h.jitter[i],1) + " ms";
+    document.getElementById("live-loss-value").textContent = NetEmUI.formatNumber(h.loss[i],2) + "% · " + Math.round(h.quality[i]) + "% quality";
+    document.querySelectorAll("[data-chart-empty]").forEach(el => el.style.display = h.down.length > 1 ? "none" : "grid");
+  }
+
+  document.getElementById("compare-latency").textContent = NetEmUI.formatNumber(link.effective?.delay_ms || 0,1) + " ms";
+  document.getElementById("compare-jitter").textContent = NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1) + " ms";
+  document.getElementById("compare-loss").textContent = NetEmUI.formatNumber(link.effective?.loss_pct || 0,2) + "%";
+  document.getElementById("compare-sla").textContent = link.sla?.pass ? "PASS" : "FAIL";
+}
+
+const client = NetEmUI.createLiveClient({
+  interval:1500,
+  maxPoints:200,
+  onStatus(ok) {
+    const el = document.getElementById("analytics-live");
+    el.textContent = ok ? "Live" : "Disconnected";
+    el.className = "stat-value " + (ok ? "good" : "bad");
+  },
+  onSample({state,history}) {
+    lastState = state;
+    (state.links || []).forEach(link => {
+      const sla = document.querySelector('[data-summary-sla="' + link.id + '"]');
+      const quality = document.querySelector('[data-summary-quality="' + link.id + '"]');
+      if (sla) {
+        sla.textContent = link.sla?.pass ? "PASS" : "FAIL";
+        sla.className = "stat-value " + (link.sla?.pass ? "good" : "bad");
+      }
+      if (quality) quality.textContent = Number(link.quality ?? 100) + "%";
+    });
+    render(history,state);
+  }
+});
+selector.addEventListener("change", () => { if (lastState) render(client.history,lastState); });
+</script>
+{% endblock %}
