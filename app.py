@@ -182,6 +182,43 @@ def calculate_profile(preset: dict, quality: int):
     }
 
 
+def apply_selected_profile(link: dict, presets: dict):
+    """Apply the preset/quality currently stored on one WAN link."""
+    inner = link.get("inner")
+    outer = link.get("outer")
+    preset_id = link.get("preset", "broadband")
+    preset = presets.get(preset_id) or presets.get("broadband")
+    if not inner or not preset:
+        return False, "Missing interface or preset", {}
+
+    quality = max(0, min(100, int(link.get("quality", 100))))
+    effective = calculate_profile(preset, quality)
+
+    ok_down, msg_down = apply_netem(
+        inner,
+        effective["delay_ms"],
+        effective["jitter_ms"],
+        effective["loss_pct"],
+        effective["download_mbit"],
+    )
+
+    ok_up, msg_up = True, "OK"
+    if outer:
+        ok_up, msg_up = apply_netem(
+            outer, 0.0, 0.0, 0.0, effective["upload_mbit"]
+        )
+
+    if ok_down and ok_up:
+        return True, "OK", effective
+
+    details = []
+    if not ok_down:
+        details.append(f"download/impairment: {msg_down}")
+    if not ok_up:
+        details.append(f"upload: {msg_up}")
+    return False, "; ".join(details), effective
+
+
 # ---------- NIC discovery ----------
 
 def get_all_nics():
