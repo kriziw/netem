@@ -565,11 +565,14 @@ def configure():
 @app.route("/clear", methods=["POST"])
 def clear():
     ifname = request.form.get("itf") or request.args.get("itf")
+    outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
     if not ifname:
         flash("Missing interface name.", "error")
         return redirect(url_for("index"))
 
     clear_qdisc(ifname)
+    if outer_ifname:
+        clear_qdisc(outer_ifname)
 
     cfg = load_config()
     shaping = cfg.get("shaping_profiles", {})
@@ -578,7 +581,7 @@ def clear():
         cfg["shaping_profiles"] = shaping
         save_config(cfg)
 
-    flash(f"Cleared qdisc on {ifname}", "info")
+    flash("Cleared WAN shaping.", "info")
     return redirect(url_for("index"))
 
 
