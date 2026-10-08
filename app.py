@@ -358,12 +358,25 @@ def index():
         if not inner:
             continue
 
+        outer = link.get("outer")
         qdisc_info = get_qdisc_state(inner)
+        outer_qdisc_info = get_qdisc_state(outer) if outer else {
+            "raw": "",
+            "parsed": {
+                "kind": None,
+                "delay_ms": None,
+                "jitter_ms": None,
+                "loss_pct": None,
+                "rate_mbit": None,
+            },
+        }
         nic_states.append(
             {
                 "name": inner,
-                "label": f"{name} (inner)",
+                "outer": outer,
+                "label": name,
                 "qdisc": qdisc_info,
+                "outer_qdisc": outer_qdisc_info,
             }
         )
 
