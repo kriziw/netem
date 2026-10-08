@@ -98,7 +98,13 @@
       margin-bottom:8px;
     }
     .bandwidth-title { font-size:.74rem; color:var(--muted); }
+    .bandwidth-head-actions { display:flex; gap:7px; align-items:center; }
     .bandwidth-tag { font-size:.64rem; color:#64748b; }
+    .bandwidth-reset {
+      border:1px solid #334155; background:rgba(15,23,42,.85); color:#94a3b8;
+      border-radius:999px; padding:3px 8px; font-size:.62rem; cursor:pointer;
+    }
+    .bandwidth-reset:hover { color:#e2e8f0; border-color:#475569; }
     .bandwidth-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
     .bandwidth-grid select { margin-bottom:0; }
     .bandwidth-grid label { font-size:.67rem; }
@@ -210,7 +216,10 @@
           <div class="bandwidth-box">
             <div class="bandwidth-head">
               <div class="bandwidth-title">Nominal WAN bandwidth</div>
-              <div class="bandwidth-tag">independent of quality/custom state</div>
+              <div class="bandwidth-head-actions">
+                <div class="bandwidth-tag">independent of quality/custom state</div>
+                <button type="button" class="bandwidth-reset" data-role="reset-bandwidth">Reset to profile defaults</button>
+              </div>
             </div>
             <div class="bandwidth-grid">
               <div>
@@ -452,6 +461,7 @@ document.querySelectorAll(".wan-card").forEach(card => {
   const baseUpload = card.querySelector('[data-role="base-upload"]');
   const profileDownloadOption = card.querySelector('[data-role="profile-download-option"]');
   const profileUploadOption = card.querySelector('[data-role="profile-upload-option"]');
+  const resetBandwidth = card.querySelector('[data-role="reset-bandwidth"]');
 
   const fields = {
     delay_ms: card.querySelector('[data-role="delay"]'),
@@ -550,6 +560,15 @@ document.querySelectorAll(".wan-card").forEach(card => {
         showQualityMode();
       }
     });
+  });
+
+  resetBandwidth.addEventListener("click", () => {
+    baseDownload.value = "";
+    baseUpload.value = "";
+    refreshProfileBandwidthLabels();
+    if (mode.value !== "custom") {
+      showQualityMode();
+    }
   });
 
   // Selecting another technology returns to its quality-derived state. Any
