@@ -312,13 +312,24 @@ def restore_runtime_state():
             profile = shaping.get(inner) if inner else None
             if not profile:
                 continue
+            download_mbit = float(
+                profile.get("download_mbit", profile.get("rate_mbit", 0.0))
+            )
+            upload_mbit = float(
+                profile.get("upload_mbit", profile.get("rate_mbit", 0.0))
+            )
+
             apply_netem(
                 inner,
                 float(profile.get("delay_ms", 0.0)),
                 float(profile.get("jitter_ms", 0.0)),
                 float(profile.get("loss_pct", 0.0)),
-                float(profile.get("rate_mbit", 0.0)),
+                download_mbit,
             )
+
+            outer = link.get("outer")
+            if outer:
+                apply_netem(outer, 0.0, 0.0, 0.0, upload_mbit)
 
 
 # ---------- Nav context ----------
