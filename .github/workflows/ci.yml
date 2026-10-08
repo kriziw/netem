@@ -35,8 +35,8 @@ jobs:
           from app import app
 
           env = Environment(loader=FileSystemLoader("templates"))
-          for path in Path("templates").glob("*.html"):
-              env.get_template(path.name)
+          for path in Path("templates").rglob("*.html"):
+              env.get_template(path.relative_to("templates").as_posix())
 
           endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
           required = {
@@ -54,6 +54,8 @@ jobs:
               "api_state",
               "api_telemetry",
               "api_events",
+              "documentation",
+              "documentation_page",
           }
           missing = required - endpoints
           if missing:
@@ -99,6 +101,19 @@ jobs:
                   "/presets",
                   "/updates",
                   "/lab",
+                  "/docs",
+                  "/docs/getting-started",
+                  "/docs/architecture",
+                  "/docs/overview",
+                  "/docs/wan-links",
+                  "/docs/scenarios",
+                  "/docs/traffic-security",
+                  "/docs/analytics-sla",
+                  "/docs/integrations-api",
+                  "/docs/topology-profiles",
+                  "/docs/updates-releases",
+                  "/docs/troubleshooting",
+                  "/docs/reference",
               ]
               for path in pages:
                   response = client.get(path, follow_redirects=True)
