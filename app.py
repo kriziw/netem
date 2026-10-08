@@ -22,6 +22,7 @@ from flask import (
     jsonify,
     Response,
     send_file,
+    abort,
 )
 
 app = Flask(__name__)
@@ -1463,6 +1464,7 @@ def redirect_after(default_endpoint):
         "setup",
         "presets",
         "updates",
+        "documentation",
     }
     endpoint = requested if requested in allowed else default_endpoint
     return redirect(url_for(endpoint))
@@ -1502,6 +1504,12 @@ def inject_nav():
                     {"id": "settings", "label": "Settings", "endpoint": "settings", "icon": "settings"},
                 ],
             },
+            {
+                "label": "Reference",
+                "items": [
+                    {"id": "docs", "label": "Documentation", "endpoint": "documentation", "icon": "docs"},
+                ],
+            },
         ],
         "config": cfg,
         "app_version": get_app_version(),
@@ -1512,6 +1520,108 @@ def inject_nav():
             "capture": capture_snapshot(),
         },
     }
+
+
+DOCS_PAGES = [
+    {
+        "slug": "getting-started",
+        "title": "Getting started",
+        "category": "Start here",
+        "summary": "Understand the lab workflow and run your first controlled WAN impairment.",
+        "template": "docs/articles/getting_started.html",
+        "keywords": "first run workflow lab test basic restore topology",
+    },
+    {
+        "slug": "architecture",
+        "title": "Architecture & traffic direction",
+        "category": "Start here",
+        "summary": "How the transparent bridges, inner/outer interfaces and directional shaping model work.",
+        "template": "docs/articles/architecture.html",
+        "keywords": "bridge inner outer download upload tc netem tbf linux datapath",
+    },
+    {
+        "slug": "overview",
+        "title": "Overview dashboard",
+        "category": "Operate",
+        "summary": "Read live path health, topology, throughput, scenario state and event activity.",
+        "template": "docs/articles/overview.html",
+        "keywords": "dashboard live topology throughput events health status",
+    },
+    {
+        "slug": "wan-links",
+        "title": "WAN Links",
+        "category": "Operate",
+        "summary": "Profiles, quality models, manual impairments, faults, MTU tests and diagnostics.",
+        "template": "docs/articles/wan_links.html",
+        "keywords": "quality latency jitter loss bandwidth duplicate corrupt reorder blackhole mtu qdisc",
+    },
+    {
+        "slug": "scenarios",
+        "title": "Scenarios",
+        "category": "Operate",
+        "summary": "Run built-in tests and create reusable quality, fault and MTU sequences.",
+        "template": "docs/articles/scenarios.html",
+        "keywords": "brownout failover flaky availability custom json steps automation",
+    },
+    {
+        "slug": "traffic-security",
+        "title": "Traffic & Security",
+        "category": "Operate",
+        "summary": "Use EICAR, benign beacons, availability stress and bounded packet capture safely.",
+        "template": "docs/articles/traffic_security.html",
+        "keywords": "eicar beacon tcpdump pcap capture security ddos safe",
+    },
+    {
+        "slug": "analytics-sla",
+        "title": "Analytics & SLA",
+        "category": "Observe",
+        "summary": "Interpret measured traffic, injected impairment, chart scales and expected SLA state.",
+        "template": "docs/articles/analytics_sla.html",
+        "keywords": "analytics charts throughput pps latency jitter loss quality sla measured injected",
+    },
+    {
+        "slug": "integrations-api",
+        "title": "Integrations & API",
+        "category": "Observe",
+        "summary": "REST endpoints, Prometheus metrics and the vendor-neutral adapter model.",
+        "template": "docs/articles/integrations_api.html",
+        "keywords": "api json prometheus metrics state telemetry events vendor adapter fortinet cisco palo alto",
+    },
+    {
+        "slug": "topology-profiles",
+        "title": "Topology & access profiles",
+        "category": "Configure",
+        "summary": "Map interfaces, persist bridges and customize DIA, broadband, mobile and satellite baselines.",
+        "template": "docs/articles/topology_profiles.html",
+        "keywords": "setup interface bridge management presets dia dsl broadband 4g 5g satellite startup",
+    },
+    {
+        "slug": "updates-releases",
+        "title": "Updates & releases",
+        "category": "Configure",
+        "summary": "Stable origin/main updates, fast-forward safety, versioning and Release Please.",
+        "template": "docs/articles/updates_releases.html",
+        "keywords": "git update release version main release please permissions techkarma",
+    },
+    {
+        "slug": "troubleshooting",
+        "title": "Troubleshooting",
+        "category": "Reference",
+        "summary": "Diagnose live telemetry, shaping, permissions, packet capture and service problems.",
+        "template": "docs/articles/troubleshooting.html",
+        "keywords": "debug troubleshoot telemetry zero throughput permission qdisc tbf tcpdump cap_net_raw service",
+    },
+    {
+        "slug": "reference",
+        "title": "Reference & limits",
+        "category": "Reference",
+        "summary": "Default values, validation limits, terminology, storage locations and current boundaries.",
+        "template": "docs/articles/reference.html",
+        "keywords": "limits defaults paths glossary event history config runtime max minimum",
+    },
+]
+
+DOCS_BY_SLUG = {item["slug"]: item for item in DOCS_PAGES}
 
 
 # ---------- Routes ----------
@@ -1628,6 +1738,35 @@ def settings():
         link_count=len(cfg.get("wan_links", [])),
         preset_count=len(get_presets(cfg)),
         update_status=git_update_status(fetch=False),
+    )
+
+
+@app.route("/docs")
+def documentation():
+    return render_template(
+        "docs/index.html",
+        page="docs",
+        docs_pages=DOCS_PAGES,
+    )
+
+
+@app.route("/docs/<slug>")
+def documentation_page(slug):
+    doc = DOCS_BY_SLUG.get(slug)
+    if not doc:
+        abort(404)
+
+    index = DOCS_PAGES.index(doc)
+    previous_doc = DOCS_PAGES[index - 1] if index > 0 else None
+    next_doc = DOCS_PAGES[index + 1] if index + 1 < len(DOCS_PAGES) else None
+
+    return render_template(
+        "docs/page.html",
+        page="docs",
+        docs_pages=DOCS_PAGES,
+        doc=doc,
+        previous_doc=previous_doc,
+        next_doc=next_doc,
     )
 
 
