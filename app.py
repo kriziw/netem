@@ -431,30 +431,27 @@ def restore_runtime_state():
                 ensure_bridge(bridge, inner, outer)
 
     if cfg.get("restore_shaping_on_startup", False):
-        shaping = cfg.get("shaping_profiles", {})
+        presets = get_presets(cfg)
         for link in links:
             inner = link.get("inner")
-            profile = shaping.get(inner) if inner else None
-            if not profile:
+            outer = link.get("outer")
+            preset_id = link.get("preset", "broadband")
+            preset = presets.get(preset_id) or presets.get("broadband")
+            if not inner or not preset:
                 continue
-            download_mbit = float(
-                profile.get("download_mbit", profile.get("rate_mbit", 0.0))
-            )
-            upload_mbit = float(
-                profile.get("upload_mbit", profile.get("rate_mbit", 0.0))
-            )
+
+            quality = int(link.get("quality", 100))
+            effective = calculate_profile(preset, quality)
 
             apply_netem(
                 inner,
-                float(profile.get("delay_ms", 0.0)),
-                float(profile.get("jitter_ms", 0.0)),
-                float(profile.get("loss_pct", 0.0)),
-                download_mbit,
+                effective["delay_ms"],
+                effective["jitter_ms"],
+                effective["loss_pct"],
+                effective["download_mbit"],
             )
-
-            outer = link.get("outer")
             if outer:
-                apply_netem(outer, 0.0, 0.0, 0.0, upload_mbit)
+                apply_netem(outer, 0.0, 0.0, 0.0, effective["upload_mbit"])
 
 
 # ---------- Nav context ----------
