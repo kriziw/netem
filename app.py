@@ -1108,6 +1108,105 @@ def interface_counters(ifname: str):
     return result
 
 
+
+def get_interface_mtu(ifname: str):
+    if not ifname:
+        return None
+    try:
+        return int((Path("/sys/class/net") / ifname / "mtu").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def apply_mtu_limit(link: dict, mtu: int):
+    """
+    Apply a transient path-MTU constriction to the bridge and both WAN ports.
+
+    mtu=0 restores the values captured before the first MTU change.
+    """
+    link_id = link.get("id") or link.get("bridge") or link.get("inner")
+    devices = [
+        dev for dev in (link.get("inner"), link.get("outer"), link.get("bridge"))
+        if dev
+    ]
+    if not devices:
+        return False, "WAN has no interfaces."
+
+    if mtu == 0:
+        errors = []
+        for dev in devices:
+            original = ORIGINAL_MTUS.pop((link_id, dev), None)
+            if original is None:
+                continue
+            rc, out, err = run_cmd(f"{IP} link set dev {dev} mtu {original}")
+            if rc != 0:
+                errors.append(f"{dev}: {err or out}")
+        if errors:
+            return False, "; ".join(errors)
+        ACTIVE_FAULTS.pop(link_id, None)
+        log_event("mtu", f"{link_id}: MTU restored", link_id=link_id)
+        return True, "OK"
+
+    mtu = max(576, min(9000, int(mtu)))
+    for dev in devices:
+        key = (link_id, dev)
+        if key not in ORIGINAL_MTUS:
+            current = get_interface_mtu(dev)
+            if current:
+                ORIGINAL_MTUS[key] = current
+
+    errors = []
+    # Bridge first, then its member ports.
+    ordered = [link.get("bridge"), link.get("inner"), link.get("outer")]
+    for dev in [item for item in ordered if item]:
+        rc, out, err = run_cmd(f"{IP} link set dev {dev} mtu {mtu}")
+        if rc != 0:
+            errors.append(f"{dev}: {err or out}")
+
+    if errors:
+        return False, "; ".join(errors)
+
+    ACTIVE_FAULTS[link_id] = f"mtu_{mtu}"
+    log_event("mtu", f"{link_id}: MTU limited to {mtu}", link_id=link_id, mtu=mtu)
+    return True, "OK"
+
+
+def capture_snapshot():
+    with RUNTIME_LOCK:
+        state = dict(CAPTURE_STATE)
+    path = state.get("path")
+    state["download_ready"] = bool(path and Path(path).exists())
+    state.pop("process", None)
+    return state
+
+
+def finish_capture(process, duration: int):
+    global CAPTURE_PROCESS
+    try:
+        process.wait(timeout=max(1, duration))
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+    with RUNTIME_LOCK:
+        error = None
+        if process.returncode not in (0, -15):
+            error = f"tcpdump exited with code {process.returncode}"
+        CAPTURE_STATE["active"] = False
+        CAPTURE_STATE["error"] = error
+        CAPTURE_PROCESS = None
+    log_event(
+        "capture",
+        "Packet capture finished",
+        interface=CAPTURE_STATE.get("interface"),
+        error=error,
+    )
+
+
 def apply_runtime_fault(link: dict, fault: str, presets: dict):
     """
     Apply a transient fault without changing the persisted WAN profile.
