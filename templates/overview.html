@@ -1,189 +1,379 @@
 {% extends "base.html" %}
-{% block title %}Overview · NetEm WAN Lab{% endblock %}
-{% block crumb %}Overview{% endblock %}
+{% block title %}Command Center · NetEm WAN Lab{% endblock %}
+{% block crumb %}Command Center{% endblock %}
 
 {% block content %}
-<div class="page-head">
+<div class="page-head command-center-head">
   <div>
-    <div class="eyebrow">Live operations</div>
-    <h1>Network resilience overview</h1>
-    <p class="page-description">Monitor both WAN paths, injected conditions, expected SLA state and live traffic from one operational view.</p>
+    <div class="eyebrow">Live lab operations</div>
+    <h1>Command Center</h1>
+    <p class="page-description">See the current paths, change a WAN in one click and watch the result without leaving the operational view.</p>
   </div>
   <div class="page-actions">
-    <a class="btn" href="{{ url_for('analytics') }}">Open analytics</a>
-    <a class="btn btn-primary" href="{{ url_for('scenarios') }}">Run scenario</a>
+    {% if not session_state.active %}
+    <a class="btn" href="{{ url_for('sessions') }}">Start lab session</a>
+    {% endif %}
+    <a class="btn" href="{{ url_for('analytics') }}">Deep analytics</a>
+    <a class="btn btn-primary" href="{{ url_for('tests') }}">Run a test</a>
   </div>
 </div>
 
-<div class="grid grid-4" style="margin-bottom:14px">
-  <div class="stat">
-    <div class="stat-label">WAN health</div>
-    <div class="stat-value {% if healthy_links == links|length %}good{% elif healthy_links %}warn{% else %}bad{% endif %}" id="overview-health">{{ healthy_links }}/{{ links|length }}</div>
-    <div class="stat-sub">links within expected SLA</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Active impairments</div>
-    <div class="stat-value {% if global_runtime.active_fault_count %}bad{% else %}good{% endif %}" id="overview-faults">{{ global_runtime.active_fault_count }}</div>
-    <div class="stat-sub">runtime faults / MTU constraints</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Scenario</div>
-    <div class="stat-value" style="font-size:16px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div>
-    <div class="stat-sub" id="overview-scenario-sub">{% if scenario_state.active %}{{ scenario_state.link_id }} · {{ scenario_state.step_label }}{% else %}no scenario running{% endif %}</div>
-  </div>
-  <div class="stat">
-    <div class="stat-label">Packet capture</div>
-    <div class="stat-value" style="font-size:16px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div>
-    <div class="stat-sub" id="overview-capture-sub">{{ capture_state.interface if capture_state.active else "diagnostics ready" }}</div>
-  </div>
-</div>
-
-<div class="grid grid-3">
-  <section class="card span-2">
-    <div class="card-head">
-      <div>
-        <div class="card-title">Live path topology</div>
-        <div class="card-sub">The impairment is applied transparently between the appliance under test and upstream networks.</div>
-      </div>
-      <a class="btn btn-sm" href="{{ url_for('wan_links') }}">Manage WANs</a>
+{% if scenario_state.active %}
+<section class="running-test-bar" id="running-test-bar">
+  <div class="running-test-line">
+    <div>
+      <div class="eyebrow" style="margin:0 0 3px">Running test</div>
+      <strong id="running-test-name">{{ scenario_state.scenario_name }}</strong>
+      <span class="card-sub"> · {{ scenario_state.link_id }} · <span id="running-test-stage">{{ scenario_state.step_label }}</span></span>
     </div>
-    <div class="card-pad">
-      <div class="topology">
-        <div class="topo-endpoint">
-          <svg class="topo-endpoint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>
-          <div><strong>SD-WAN / Firewall</strong><div class="card-sub">appliance under test</div></div>
-        </div>
+    <form method="post" action="{{ url_for('lab_scenario_stop') }}">
+      <input type="hidden" name="return_to" value="overview">
+      <button class="btn btn-sm btn-danger" type="submit">Stop &amp; restore</button>
+    </form>
+  </div>
+  <div class="running-test-progress"><span id="running-test-progress" style="width:12%"></span></div>
+</section>
+{% endif %}
 
-        <div class="topo-links">
+<div class="command-center-grid">
+  <div class="command-main">
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Live path topology</div>
+          <div class="card-sub">Click a WAN to change it. Flow animation reflects measured traffic, not decorative state.</div>
+        </div>
+        <span class="status good" id="overview-live-status">Streaming</span>
+      </div>
+      <div class="live-topology">
+        <div class="live-topology-stage">
+          <div class="live-node">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>
+            <div><strong>SD-WAN / Firewall</strong><div class="card-sub">appliance under test</div></div>
+          </div>
+
+          <div class="live-paths">
+            {% for link in links %}
+            {% set state_class = 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else '') %}
+            <button class="live-path {{ state_class }}" type="button" data-open-wan="{{ link.id }}" data-live-path="{{ link.id }}">
+              <div>
+                <div class="live-path-name">{{ link.label }}</div>
+                <div class="live-path-sub">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+              </div>
+              <div class="live-path-metrics">
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms latency</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong><span>% loss</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</strong><span>quality</span></div>
+              </div>
+              <div class="live-path-right">
+                <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
+                  {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("SLA fail" if not link.sla.pass else link.quality_status) }}
+                </span>
+                <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
+              </div>
+              <span class="flow-track"></span>
+            </button>
+            {% endfor %}
+          </div>
+
+          <div class="live-node">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18a4 4 0 0 1 .8-7.9A6 6 0 0 1 18.3 9a4.5 4.5 0 0 1-.8 9z"/></svg>
+            <div><strong>Upstream</strong><div class="card-sub">ISP / Internet</div></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">WAN pulse</div>
+          <div class="card-sub">Measured traffic and live impairment trend. Click any card to act on that WAN.</div>
+        </div>
+      </div>
+      <div class="card-pad">
+        <div class="wan-live-grid">
           {% for link in links %}
-          {% set state_class = 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else '') %}
-          <div class="topo-link {{ state_class }}" data-link-card="{{ link.id }}">
-            <div>
-              <div class="topo-name">{{ link.label }}</div>
-              <div class="topo-tech">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+          <button class="wan-live-card" type="button" data-open-wan="{{ link.id }}">
+            <div class="wan-live-top">
+              <div>
+                <div class="card-title">{{ link.label }}</div>
+                <div class="card-sub">{{ link.preset_name }}</div>
+              </div>
+              <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "SLA FAIL" if not link.sla.pass else "SLA PASS" }}</span>
             </div>
-            <div class="topo-metrics">
-              <span><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong> ms<br>latency</span>
-              <span><strong data-live="{{ link.id }}-jitter">{{ link.effective.jitter_ms }}</strong> ms<br>jitter</span>
-              <span><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong>%<br>loss</span>
+            <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
+            <div class="wan-live-delta" data-live="{{ link.id }}-delta">waiting for live sample</div>
+            <div class="sparkline">
+              <svg viewBox="0 0 100 40" preserveAspectRatio="none"><path data-spark="{{ link.id }}-down"></path></svg>
             </div>
-            <div class="topo-state">
-              <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
-                {{ "Fault" if link.fault != "normal" else ("SLA fail" if not link.sla.pass else link.quality_status) }}
-              </span>
-              <div class="topo-tech" data-live="{{ link.id }}-throughput">waiting for traffic sample</div>
+            <div class="metric-row" style="margin-top:8px">
+              <div class="metric-box"><div class="metric-label">Up</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
+              <div class="metric-box"><div class="metric-label">Latency</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
+              <div class="metric-box"><div class="metric-label">Loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
             </div>
-          </div>
+          </button>
           {% endfor %}
         </div>
+      </div>
+    </section>
 
-        <div class="topo-endpoint">
-          <svg class="topo-endpoint-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18a4 4 0 0 1 .8-7.9A6 6 0 0 1 18.3 9a4.5 4.5 0 0 1-.8 9z"/></svg>
-          <div><strong>Upstream</strong><div class="card-sub">ISP / Internet</div></div>
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Combined downstream throughput</div>
+          <div class="card-sub">Rolling measured traffic across all WANs · browser live window</div>
         </div>
       </div>
-    </div>
-  </section>
-
-  <section class="card">
-    <div class="card-head">
-      <div>
-        <div class="card-title">Recent events</div>
-        <div class="card-sub">Runtime changes and scenario activity</div>
-      </div>
-      <a class="btn btn-sm" href="{{ url_for('analytics') }}">History</a>
-    </div>
-    <div class="card-pad">
-      <div class="timeline" id="overview-events">
-        {% if events %}
-          {% for event in events[:8] %}
-          <div class="timeline-item">
-            <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
-            <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
-            <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+      <div class="card-pad">
+        <div class="chart-frame">
+          <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+          <div class="chart">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+              {% for link in links %}
+              <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
+              {% endfor %}
+            </svg>
+            <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
           </div>
+          <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
+        </div>
+        <div class="chart-legend">
+          {% for link in links %}
+          <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }}</span>
           {% endfor %}
-        {% else %}
-          <div class="empty-state"><strong>No runtime events yet</strong>Start a scenario or change a WAN condition.</div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <aside class="command-side">
+    <section class="card">
+      <div class="card-head">
+        <div><div class="card-title">Lab state</div><div class="card-sub">Current operational context</div></div>
+      </div>
+      <div class="card-pad">
+        <div class="grid grid-2">
+          <div class="metric-box"><div class="metric-label">Healthy WANs</div><div class="metric-value" id="overview-health">{{ healthy_links }}/{{ links|length }}</div></div>
+          <div class="metric-box"><div class="metric-label">Faults</div><div class="metric-value" id="overview-faults">{{ global_runtime.active_fault_count }}</div></div>
+          <div class="metric-box"><div class="metric-label">Scenario</div><div class="metric-value" style="font-size:11px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div></div>
+          <div class="metric-box"><div class="metric-label">Capture</div><div class="metric-value" style="font-size:11px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div></div>
+        </div>
+        {% if session_state.active %}
+        <div class="docs-tip" style="margin:10px 0 0">
+          <strong>Session active:</strong> {{ session_state.name }}<br>
+          Events created now are associated with this lab session.
+        </div>
         {% endif %}
       </div>
-    </div>
-  </section>
+    </section>
 
-  <section class="card span-2">
-    <div class="card-head">
-      <div>
-        <div class="card-title">Live throughput</div>
-        <div class="card-sub">Rolling browser view from Linux interface counters · last ~3 minutes</div>
-      </div>
-      <span class="status good" id="overview-live-status">Streaming</span>
-    </div>
-    <div class="card-pad">
-      <div class="chart-frame">
-        <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
-        <div class="chart">
-          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-            {% for link in links %}
-            <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
-            {% endfor %}
-          </svg>
-          <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
+    <section class="card">
+      <div class="card-head"><div><div class="card-title">Quick actions</div><div class="card-sub">Common workflows without page hunting</div></div></div>
+      <div class="card-pad">
+        <div class="quick-actions">
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
         </div>
-        <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
       </div>
-      <div class="chart-legend">
-        {% for link in links %}
-        <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }} downstream</span>
+    </section>
+
+    <section class="card">
+      <div class="card-head">
+        <div><div class="card-title">Recent activity</div><div class="card-sub">What changed and when</div></div>
+        <button class="btn btn-sm" type="button" onclick="document.getElementById('activity-toggle').click()">Open rail</button>
+      </div>
+      <div class="card-pad">
+        <div class="timeline">
+          {% if events %}
+            {% for event in events[:7] %}
+            <div class="timeline-item">
+              <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+              <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+              <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+            </div>
+            {% endfor %}
+          {% else %}
+            <div class="empty-state"><strong>No runtime events yet</strong>Use a quick action or run a test.</div>
+          {% endif %}
+        </div>
+      </div>
+    </section>
+  </aside>
+</div>
+
+{% for link in links %}
+<aside class="drawer wan-quick-drawer" id="wan-drawer-{{ link.id }}" data-wan-drawer="{{ link.id }}">
+  <div class="drawer-head">
+    <div>
+      <div class="wan-name">{{ link.label }}</div>
+      <div class="wan-tech">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+    </div>
+    <button class="drawer-close" type="button" data-close-wan>×</button>
+  </div>
+  <div class="drawer-body">
+    <div class="section-title" style="margin-top:0">Live state</div>
+    <div class="metric-row">
+      <div class="metric-box"><div class="metric-label">Latency</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-latency">{{ link.effective.delay_ms }}</span> <span class="metric-unit">ms</span></div></div>
+      <div class="metric-box"><div class="metric-label">Jitter</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-jitter">{{ link.effective.jitter_ms }}</span> <span class="metric-unit">ms</span></div></div>
+      <div class="metric-box"><div class="metric-label">Loss</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-loss">{{ link.effective.loss_pct }}</span><span class="metric-unit">%</span></div></div>
+    </div>
+
+    <div class="section-title">Degrade link</div>
+    <form method="post" action="{{ url_for('quick_wan_action') }}" data-quick-quality-form="{{ link.id }}">
+      <input type="hidden" name="link_id" value="{{ link.id }}">
+      <input type="hidden" name="action" value="quality">
+      <input type="hidden" name="return_to" value="overview">
+      <div class="quick-quality-readout">
+        <div><label style="margin:0">Quality</label><div class="quick-quality-number" data-quality-number="{{ link.id }}">{{ link.runtime_quality }}%</div></div>
+        <div class="card-sub">Current profile: {{ link.preset_name }}</div>
+      </div>
+      <input type="range" name="quality" min="0" max="100" step="1" value="{{ link.runtime_quality }}" data-quality-slider="{{ link.id }}">
+      <div class="quick-presets">
+        {% for q in [100, 90, 75, 60, 40, 20] %}
+        <button class="btn btn-sm" type="button" data-set-quality="{{ link.id }}" data-value="{{ q }}">{{ q }}%</button>
         {% endfor %}
       </div>
-    </div>
-  </section>
+      <div class="quick-preview">
+        <div class="metric-box"><div class="metric-label">Expected latency</div><div class="metric-value"><span data-preview="{{ link.id }}-delay">{{ link.effective.delay_ms }}</span> <span class="metric-unit">ms</span></div></div>
+        <div class="metric-box"><div class="metric-label">Expected loss</div><div class="metric-value"><span data-preview="{{ link.id }}-loss">{{ link.effective.loss_pct }}</span><span class="metric-unit">%</span></div></div>
+        <div class="metric-box"><div class="metric-label">Expected down</div><div class="metric-value"><span data-preview="{{ link.id }}-down">{{ link.effective.download_mbit }}</span> <span class="metric-unit">Mbit</span></div></div>
+      </div>
+      <button class="btn btn-primary" type="submit" style="margin-top:12px">Apply quality</button>
+    </form>
 
-  <section class="card">
-    <div class="card-head">
-      <div>
-        <div class="card-title">WAN summary</div>
-        <div class="card-sub">Configured vs effective state</div>
-      </div>
-    </div>
-    <div class="card-pad" style="display:grid;gap:13px">
-      {% for link in links %}
-      <div>
-        <div class="wan-head">
-          <div><div class="wan-name" style="font-size:13px">{{ link.label }}</div><div class="wan-tech">{{ link.preset_name }} · {{ link.mode|capitalize }}</div></div>
-          <span class="status {{ 'bad' if not link.sla.pass else 'good' }}">{{ "SLA FAIL" if not link.sla.pass else "SLA PASS" }}</span>
-        </div>
-        <div class="metric-row" style="margin-top:8px">
-          <div class="metric-box"><div class="metric-label">Quality</div><div class="metric-value" data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</div></div>
-          <div class="metric-box"><div class="metric-label">Effective down</div><div class="metric-value">{{ link.effective.download_mbit }} <span class="metric-unit">Mbit</span></div></div>
-          <div class="metric-box"><div class="metric-label">Effective up</div><div class="metric-value">{{ link.effective.upload_mbit }} <span class="metric-unit">Mbit</span></div></div>
-        </div>
-      </div>
+    <div class="section-title">Fail or restore path</div>
+    <div class="grid grid-2">
+      {% for action,label,cls in [
+        ('blackhole','Fail both directions','btn-danger'),
+        ('downstream_blackhole','Fail downstream','btn-danger'),
+        ('upstream_blackhole','Fail upstream','btn-danger'),
+        ('normal','Restore WAN','')
+      ] %}
+      <form method="post" action="{{ url_for('quick_wan_action') }}" {% if action != 'normal' %}onsubmit="return confirm('Apply {{ label|lower }} to {{ link.label }}?');"{% endif %}>
+        <input type="hidden" name="link_id" value="{{ link.id }}">
+        <input type="hidden" name="action" value="{{ action }}">
+        <input type="hidden" name="return_to" value="overview">
+        <button class="btn {{ cls }}" type="submit" style="width:100%">{{ label }}</button>
+      </form>
       {% endfor %}
     </div>
-  </section>
-</div>
+
+    <div class="section-title">MTU test</div>
+    <form method="post" action="{{ url_for('quick_wan_action') }}">
+      <input type="hidden" name="link_id" value="{{ link.id }}">
+      <input type="hidden" name="action" value="mtu">
+      <input type="hidden" name="return_to" value="overview">
+      <div style="display:flex;gap:8px">
+        <select name="mtu">
+          <option value="1492">1492 · PPPoE-like</option>
+          <option value="1400">1400</option>
+          <option value="1380">1380</option>
+          <option value="1300">1300</option>
+          <option value="1200">1200</option>
+          <option value="0">Restore original</option>
+        </select>
+        <button class="btn" type="submit">Apply</button>
+      </div>
+    </form>
+
+    <div class="section-title">More</div>
+    <div class="quick-actions">
+      <a class="quick-action" href="{{ url_for('wan_links') }}#{{ link.id }}"><strong>Advanced WAN settings</strong><span>Profiles, custom packet behavior and qdisc diagnostics</span></a>
+      <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Packet capture</strong><span>Capture on {{ link.label }} inner or outer side</span></a>
+    </div>
+  </div>
+</aside>
+{% endfor %}
 {% endblock %}
 
 {% block scripts %}
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
-document.querySelectorAll("[data-ts]").forEach(el => {
-  el.textContent = NetEmUI.eventTime(el.dataset.ts);
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
+
+const qualityModels = {{ quality_curves | tojson }};
+const presets = {{ presets | tojson }};
+const linkConfig = {{ links | tojson }};
+const drawerBackdrop = document.getElementById("drawer-backdrop");
+
+function closeWanDrawers() {
+  document.querySelectorAll("[data-wan-drawer].open").forEach(drawer => drawer.classList.remove("open"));
+  drawerBackdrop.classList.remove("open");
+}
+function openWanDrawer(id) {
+  closeWanDrawers();
+  const drawer = document.querySelector('[data-wan-drawer="' + id + '"]');
+  if (!drawer) return;
+  drawer.classList.add("open");
+  drawerBackdrop.classList.add("open");
+}
+document.querySelectorAll("[data-open-wan]").forEach(el => el.addEventListener("click", () => openWanDrawer(el.dataset.openWan)));
+document.querySelectorAll("[data-close-wan]").forEach(el => el.addEventListener("click", closeWanDrawers));
+drawerBackdrop.addEventListener("click", closeWanDrawers);
+document.addEventListener("keydown", event => { if (event.key === "Escape") closeWanDrawers(); });
+
+const requestedWan = new URLSearchParams(location.search).get("wan");
+if (requestedWan) setTimeout(() => openWanDrawer(requestedWan), 50);
+
+function curveValue(q, points) {
+  const ordered = [...points].sort((a,b) => b[0] - a[0]);
+  if (q >= ordered[0][0]) return Number(ordered[0][1]);
+  if (q <= ordered[ordered.length - 1][0]) return Number(ordered[ordered.length - 1][1]);
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const [qh, vh] = ordered[i], [ql, vl] = ordered[i + 1];
+    if (qh >= q && q >= ql) {
+      const t = (qh - q) / (qh - ql);
+      const k = 2.2;
+      const eased = (1 - Math.exp(-k * t)) / (1 - Math.exp(-k));
+      return Number(vh) + (Number(vl) - Number(vh)) * eased;
+    }
+  }
+  return Number(ordered[ordered.length - 1][1]);
+}
+function effectiveFor(link, q) {
+  const preset = presets[link.preset_id];
+  const curves = qualityModels[preset.quality_model || "broadband"] || qualityModels.broadband;
+  if (q === 0) return {delay_ms:Math.max(Number(preset.delay_ms||0),1000),loss_pct:100,download_mbit:1};
+  return {
+    delay_ms: Number(preset.delay_ms||0) * curveValue(q, curves.delay_factor),
+    loss_pct: Math.min(100, Number(preset.loss_pct||0) + curveValue(q, curves.loss_add)),
+    download_mbit: Math.max(1, Math.round(Number(link.nominal_download_mbit) * curveValue(q, curves.download_factor)))
+  };
+}
+document.querySelectorAll("[data-quality-slider]").forEach(slider => {
+  const id = slider.dataset.qualitySlider;
+  const link = linkConfig.find(item => item.id === id);
+  const update = () => {
+    const q = Number(slider.value);
+    const e = effectiveFor(link,q);
+    document.querySelector('[data-quality-number="' + id + '"]').textContent = q + "%";
+    document.querySelector('[data-preview="' + id + '-delay"]').textContent = e.delay_ms.toFixed(1);
+    document.querySelector('[data-preview="' + id + '-loss"]').textContent = e.loss_pct.toFixed(2);
+    document.querySelector('[data-preview="' + id + '-down"]').textContent = Math.round(e.download_mbit);
+  };
+  slider.addEventListener("input", update);
+  update();
 });
+document.querySelectorAll("[data-set-quality]").forEach(btn => btn.addEventListener("click", () => {
+  const slider = document.querySelector('[data-quality-slider="' + btn.dataset.setQuality + '"]');
+  slider.value = btn.dataset.value;
+  slider.dispatchEvent(new Event("input"));
+}));
 
-const linkOrder = {{ links | map(attribute='id') | list | tojson }};
-
+const previousRates = {};
 NetEmUI.createLiveClient({
-  interval: 1500,
-  maxPoints: 120,
+  interval:1500,
+  maxPoints:120,
   onStatus(ok) {
     const status = document.getElementById("overview-live-status");
     if (!status) return;
     status.className = "status " + (ok ? "good" : "bad");
     status.textContent = ok ? "Streaming" : "Disconnected";
   },
-  onSample({state, history}) {
+  onSample({state,history}) {
     let healthy = 0;
     let faults = 0;
 
@@ -191,69 +381,76 @@ NetEmUI.createLiveClient({
       if (link.sla?.pass) healthy++;
       if (link.fault && link.fault !== "normal") faults++;
 
-      const latency = document.querySelector('[data-live="' + link.id + '-latency"]');
-      const jitter = document.querySelector('[data-live="' + link.id + '-jitter"]');
-      const loss = document.querySelector('[data-live="' + link.id + '-loss"]');
-      const quality = document.querySelector('[data-live="' + link.id + '-quality"]');
-      const status = document.querySelector('[data-live="' + link.id + '-status"]');
-      const throughput = document.querySelector('[data-live="' + link.id + '-throughput"]');
-
-      if (latency) latency.textContent = NetEmUI.formatNumber(link.effective?.delay_ms || 0, 1);
-      if (jitter) jitter.textContent = NetEmUI.formatNumber(link.effective?.jitter_ms || 0, 1);
-      if (loss) loss.textContent = NetEmUI.formatNumber(link.effective?.loss_pct || 0, 2);
-      if (quality) quality.textContent = Number(link.quality ?? 100) + "%";
-
-      if (status) {
-        const cls = NetEmUI.statusClass(link);
-        status.className = "status " + cls;
-        status.textContent = link.fault !== "normal" ? "Fault" : (link.sla?.pass ? (Number(link.quality) >= 90 ? "Excellent" : Number(link.quality) >= 75 ? "Good" : Number(link.quality) >= 50 ? "Fair" : "Poor") : "SLA fail");
-      }
-
       const h = history[link.id];
-      if (h && throughput && h.down.length) {
-        const i = h.down.length - 1;
-        throughput.textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
+      const i = h?.down?.length ? h.down.length - 1 : -1;
+      const down = i >= 0 ? h.down[i] : 0;
+      const up = i >= 0 ? h.up[i] : 0;
+
+      const set = (key,value) => document.querySelectorAll('[data-live="' + link.id + '-' + key + '"]').forEach(el => el.textContent=value);
+      set("latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
+      set("latency-small", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
+      set("jitter", NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1));
+      set("loss", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
+      set("loss-small", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
+      set("quality", Number(link.quality ?? 100) + "%");
+      set("down", NetEmUI.formatRate(down));
+      set("up", NetEmUI.formatRate(up));
+      set("throughput", NetEmUI.formatRate(down) + " ↓ · " + NetEmUI.formatRate(up) + " ↑");
+      set("drawer-latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
+      set("drawer-jitter", NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1));
+      set("drawer-loss", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
+
+      document.querySelectorAll('[data-live="' + link.id + '-status"]').forEach(status => {
+        status.className = "status " + NetEmUI.statusClass(link);
+        status.textContent = link.fault !== "normal" ? link.fault.replaceAll("_"," ") : (link.sla?.pass ? "Healthy" : "SLA fail");
+      });
+      document.querySelectorAll('[data-live="' + link.id + '-sla"]').forEach(status => {
+        status.className = "status " + (link.sla?.pass ? "good" : "bad");
+        status.textContent = link.sla?.pass ? "SLA PASS" : "SLA FAIL";
+      });
+
+      const path = document.querySelector('[data-live-path="' + link.id + '"]');
+      if (path) {
+        path.classList.toggle("flow-active", (down + up) > .05);
+        path.classList.toggle("flow-fast", (down + up) > 50);
+        path.classList.toggle("bad", link.fault !== "normal" || !link.sla?.pass);
+        path.classList.toggle("warn", link.fault === "normal" && link.sla?.pass && Number(link.quality) < 75);
       }
 
+      const spark = document.querySelector('[data-spark="' + link.id + '-down"]');
+      if (spark && h) NetEmUI.setPath(spark, h.down, null);
+
+      const delta = document.querySelector('[data-live="' + link.id + '-delta"]');
+      if (delta) {
+        const prev = previousRates[link.id];
+        if (prev != null && i >= 0) {
+          const diff = down - prev;
+          delta.className = "wan-live-delta " + (diff > .1 ? "up" : diff < -.1 ? "down" : "");
+          delta.textContent = Math.abs(diff) < .1 ? "stable" : (diff > 0 ? "↑ +" : "↓ −") + NetEmUI.formatRate(Math.abs(diff)) + " since previous sample";
+        }
+        previousRates[link.id] = down;
+      }
     });
 
-    const overviewPaths = [];
-    const overviewSeries = [];
-    let overviewTimestamps = [];
+    const paths=[], series=[];
+    let timestamps=[];
     (state.links || []).forEach(link => {
-      const h = history[link.id];
-      const path = document.querySelector('[data-chart="' + link.id + '-down"]');
-      if (h && path) {
-        overviewPaths.push(path);
-        overviewSeries.push(h.down);
-        if (h.timestamps.length > overviewTimestamps.length) overviewTimestamps = h.timestamps;
-      }
+      const h=history[link.id], path=document.querySelector('[data-chart="' + link.id + '-down"]');
+      if(h && path){ paths.push(path); series.push(h.down); if(h.timestamps.length>timestamps.length) timestamps=h.timestamps; }
     });
-    NetEmUI.renderSeries(
-      overviewPaths,
-      overviewSeries,
-      {
-        axis: document.getElementById("overview-throughput-y"),
-        timeAxis: document.getElementById("overview-throughput-x"),
-        timestamps: overviewTimestamps,
-        unit: " Mb/s"
-      }
-    );
-
+    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,unit:" Mb/s"});
+    document.getElementById("throughput-empty").style.display = Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
     document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
     document.getElementById("overview-faults").textContent = faults;
-    document.getElementById("throughput-empty").style.display =
-      Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
+    document.getElementById("overview-scenario").textContent = state.scenario?.active ? state.scenario.scenario_name : "Idle";
+    document.getElementById("overview-capture").textContent = state.capture?.active ? "Active" : "Idle";
 
-    const scenario = state.scenario || {};
-    document.getElementById("overview-scenario").textContent = scenario.active ? scenario.scenario_name : "Idle";
-    document.getElementById("overview-scenario-sub").textContent = scenario.active
-      ? scenario.link_id + " · " + (scenario.step_label || "running")
-      : "no scenario running";
-
-    const capture = state.capture || {};
-    document.getElementById("overview-capture").textContent = capture.active ? "Active" : "Idle";
-    document.getElementById("overview-capture-sub").textContent = capture.active ? capture.interface : "diagnostics ready";
+    if (state.scenario?.active) {
+      const stage=document.getElementById("running-test-stage");
+      if(stage) stage.textContent=state.scenario.step_label || "running";
+      const progress=document.getElementById("running-test-progress");
+      if(progress) progress.style.width=Math.min(96,12 + Number(state.scenario.step||0)*14) + "%";
+    }
   }
 });
 </script>
