@@ -122,6 +122,7 @@ jobs:
                   "/docs/topology-profiles",
                   "/docs/updates-releases",
                   "/docs/troubleshooting",
+                  "/docs/roadmap",
                   "/docs/reference",
               ]
               for path in pages:
