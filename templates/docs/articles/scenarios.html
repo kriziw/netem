@@ -1,0 +1,54 @@
+
+<h2 id="purpose">Why use scenarios</h2>
+<p>Scenarios turn one-off impairment changes into repeatable lab experiments. A scenario is an ordered list of stages. Each stage waits for its <code>after</code> interval, performs one supported action, updates runtime state and writes events to the timeline.</p>
+<p>Only one scenario can run at a time. When it ends—or when you request a stop—the configured WAN profile is restored.</p>
+
+<h2 id="built-in">Built-in scenarios</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Scenario</th><th>Behavior</th><th>Primary use</th></tr></thead>
+<tbody>
+<tr><td>Progressive brownout</td><td>100 → 80 → 60 → 40 → 70 → 100% quality</td><td>Thresholds, brownout handling, hysteresis and recovery</td></tr>
+<tr><td>SLA failover</td><td>Healthy → bidirectional blackhole for 30s → restore</td><td>Detecting failure while Ethernet remains up</td></tr>
+<tr><td>Flaky underlay</td><td>Alternates downstream and upstream one-way blackholes</td><td>Asymmetric-failure detection and SLA hysteresis</td></tr>
+<tr><td>Availability stress / DDoS impact</td><td>100 → 60 → 30 → 10 → 70 → 100% quality</td><td>Safe saturation-impact simulation without attack traffic</td></tr>
+</tbody></table></div>
+
+<h2 id="running">Run a scenario</h2>
+<ol>
+  <li>Open <strong>Scenarios</strong>.</li>
+  <li>Choose the target WAN from the scenario card.</li>
+  <li>Click <strong>Run</strong>.</li>
+  <li>Watch the active-scenario banner and Overview/Analytics.</li>
+  <li>Let the scenario finish, or use <strong>Stop &amp; restore WAN</strong> if you need to abort it.</li>
+</ol>
+<p>The stage timeline on each card shows cumulative elapsed time and the action/value that will be applied.</p>
+
+<h2 id="custom">Custom scenario builder</h2>
+<p>Custom scenarios are stored in <code>config.json</code>. The current builder accepts a validated JSON array of stages. A scenario may contain up to 30 stages; up to 20 custom scenarios are retained.</p>
+<pre>[
+  {"after": 0,  "action": "quality", "value": 100, "label": "Nominal"},
+  {"after": 10, "action": "quality", "value": 45,  "label": "Brownout"},
+  {"after": 15, "action": "mtu",     "value": 1300,"label": "MTU constrained"},
+  {"after": 15, "action": "fault",   "value": "blackhole", "label": "Outage"},
+  {"after": 15, "action": "fault",   "value": "normal", "label": "Restore"},
+  {"after": 5,  "action": "mtu",     "value": 0, "label": "MTU restored"}
+]</pre>
+
+<h2 id="actions">Supported actions</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Action</th><th>Accepted value</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>quality</code></td><td>0–100 integer</td><td>Apply the selected access profile at that quality level.</td></tr>
+<tr><td><code>fault</code></td><td><code>normal</code>, <code>blackhole</code>, <code>downstream_blackhole</code>, <code>upstream_blackhole</code></td><td>Apply or clear a runtime data-plane fault.</td></tr>
+<tr><td><code>mtu</code></td><td>576–9000, or 0</td><td>Apply a temporary path MTU; 0 restores the original value.</td></tr>
+</tbody></table></div>
+<p><code>after</code> must be an integer from 0 to 3600 seconds. Values outside supported ranges are rejected or bounded by validation. Labels are limited to 80 characters.</p>
+
+<h2 id="stop-restore">Stop and restoration behavior</h2>
+<p>Stopping a scenario sets a stop request; the scenario runner exits its sequence and restores the persisted WAN profile. MTU state is also restored by the scenario cleanup path. This keeps the configured baseline authoritative.</p>
+
+<h2 id="events">Scenario events</h2>
+<p>Scenario start, stages, completion, stop, faults and MTU changes are written to the persistent event log. Use the activity panel on Scenarios for the recent view or Analytics for the broader event timeline/export.</p>
+
+<h2 id="design-future">Future orchestration model</h2>
+<p>The UI reserves space for conditional actions such as “wait until SLA fails,” parallel WAN actions, pass/fail assertions and vendor-observed events. These are roadmap items; the current scenario engine is time-driven and supports quality, fault and MTU actions only.</p>
