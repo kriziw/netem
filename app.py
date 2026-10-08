@@ -470,25 +470,7 @@ def restore_runtime_state():
     if cfg.get("restore_shaping_on_startup", True):
         presets = get_presets(cfg)
         for link in links:
-            inner = link.get("inner")
-            outer = link.get("outer")
-            preset_id = link.get("preset", "broadband")
-            preset = presets.get(preset_id) or presets.get("broadband")
-            if not inner or not preset:
-                continue
-
-            quality = int(link.get("quality", 100))
-            effective = calculate_profile(preset, quality)
-
-            apply_netem(
-                inner,
-                effective["delay_ms"],
-                effective["jitter_ms"],
-                effective["loss_pct"],
-                effective["download_mbit"],
-            )
-            if outer:
-                apply_netem(outer, 0.0, 0.0, 0.0, effective["upload_mbit"])
+            apply_selected_profile(link, presets)
 
 
 # ---------- Nav context ----------
