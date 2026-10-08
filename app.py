@@ -719,8 +719,8 @@ def index():
                 "delay_ms": float(link["custom_profile"].get("delay_ms", 0.0)),
                 "jitter_ms": float(link["custom_profile"].get("jitter_ms", 0.0)),
                 "loss_pct": float(link["custom_profile"].get("loss_pct", 0.0)),
-                "download_mbit": float(link["custom_profile"].get("download_mbit", 0.0)),
-                "upload_mbit": float(link["custom_profile"].get("upload_mbit", 0.0)),
+                "download_mbit": int(round(float(link["custom_profile"].get("download_mbit", 0.0)))),
+                "upload_mbit": int(round(float(link["custom_profile"].get("upload_mbit", 0.0)))),
             }
         else:
             effective = calculate_profile(preset, quality) if preset else {}
@@ -873,8 +873,6 @@ def setup():
                     "quality": int(previous.get("quality", 100)),
                     "mode": previous.get("mode", "quality"),
                     "custom_profile": previous.get("custom_profile"),
-                    "mode": previous.get("mode", "quality"),
-                    "custom_profile": previous.get("custom_profile"),
                 }
             )
 
@@ -891,6 +889,8 @@ def setup():
                     "outer": wan2_outer,
                     "preset": previous.get("preset", "broadband"),
                     "quality": int(previous.get("quality", 100)),
+                    "mode": previous.get("mode", "quality"),
+                    "custom_profile": previous.get("custom_profile"),
                 }
             )
 
@@ -1010,12 +1010,12 @@ def configure():
                 100.0,
                 custom_float("custom_loss_pct", baseline["loss_pct"]),
             ),
-            "download_mbit": custom_float(
+            "download_mbit": int(round(custom_float(
                 "custom_download_mbit", baseline["download_mbit"]
-            ),
-            "upload_mbit": custom_float(
+            ))),
+            "upload_mbit": int(round(custom_float(
                 "custom_upload_mbit", baseline["upload_mbit"]
-            ),
+            ))),
         }
     else:
         # Returning to the quality slider deliberately discards manual overrides.
@@ -1078,12 +1078,12 @@ def presets():
                     100.0,
                     field_float("loss_pct", existing.get("loss_pct", 0.0)),
                 ),
-                "download_mbit": field_float(
+                "download_mbit": int(round(field_float(
                     "download_mbit", existing.get("download_mbit", 0.0)
-                ),
-                "upload_mbit": field_float(
+                ))),
+                "upload_mbit": int(round(field_float(
                     "upload_mbit", existing.get("upload_mbit", 0.0)
-                ),
+                ))),
             }
 
         cfg["presets"] = updated
