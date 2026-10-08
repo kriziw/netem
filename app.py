@@ -1470,6 +1470,22 @@ def redirect_after(default_endpoint):
     return redirect(url_for(endpoint))
 
 
+DOC_HELP_BY_ENDPOINT = {
+    "overview": "overview",
+    "index": "overview",
+    "wan_links": "wan-links",
+    "scenarios": "scenarios",
+    "lab_tools": "scenarios",
+    "traffic_security": "traffic-security",
+    "analytics": "analytics-sla",
+    "integrations": "integrations-api",
+    "settings": "topology-profiles",
+    "setup": "topology-profiles",
+    "presets": "topology-profiles",
+    "updates": "updates-releases",
+}
+
+
 # ---------- Nav context ----------
 
 @app.context_processor
@@ -1513,6 +1529,7 @@ def inject_nav():
         ],
         "config": cfg,
         "app_version": get_app_version(),
+        "help_doc_slug": DOC_HELP_BY_ENDPOINT.get(request.endpoint),
         "global_runtime": {
             "scenario": scenario_snapshot(),
             "active_fault_count": len(active_fault_labels),
