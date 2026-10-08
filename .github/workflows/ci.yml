@@ -40,18 +40,74 @@ jobs:
 
           endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
           required = {
+              "overview",
               "index",
+              "wan_links",
+              "scenarios",
+              "traffic_security",
+              "analytics",
+              "integrations",
+              "settings",
               "lab_tools",
               "updates",
               "setup",
               "api_state",
               "api_telemetry",
+              "api_events",
           }
           missing = required - endpoints
           if missing:
               raise SystemExit(f"Missing expected endpoints: {sorted(missing)}")
 
           print(f"Validated {len(endpoints)} Flask endpoints and all templates.")
+          PY
+
+      - name: Smoke-test redesigned GET pages
+        run: |
+          python - <<'PY'
+          import json
+          from app import app, CONFIG_PATH
+
+          CONFIG_PATH.write_text(json.dumps({
+              "mgmt_interface": "lo",
+              "restore_bridges_on_startup": False,
+              "restore_shaping_on_startup": False,
+              "wan_links": [{
+                  "id": "wan1",
+                  "name": "CI WAN",
+                  "bridge": "lo",
+                  "inner": "lo",
+                  "outer": "lo",
+                  "preset": "dia",
+                  "quality": 100,
+                  "mode": "quality"
+              }]
+          }))
+
+          try:
+              client = app.test_client()
+              pages = [
+                  "/",
+                  "/dashboard",
+                  "/wan",
+                  "/scenarios",
+                  "/traffic-security",
+                  "/analytics",
+                  "/integrations",
+                  "/settings",
+                  "/setup",
+                  "/presets",
+                  "/updates",
+                  "/lab",
+              ]
+              for path in pages:
+                  response = client.get(path, follow_redirects=True)
+                  if response.status_code != 200:
+                      raise SystemExit(f"{path} returned HTTP {response.status_code}")
+                  print(f"PASS {path}")
+          finally:
+              if CONFIG_PATH.exists():
+                  CONFIG_PATH.unlink()
           PY
 
       - name: Validate release configuration

@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block title %}Integrations · NetEm WAN Lab{% endblock %}
+{% block crumb %}Integrations{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Extensibility</div>
+    <h1>Integrations</h1>
+    <p class="page-description">Keep the impairment engine vendor-neutral while layering vendor telemetry, monitoring and automation on top of a stable common API.</p>
+  </div>
+</div>
+
+<div class="grid grid-3">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">NetEm state API</div><div class="card-sub">Current configuration and runtime state</div></div>
+      <span class="status good">Available</span>
+    </div>
+    <div class="card-pad">
+      <div class="api-row"><code>GET /api/v1/state</code></div>
+      <div class="kv" style="margin-top:12px">
+        <div class="k">Includes</div><div class="v">WAN state, effective impairment, SLA, MTU, scenario, capture, version</div>
+        <div class="k">Purpose</div><div class="v">automation, dashboards, vendor adapters</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Telemetry API</div><div class="card-sub">Raw interface counters for live consumers</div></div>
+      <span class="status good">Available</span>
+    </div>
+    <div class="card-pad">
+      <div class="api-row"><code>GET /api/v1/telemetry</code></div>
+      <div class="api-row"><code>GET /api/v1/events</code></div>
+      <div class="kv" style="margin-top:12px">
+        <div class="k">Sampling</div><div class="v">consumer-controlled</div>
+        <div class="k">Current UI</div><div class="v">1.5 second polling</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Prometheus</div><div class="card-sub">External monitoring/export</div></div>
+      <span class="status good">Available</span>
+    </div>
+    <div class="card-pad">
+      <div class="api-row"><code>GET /metrics</code></div>
+      <div class="kv" style="margin-top:12px">
+        <div class="k">Format</div><div class="v">Prometheus exposition</div>
+        <div class="k">Use</div><div class="v">Grafana / long-term lab telemetry</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="section-title">SD-WAN vendor adapters</div>
+<div class="grid grid-3">
+  {% for vendor, description in [
+    ('Fortinet', 'Performance SLA, SD-WAN member health, selected path and event correlation'),
+    ('Cisco', 'Catalyst SD-WAN / Meraki health and path telemetry'),
+    ('Palo Alto', 'Prisma SD-WAN / firewall path quality and policy state'),
+    ('Juniper', 'Session Smart / WAN health and path state'),
+    ('VMware / VeloCloud', 'Edge link metrics, business policy and path selection'),
+    ('Versa', 'WAN circuit health and SD-WAN path telemetry')
+  ] %}
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">{{ vendor }}</div><div class="card-sub">{{ description }}</div></div>
+      <span class="future-tag">Adapter planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Design</div><div class="v">optional connector; no dependency in impairment engine</div>
+        <div class="k">Common model</div><div class="v">health · latency · jitter · loss · selected path</div>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<div class="grid grid-2" style="margin-top:14px">
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Webhooks &amp; automation</div><div class="card-sub">External event-driven orchestration</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Outbound</div><div class="v">scenario started · SLA transition · fault applied · scenario complete</div>
+        <div class="k">Inbound</div><div class="v">start scenario · restore WAN · trigger capture</div>
+        <div class="k">Authentication</div><div class="v">API tokens / scoped service credentials</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Streaming telemetry</div><div class="card-sub">Evolution from browser polling</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Preferred transport</div><div class="v">Server-Sent Events for one-way live state delivery</div>
+        <div class="k">Fallback</div><div class="v">existing REST polling remains supported</div>
+        <div class="k">Consumers</div><div class="v">Overview · Analytics · external dashboards</div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}

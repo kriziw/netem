@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block title %}Settings · NetEm WAN Lab{% endblock %}
+{% block crumb %}Settings{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Configuration</div>
+    <h1>Settings</h1>
+    <p class="page-description">System-level configuration is separated from day-to-day lab operations so the primary workspace stays focused on testing and live visibility.</p>
+  </div>
+</div>
+
+<div class="grid grid-3">
+  <a class="card" href="{{ url_for('setup') }}">
+    <div class="card-head"><div><div class="card-title">Topology &amp; interfaces</div><div class="card-sub">Management NIC, transparent WAN bridges and startup restore</div></div><span class="status info">{{ link_count }} WAN</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Management</div><div class="v mono">{{ mgmt_interface or "not detected" }}</div>
+        <div class="k">Scope</div><div class="v">interface mapping · bridge persistence · aliases</div>
+      </div>
+    </div>
+  </a>
+
+  <a class="card" href="{{ url_for('presets') }}">
+    <div class="card-head"><div><div class="card-title">Access profiles</div><div class="card-sub">DIA, broadband, DSL, mobile and satellite baselines</div></div><span class="status info">{{ preset_count }} profiles</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Controls</div><div class="v">baseline latency · jitter · loss · bandwidth</div>
+        <div class="k">Models</div><div class="v">access-specific quality degradation curves</div>
+      </div>
+    </div>
+  </a>
+
+  <a class="card" href="{{ url_for('updates') }}">
+    <div class="card-head"><div><div class="card-title">Application &amp; updates</div><div class="card-sub">Release channel, versioning and Git update status</div></div><span class="status {{ 'good' if update_status.ok and update_status.behind == 0 else 'warn' }}">v{{ app_version }}</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Channel</div><div class="v mono">origin/main</div>
+        <div class="k">Status</div><div class="v">{% if update_status.ok %}{{ update_status.behind }} stable commit(s) available{% else %}update status unavailable{% endif %}</div>
+      </div>
+    </div>
+  </a>
+
+  <a class="card" href="{{ url_for('analytics') }}">
+    <div class="card-head"><div><div class="card-title">SLA profiles</div><div class="card-sub">Generic vendor-neutral expected-SLA thresholds</div></div></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Metrics</div><div class="v">latency · jitter · packet loss</div>
+        <div class="k">Purpose</div><div class="v">expected vs appliance-observed comparison</div>
+      </div>
+    </div>
+  </a>
+
+  <a class="card" href="{{ url_for('integrations') }}">
+    <div class="card-head"><div><div class="card-title">API &amp; integrations</div><div class="card-sub">Prometheus, REST and future vendor adapters</div></div></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">REST</div><div class="v mono">/api/v1/*</div>
+        <div class="k">Metrics</div><div class="v mono">/metrics</div>
+      </div>
+    </div>
+  </a>
+
+  <section class="card future-card">
+    <div class="card-head"><div><div class="card-title">System &amp; retention</div><div class="card-sub">Future appliance-level preferences</div></div><span class="future-tag">Planned</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Telemetry retention</div><div class="v">SQLite rolling history / scenario sessions</div>
+        <div class="k">Authentication</div><div class="v">local / reverse-proxy-aware access control</div>
+        <div class="k">Backup</div><div class="v">config + scenarios + history export</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="section-title">System information</div>
+<section class="card">
+  <div class="card-pad">
+    <div class="kv">
+      <div class="k">Application version</div><div class="v"><strong>v{{ app_version }}</strong></div>
+      <div class="k">Update channel</div><div class="v mono">origin/main</div>
+      <div class="k">Current local branch</div><div class="v mono">{{ update_status.branch or "unknown" }}</div>
+      <div class="k">Foundation</div><div class="v">Techkarma NetEm · MIT License</div>
+      <div class="k">Fork</div><div class="v">Maintained &amp; extended by Kristofer Wohlgang</div>
+    </div>
+  </div>
+</section>
+{% endblock %}

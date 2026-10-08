@@ -21,9 +21,23 @@ The current development direction is vendor-neutral: impairments are applied to 
 9. **Persistent history & export** — retain lab events across service restarts and export them as JSON or CSV.
 10. **Bounded packet capture** — short diagnostic PCAPs on configured WAN interfaces with duration, packet-count and snap-length limits.
 
-These capabilities live under the **Lab Tools** page. The initial implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the read-only API later.
+The current UI organizes these capabilities into dedicated operational workspaces rather than a single Lab Tools page. The implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the normalized API later.
 
-See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the implementation model and roadmap.
+See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture and [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the user-interface model and roadmap.
+
+## Enterprise UI
+
+The interface is organized around **operate / observe / configure** workflows:
+
+- **Overview** — live path topology, WAN health, injected conditions, throughput and recent events.
+- **WAN Links** — compact WAN status cards with focused configuration drawers for profile, quality, advanced impairment, faults and diagnostics.
+- **Scenarios** — reusable built-in/custom scenarios and active execution state.
+- **Traffic & Security** — EICAR/beacon tests, bounded PCAP capture and reserved workflows for controlled traffic generation and replay.
+- **Analytics** — rolling live throughput/PPS/impairment charts, generic SLA evaluation and persistent event history.
+- **Integrations** — REST, Prometheus and future multi-vendor SD-WAN adapters.
+- **Settings** — topology, access profiles, release/update management and other appliance-level configuration.
+
+The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
 
 ---
 
@@ -63,19 +77,19 @@ See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the implementation mode
   - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
 
 - **GUI preset editor**
-  - Preset baseline values can be edited from a dedicated Presets menu.
+  - Preset baseline values can be edited under Settings → Access Profiles.
   - Each preset can select its degradation behaviour: DIA, DSL, broadband, mobile or satellite.
   - Project defaults can be restored from the same screen.
 
 - **In-app updates**
-  - A dedicated Updates page checks the configured Git remote.
+  - Settings → Application & Updates checks the configured stable Git channel.
   - Updates are fast-forward only and refuse to run when tracked files have local changes.
   - After updating, the process restarts through systemd.
 
 - **Safer service behavior**
   - Flask debug mode is disabled for normal application startup.
 
-The technology presets are representative lab profiles rather than claims about any specific ISP or carrier. They are intended as useful starting points. Edit their nominal values in the Presets menu, then change each WAN's simulated condition with the quality slider.
+The technology presets are representative lab profiles rather than claims about any specific ISP or carrier. They are intended as useful starting points. Edit their nominal values under Settings → Access Profiles, then change each WAN's simulated condition from WAN Links.
 
 ---
 
@@ -138,7 +152,7 @@ Debian 12 is the recommended base.
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git
 
-# Optional: enables bounded PCAP capture from Lab Tools
+# Optional: enables bounded PCAP capture from Traffic & Security
 sudo apt install -y tcpdump
 ```
 

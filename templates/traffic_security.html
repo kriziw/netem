@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Traffic & Security · NetEm WAN Lab{% endblock %}
+{% block crumb %}Traffic &amp; Security{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Controlled test traffic</div>
+    <h1>Traffic &amp; security</h1>
+    <p class="page-description">Generate safe security telemetry, capture diagnostic traffic and prepare controlled load/replay workflows without turning the appliance into an unrestricted attack tool.</p>
+  </div>
+  <div class="page-actions">
+    <span class="status {{ 'good' if tcpdump_available else 'warn' }}">{{ "tcpdump detected" if tcpdump_available else "tcpdump unavailable" }}</span>
+  </div>
+</div>
+
+<div class="grid grid-3">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Anti-malware validation</div><div class="card-sub">Harmless industry-standard test artifact</div></div>
+      <span class="status good">Safe</span>
+    </div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">Serve the standard EICAR test string through NetEm to validate AV/security-policy detection paths without executing malware.</p>
+      <div class="actions" style="margin-top:13px">
+        <a class="btn btn-primary" href="{{ url_for('security_eicar') }}">Download EICAR artifact</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Benign beacon sink</div><div class="card-sub">C2-like callback visibility testing</div></div>
+      <span class="status good">Safe</span>
+    </div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">A no-command, no-payload HTTP endpoint that records callback events. Useful for testing telemetry and policy visibility from controlled clients.</p>
+      <div class="api-row"><code id="beacon-url">{{ request.url_root.rstrip('/') }}{{ url_for('security_beacon') }}</code></div>
+      <button class="btn" type="button" id="copy-beacon">Copy endpoint</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Availability stress</div><div class="card-sub">DDoS-impact simulation without attack traffic</div></div>
+      <span class="status info">Scenario</span>
+    </div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">Progressively reduce circuit quality/capacity to emulate the operational effect of saturation and validate SD-WAN failover decisions.</p>
+      <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:12px">
+        <input type="hidden" name="scenario_id" value="availability_stress">
+        <input type="hidden" name="return_to" value="traffic_security">
+        <label>Target WAN</label>
+        <select name="link_id">
+          {% for link in links %}<option value="{{ link.id }}">{{ link.label }} · {{ link.preset_name }}</option>{% endfor %}
+        </select>
+        <button class="btn btn-warning" type="submit" {% if global_runtime.scenario.active %}disabled{% endif %}>Run availability stress</button>
+      </form>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-2" style="margin-top:14px">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Bounded packet capture</div><div class="card-sub">Short PCAPs from configured WAN interfaces only</div></div>
+      {% if capture_state.active %}<span class="status info">Capturing</span>{% else %}<span class="status good">Ready</span>{% endif %}
+    </div>
+    <div class="card-pad">
+      {% if tcpdump_available %}
+        {% if capture_state.active %}
+          <div class="stat" style="min-height:auto;margin-bottom:12px">
+            <div class="stat-label">Active capture</div>
+            <div class="stat-value" style="font-size:16px">{{ capture_state.interface }}</div>
+            <div class="stat-sub">target {{ capture_state.link_id }} · up to {{ capture_state.duration }} seconds</div>
+          </div>
+          <form method="post" action="{{ url_for('lab_capture_stop') }}">
+            <input type="hidden" name="return_to" value="traffic_security">
+            <button class="btn btn-danger" type="submit">Stop capture</button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ url_for('lab_capture_start') }}">
+            <input type="hidden" name="return_to" value="traffic_security">
+            <div class="form-grid">
+              <div>
+                <label>WAN</label>
+                <select name="link_id" required>
+                  {% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}
+                </select>
+              </div>
+              <div>
+                <label>Capture side</label>
+                <select name="side"><option value="inner">Inner · appliance side</option><option value="outer">Outer · upstream side</option></select>
+              </div>
+              <div>
+                <label>Duration</label>
+                <select name="duration"><option value="15">15 seconds</option><option value="30" selected>30 seconds</option><option value="60">60 seconds</option><option value="120">120 seconds</option></select>
+              </div>
+            </div>
+            <div class="actions">
+              <button class="btn btn-primary" type="submit">Start capture</button>
+              {% if capture_state.download_ready %}<a class="btn" href="{{ url_for('lab_capture_download') }}">Download last PCAP</a>{% endif %}
+            </div>
+          </form>
+          <div class="field-help" style="margin-top:10px">Guardrails: 120s max · 20,000 packets max · 256-byte snap length · one capture at a time. Service requires CAP_NET_RAW.</div>
+        {% endif %}
+      {% else %}
+        <div class="empty-state"><strong>tcpdump not available</strong>Install tcpdump on the NetEm VM to enable bounded capture.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Controlled traffic generator</div><div class="card-sub">Reserved for bounded iperf3-based load profiles</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Patterns</div><div class="v">constant load · burst · microburst · connection pressure · PPS stress</div>
+        <div class="k">Controls</div><div class="v">direction · duration · rate cap · concurrent sessions</div>
+        <div class="k">Guardrails</div><div class="v">configured lab targets only · explicit allowlist · emergency stop</div>
+      </div>
+      <div class="field-help" style="margin-top:12px">The UI is intentionally reserving this capability now so traffic generation can be added without restructuring navigation later.</div>
+    </div>
+  </section>
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">PCAP replay</div><div class="card-sub">Sanitized traffic replay workflow</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Engine</div><div class="v">tcpreplay wrapper</div>
+        <div class="k">Input</div><div class="v">uploaded / captured sanitized PCAP</div>
+        <div class="k">Output</div><div class="v">selected configured lab interface</div>
+        <div class="k">Safety</div><div class="v">rate limit, duration limit, interface restriction</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Security event library</div><div class="card-sub">Future safe detection profiles</div></div>
+      <span class="future-tag">Planned</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">DNS</div><div class="v">NXDOMAIN bursts · randomized hostnames · beacon cadence</div>
+        <div class="k">Web</div><div class="v">controlled periodic callbacks · safe signature triggers</div>
+        <div class="k">IDS/IPS</div><div class="v">non-destructive test-signature library</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head">
+    <div><div class="card-title">Security &amp; capture event history</div><div class="card-sub">Recent safe test events and diagnostic captures</div></div>
+    <a class="btn btn-sm" href="{{ url_for('analytics') }}">All events</a>
+  </div>
+  <div class="card-pad">
+    <div class="timeline">
+      {% if events %}
+        {% for event in events[:16] %}
+          <div class="timeline-item">
+            <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+            <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+            <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+          </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state"><strong>No traffic/security events yet</strong>Use an EICAR test, beacon callback or packet capture to create events.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
+const copy = document.getElementById("copy-beacon");
+if (copy) copy.addEventListener("click", async () => {
+  const value = document.getElementById("beacon-url").textContent.trim();
+  try {
+    await navigator.clipboard.writeText(value);
+    copy.textContent = "Copied";
+    setTimeout(() => copy.textContent = "Copy endpoint", 1200);
+  } catch (_) {}
+});
+{% if capture_state.active %}
+setTimeout(() => window.location.reload(), 3000);
+{% endif %}
+</script>
+{% endblock %}

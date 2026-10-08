@@ -1,361 +1,123 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>NetEm · Setup</title>
-  <style>
-    :root {
-      --bg:#020617;
-      --card:rgba(15,23,42,.96);
-      --border:#1f2937;
-      --accent:#22e6b8;
-      --accent-soft:rgba(34,230,184,.12);
-      --text:#e5e7eb;
-      --muted:#9ca3af;
-      --danger:#ef4444;
-    }
-    * { box-sizing:border-box; }
-    body {
-      margin:0;
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      background:
-        radial-gradient(circle at top left,rgba(34,230,184,.16),transparent 60%),
-        radial-gradient(circle at bottom right,rgba(37,99,235,.15),transparent 60%),
-        var(--bg);
-      color:var(--text);
-    }
-    a { color:inherit; text-decoration:none; }
-    .layout { display:flex; min-height:100vh; }
-    .sidebar {
-      width:250px; padding:22px 20px; border-right:1px solid var(--border);
-      background:#020617; display:flex; flex-direction:column;
-    }
-    .sidebar-header { margin-bottom:26px; }
-    .brand { font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-    .brand span { color:var(--accent); }
-    .brand-sub {
-      margin-top:3px; font-size:.76rem; color:var(--muted);
-      letter-spacing:.12em; text-transform:uppercase;
-    }
-    .nav-title {
-      font-size:.72rem; color:var(--muted); text-transform:uppercase;
-      letter-spacing:.12em; margin-bottom:7px;
-    }
-    .nav-list { list-style:none; padding:0; margin:0; }
-    .nav-item { margin-bottom:4px; }
-    .nav-link {
-      display:flex; gap:9px; align-items:center; padding:8px 10px;
-      border-radius:999px; color:#cbd5e1; font-size:.86rem;
-    }
-    .nav-dot { width:7px; height:7px; border-radius:50%; background:#475569; }
-    .nav-item-active .nav-link {
-      background:var(--accent-soft); color:var(--accent); font-weight:600;
-    }
-    .nav-item-active .nav-dot { background:var(--accent); }
-    .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
-    .lab-badge {
-      display:inline-block; margin-bottom:7px; padding:3px 7px; border-radius:999px;
-      border:1px solid rgba(234,179,8,.45); background:rgba(234,179,8,.08);
-      color:#fde68a; font-size:.64rem; font-weight:700; letter-spacing:.10em;
-    }
-    .project-credit { margin-top:3px; line-height:1.3; font-size:.68rem; color:#64748b; }
-    .project-credit strong { color:#94a3b8; font-weight:600; }
-    .project-credit a { color:#94a3b8; text-decoration:underline; text-decoration-color:#475569; }
+{% extends "base.html" %}
+{% block title %}Topology Settings · NetEm WAN Lab{% endblock %}
+{% block crumb %}Settings / Topology{% endblock %}
 
-    .main { flex:1; padding:24px; }
-    .top {
-      display:flex; justify-content:space-between; align-items:flex-start;
-      gap:18px; margin-bottom:18px;
-    }
-    .title {
-      font-size:1.12rem; text-transform:uppercase;
-      letter-spacing:.12em; color:var(--muted);
-    }
-    .subtitle {
-      margin-top:5px; max-width:820px; font-size:.86rem;
-      line-height:1.45; color:var(--muted);
-    }
-    code {
-      font-size:.8rem; padding:1px 6px; border-radius:6px;
-      background:rgba(15,23,42,.9); border:1px solid var(--border);
-    }
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Settings</div>
+    <h1>Topology &amp; interfaces</h1>
+    <p class="page-description">Map the management interface and the transparent inner/outer interface pairs used for each emulated WAN. This is appliance setup, not a day-to-day lab control.</p>
+  </div>
+  <div class="page-actions"><a class="btn" href="{{ url_for('settings') }}">Back to settings</a></div>
+</div>
 
-    .btn {
-      border-radius:999px; padding:7px 14px; border:1px solid var(--border);
-      background:rgba(15,23,42,.95); color:#cbd5e1;
-      cursor:pointer; font-size:.82rem;
-    }
-    .btn-primary {
-      background:var(--accent); color:#020617;
-      border-color:var(--accent); font-weight:700;
-    }
-    .btn-danger {
-      color:#fecaca; border-color:rgba(239,68,68,.6);
-      background:rgba(239,68,68,.08);
-    }
-
-    .flash {
-      margin-bottom:10px; padding:9px 11px; border-radius:10px;
-      font-size:.82rem; border:1px solid var(--border);
-    }
-    .flash.success {
-      border-color:rgba(34,197,94,.7); color:#bbf7d0;
-      background:rgba(34,197,94,.08);
-    }
-    .flash.error {
-      border-color:rgba(239,68,68,.7); color:#fecaca;
-      background:rgba(239,68,68,.08);
-    }
-    .flash.info {
-      border-color:rgba(59,130,246,.7); color:#bfdbfe;
-      background:rgba(59,130,246,.08);
-    }
-
-    .card {
-      max-width:900px; padding:18px; border-radius:18px;
-      border:1px solid rgba(51,65,85,.85);
-      background:
-        radial-gradient(circle at top left,rgba(34,230,184,.10),transparent 55%),
-        var(--card);
-      box-shadow:0 20px 44px rgba(0,0,0,.48);
-    }
-    .card-title { font-size:1rem; font-weight:700; margin-bottom:4px; }
-    .card-sub {
-      font-size:.8rem; color:var(--muted); line-height:1.4; margin-bottom:16px;
-    }
-
-    .wan-grid {
-      display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px;
-    }
-    .wan-panel {
-      border:1px solid var(--border); border-radius:14px;
-      padding:14px; background:rgba(2,6,23,.48);
-    }
-    .wan-heading {
-      font-size:.9rem; font-weight:700; margin-bottom:12px;
-      display:flex; justify-content:space-between; align-items:center;
-    }
-    .wan-id {
-      color:#64748b; font-size:.7rem; font-family:ui-monospace,monospace;
-      font-weight:400;
-    }
-
-    label {
-      display:block; color:var(--muted); font-size:.76rem; margin-bottom:4px;
-    }
-    input[type="text"], select {
-      width:100%; padding:8px 9px; border-radius:9px;
-      border:1px solid var(--border); background:rgba(15,23,42,.9);
-      color:var(--text); margin-bottom:11px; font-size:.84rem;
-    }
-
-    .option-block {
-      margin-top:16px; padding-top:14px; border-top:1px solid var(--border);
-    }
-    .option-title { font-size:.86rem; font-weight:700; margin-bottom:7px; }
-    .check-row {
-      display:flex; align-items:flex-start; gap:9px;
-      margin:10px 0; color:#cbd5e1; font-size:.82rem;
-    }
-    .check-row input { margin-top:2px; }
-    .check-help {
-      display:block; margin-top:2px; color:var(--muted);
-      font-size:.73rem; line-height:1.35;
-    }
-
-    .form-actions {
-      margin-top:16px; display:flex; gap:8px; align-items:center; flex-wrap:wrap;
-    }
-    .warning-note {
-      margin-top:14px; max-width:900px; color:var(--muted);
-      font-size:.74rem; line-height:1.45;
-    }
-
-    @media (max-width:900px) {
-      .layout { flex-direction:column; }
-      .sidebar { width:100%; }
-      .sidebar-footer { display:none; }
-      .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
-      .main { padding:16px; }
-      .top { flex-direction:column; }
-      .wan-grid { grid-template-columns:1fr; }
-    }
-    .lab-watermark {
-      position:fixed; right:14px; bottom:10px; z-index:20;
-      padding:4px 8px; border-radius:999px;
-      border:1px solid rgba(71,85,105,.45);
-      background:rgba(2,6,23,.74); backdrop-filter:blur(6px);
-      color:#64748b; font-size:.60rem; letter-spacing:.04em;
-      pointer-events:none; user-select:none;
-    }
-  </style>
-</head>
-<body>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <div class="brand">NetEm <span>WAN Lab</span></div>
-      <div class="brand-sub">SD-WAN impairment emulator</div>
-    </div>
-
-    <div class="nav-title">Navigation</div>
-    <ul class="nav-list">
-      {% for item in nav_items %}
-      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
-        <a class="nav-link" href="{{ url_for(item.endpoint) }}">
-          <span class="nav-dot"></span>{{ item.label }}
-        </a>
-      </li>
-      {% endfor %}
-    </ul>
-
-    <div class="sidebar-footer">
-      <div class="lab-badge">LAB USE ONLY</div>
-      <div class="project-credit">Fork maintained &amp; extended by <strong>Kristofer Wohlgang</strong></div>
-      <div class="project-credit">Foundation: <a href="https://github.com/techkarma-no/techkarma-netem" target="_blank" rel="noopener">Techkarma NetEm</a></div>
-      <div class="project-credit">Version <strong>v{{ app_version }}</strong> · Powered by Linux tc/netem</div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="top">
-      <div>
-        <div class="title">Setup</div>
-        <div class="subtitle">
-          Define the transparent interface pair for each WAN. The application creates
-          <code>br-wan1</code> and <code>br-wan2</code> and can restore both the bridges
-          and the selected simulation state after restart.
-        </div>
+<form method="post" action="{{ url_for('setup') }}">
+  <div class="grid grid-2">
+    <section class="card">
+      <div class="card-head">
+        <div><div class="card-title">WAN 1 mapping</div><div class="card-sub">Transparent bridge br-wan1</div></div>
+        <span class="status info">br-wan1</span>
       </div>
-
-      <form method="post" action="{{ url_for('reset_config') }}"
-            onsubmit="return confirm('Reset configuration, delete bridges and clear qdiscs?');">
-        <button class="btn btn-danger" type="submit">Reset configuration</button>
-      </form>
-    </div>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-
-    <form method="post">
-      <div class="card">
-        <div class="card-title">WAN links</div>
-        <div class="card-sub">
-          Configure one or two transparent WAN paths. The inner interface faces the firewall/test device;
-          the outer interface faces the ISP/upstream side.
-        </div>
-
-        <div class="wan-grid">
-          <div class="wan-panel">
-            <div class="wan-heading">
-              <span>WAN 1</span>
-              <span class="wan-id">br-wan1</span>
-            </div>
-
-            <label for="wan1_name">Link alias</label>
-            <input
-              id="wan1_name"
-              name="wan1_name"
-              type="text"
-              value="{{ wan1.get('name', '') }}"
-              placeholder="e.g. Primary DIA"
-            />
-
-            <label for="wan1_inner">Inner interface · toward test device</label>
-            <select id="wan1_inner" name="wan1_inner">
-              <option value="">-- not used --</option>
+      <div class="card-pad">
+        <label>Display name</label>
+        <input type="text" name="wan1_name" value="{{ wan1.get('name','WAN 1') }}" placeholder="Primary DIA">
+        <div class="form-grid">
+          <div>
+            <label>Inner interface · appliance side</label>
+            <select name="wan1_inner">
+              <option value="">Not configured</option>
               {% for nic in all_nics %}
                 <option value="{{ nic }}" {% if wan1.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
               {% endfor %}
             </select>
-
-            <label for="wan1_outer">Outer interface · toward WAN</label>
-            <select id="wan1_outer" name="wan1_outer">
-              <option value="">-- not used --</option>
+          </div>
+          <div>
+            <label>Outer interface · upstream side</label>
+            <select name="wan1_outer">
+              <option value="">Not configured</option>
               {% for nic in all_nics %}
                 <option value="{{ nic }}" {% if wan1.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
               {% endfor %}
             </select>
           </div>
+        </div>
+        <div class="field-help">Traffic flows appliance → inner NIC → br-wan1 → outer NIC → upstream router.</div>
+      </div>
+    </section>
 
-          <div class="wan-panel">
-            <div class="wan-heading">
-              <span>WAN 2</span>
-              <span class="wan-id">br-wan2</span>
-            </div>
-
-            <label for="wan2_name">Link alias</label>
-            <input
-              id="wan2_name"
-              name="wan2_name"
-              type="text"
-              value="{{ wan2.get('name', '') }}"
-              placeholder="e.g. Backup 5G"
-            />
-
-            <label for="wan2_inner">Inner interface · toward test device</label>
-            <select id="wan2_inner" name="wan2_inner">
-              <option value="">-- not used --</option>
+    <section class="card">
+      <div class="card-head">
+        <div><div class="card-title">WAN 2 mapping</div><div class="card-sub">Transparent bridge br-wan2</div></div>
+        <span class="status info">br-wan2</span>
+      </div>
+      <div class="card-pad">
+        <label>Display name</label>
+        <input type="text" name="wan2_name" value="{{ wan2.get('name','WAN 2') }}" placeholder="Backup 5G">
+        <div class="form-grid">
+          <div>
+            <label>Inner interface · appliance side</label>
+            <select name="wan2_inner">
+              <option value="">Not configured</option>
               {% for nic in all_nics %}
                 <option value="{{ nic }}" {% if wan2.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
               {% endfor %}
             </select>
-
-            <label for="wan2_outer">Outer interface · toward WAN</label>
-            <select id="wan2_outer" name="wan2_outer">
-              <option value="">-- not used --</option>
+          </div>
+          <div>
+            <label>Outer interface · upstream side</label>
+            <select name="wan2_outer">
+              <option value="">Not configured</option>
               {% for nic in all_nics %}
                 <option value="{{ nic }}" {% if wan2.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
               {% endfor %}
             </select>
           </div>
         </div>
+        <div class="field-help">Traffic flows appliance → inner NIC → br-wan2 → outer NIC → upstream router.</div>
+      </div>
+    </section>
+  </div>
 
-        <div class="option-block">
-          <div class="option-title">Startup persistence</div>
-
-          <label class="check-row">
-            <input
-              type="checkbox"
-              name="restore_bridges_on_startup"
-              {% if config.get('restore_bridges_on_startup', true) %}checked{% endif %}>
-            <span>
-              Restore WAN bridges when the application starts
-              <span class="check-help">
-                Recreates the saved transparent WAN topology after a VM or service restart.
-              </span>
-            </span>
-          </label>
-
-          <label class="check-row">
-            <input
-              type="checkbox"
-              name="restore_shaping_on_startup"
-              {% if config.get('restore_shaping_on_startup', true) %}checked{% endif %}>
-            <span>
-              Restore selected presets, quality and custom state on startup
-              <span class="check-help">
-                Reapplies each WAN's saved access profile and simulation state after restart.
-              </span>
-            </span>
-          </label>
-        </div>
-
-        <div class="form-actions">
-          <button class="btn btn-primary" type="submit">Save & create bridges</button>
+  <div class="grid grid-2" style="margin-top:14px">
+    <section class="card">
+      <div class="card-head"><div><div class="card-title">Management plane</div><div class="card-sub">Kept separate from emulated WAN datapaths</div></div></div>
+      <div class="card-pad">
+        <div class="kv">
+          <div class="k">Management interface</div><div class="v mono">{{ config.get('mgmt_interface') or 'auto-detect' }}</div>
+          <div class="k">Purpose</div><div class="v">Web UI, SSH and Git updates</div>
         </div>
       </div>
-    </form>
+    </section>
 
-    <div class="warning-note">
-      Reset configuration removes the saved WAN mapping, deletes the NetEm bridges and clears active qdiscs.
-      Preset defaults can be managed separately from the Presets page.
-    </div>
-  </main>
-</div>
-<div class="lab-watermark">LAB USE ONLY · fork maintained & extended by Kristofer Wohlgang · foundation: Techkarma NetEm</div>
-</body>
-</html>
+    <section class="card">
+      <div class="card-head"><div><div class="card-title">Startup behavior</div><div class="card-sub">Persist topology and optionally reapply link conditions</div></div></div>
+      <div class="card-pad">
+        <label style="display:flex;gap:9px;align-items:flex-start;color:var(--text-soft);margin-bottom:12px">
+          <input type="checkbox" name="restore_bridges_on_startup" {% if config.get('restore_bridges_on_startup', True) %}checked{% endif %}>
+          <span><strong>Restore WAN bridges on application startup</strong><br><span class="field-help">Recommended for persistent lab appliances.</span></span>
+        </label>
+        <label style="display:flex;gap:9px;align-items:flex-start;color:var(--text-soft)">
+          <input type="checkbox" name="restore_shaping_on_startup" {% if config.get('restore_shaping_on_startup', True) %}checked{% endif %}>
+          <span><strong>Restore selected WAN profiles and quality</strong><br><span class="field-help">Reapply saved shaping after VM/service restart.</span></span>
+        </label>
+      </div>
+    </section>
+  </div>
+
+  <div class="actions" style="margin-top:14px">
+    <button class="btn btn-primary" type="submit">Save topology</button>
+    <a class="btn" href="{{ url_for('wan_links') }}">Cancel</a>
+  </div>
+</form>
+
+<section class="card" style="margin-top:22px;border-color:rgba(255,107,122,.2)">
+  <div class="card-head"><div><div class="card-title">Reset appliance configuration</div><div class="card-sub">Removes configured WAN bridges and clears qdiscs</div></div></div>
+  <div class="card-pad">
+    <p class="page-description" style="margin-top:0">Use only when rebuilding the NetEm topology. This removes the current configuration file and runtime bridge setup.</p>
+    <form method="post" action="{{ url_for('reset_config') }}" onsubmit="return confirm('Reset NetEm configuration and remove the WAN bridges?');">
+      <button class="btn btn-danger" type="submit">Reset configuration</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

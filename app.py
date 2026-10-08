@@ -41,6 +41,7 @@ UPDATE_BRANCH = "main"
 
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
+RUNTIME_EFFECTIVE = {}
 EVENT_LOG = []
 SCENARIO_STOP = threading.Event()
 SCENARIO_STATE = {
@@ -761,6 +762,13 @@ def apply_selected_profile(link: dict, presets: dict):
         )
 
     if ok_down and ok_up:
+        link_id = link.get("id") or link.get("bridge") or inner
+        RUNTIME_EFFECTIVE[link_id] = {
+            "effective": dict(effective),
+            "quality": int(link.get("quality", 100)),
+            "mode": link.get("mode", "quality"),
+            "updated_at": time.time(),
+        }
         return True, "OK", effective
 
     details = []
@@ -1343,52 +1351,25 @@ def run_scenario(link_id: str, scenario: dict):
         SCENARIO_STOP.clear()
 
 
-# ---------- Nav context ----------
 
-@app.context_processor
-def inject_nav():
-    cfg = load_config()
-    return {
-        "nav_items": [
-            {"id": "dashboard", "label": "Dashboard", "endpoint": "index"},
-            {"id": "lab", "label": "Lab Tools", "endpoint": "lab_tools"},
-            {"id": "presets", "label": "Presets", "endpoint": "presets"},
-            {"id": "updates", "label": "Updates", "endpoint": "updates"},
-            {"id": "setup", "label": "Setup", "endpoint": "setup"},
-        ],
-        "config": cfg,
-        "app_version": get_app_version(),
-    }
-
-
-# ---------- Routes ----------
-
-@app.route("/")
-def index():
-    cfg = load_config()
-
-    # Send to setup if no links configured
-    if not cfg.get("wan_links"):
-        return redirect(url_for("setup"))
-
-    mgmt = cfg.get("mgmt_interface") or guess_mgmt_interface()
-    if mgmt and not cfg.get("mgmt_interface"):
-        cfg["mgmt_interface"] = mgmt
-        save_config(cfg)
-
+def build_link_states(cfg: dict, include_qdisc=False):
+    """Build the common vendor-neutral WAN view model used across the UI."""
     presets = get_presets(cfg)
-    nic_states = []
+    sla_profile = get_sla_profile(cfg)
+    states = []
+
     for link in cfg.get("wan_links", []):
-        name = link.get("name", "WAN")
         inner = link.get("inner")
         if not inner:
             continue
 
+        link_id = link.get("id") or link.get("bridge") or inner
         outer = link.get("outer")
         preset_id = link.get("preset", "broadband")
         if preset_id not in presets:
             preset_id = next(iter(presets), "")
         preset = presets.get(preset_id, {})
+
         quality = max(0, min(100, int(link.get("quality", 100))))
         mode = link.get("mode", "quality")
         bandwidth_download = link.get("bandwidth_download_mbit")
@@ -1403,47 +1384,55 @@ def index():
             if bandwidth_upload is not None
             else int(round(float(preset.get("upload_mbit", 0.0))))
         )
-        if mode == "custom" and link.get("custom_profile"):
-            effective = {
-                "delay_ms": float(link["custom_profile"].get("delay_ms", 0.0)),
-                "jitter_ms": float(link["custom_profile"].get("jitter_ms", 0.0)),
-                "loss_pct": float(link["custom_profile"].get("loss_pct", 0.0)),
-                "download_mbit": int(round(float(link["custom_profile"].get("download_mbit", 0.0)))),
-                "upload_mbit": int(round(float(link["custom_profile"].get("upload_mbit", 0.0)))),
-                "loss_correlation_pct": float(link["custom_profile"].get("loss_correlation_pct", 0.0)),
-                "duplicate_pct": float(link["custom_profile"].get("duplicate_pct", 0.0)),
-                "corrupt_pct": float(link["custom_profile"].get("corrupt_pct", 0.0)),
-                "reorder_pct": float(link["custom_profile"].get("reorder_pct", 0.0)),
-            }
-        else:
-            effective = (
-                calculate_profile(
-                    preset,
-                    quality,
-                    bandwidth_download,
-                    bandwidth_upload,
-                )
-                if preset else {}
-            )
-            mode = "quality"
 
-        nic_states.append(
-            {
-                "id": link.get("id") or link.get("bridge") or inner,
-                "name": inner,
-                "outer": outer,
-                "label": name,
-                "preset_id": preset_id,
-                "quality": quality,
-                "mode": mode,
-                "bandwidth_download_mbit": bandwidth_download,
-                "bandwidth_upload_mbit": bandwidth_upload,
-                "nominal_download_mbit": nominal_download,
-                "nominal_upload_mbit": nominal_upload,
-                "quality_status": "Custom" if mode == "custom" else quality_status(quality),
-                "effective": effective,
-                "qdisc": get_qdisc_state(inner),
-                "outer_qdisc": get_qdisc_state(outer) if outer else {
+        configured_effective = get_effective_profile(link, presets)
+        runtime = RUNTIME_EFFECTIVE.get(link_id) or {}
+        effective = runtime.get("effective") or configured_effective
+        runtime_quality = runtime.get("quality", quality)
+        runtime_mode = runtime.get("mode", mode)
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
+        sla = evaluate_sla(effective, sla_profile, fault)
+
+        state = {
+            "id": link_id,
+            "label": link.get("name", "WAN"),
+            "name": inner,
+            "inner": inner,
+            "outer": outer,
+            "bridge": link.get("bridge"),
+            "preset_id": preset_id,
+            "preset_name": preset.get("name", preset_id),
+            "quality_model": preset.get("quality_model", "broadband"),
+            "quality": quality,
+            "runtime_quality": runtime_quality,
+            "mode": mode,
+            "runtime_mode": runtime_mode,
+            "quality_status": (
+                "Custom"
+                if runtime_mode == "custom"
+                else quality_status(runtime_quality)
+            ),
+            "bandwidth_download_mbit": bandwidth_download,
+            "bandwidth_upload_mbit": bandwidth_upload,
+            "nominal_download_mbit": nominal_download,
+            "nominal_upload_mbit": nominal_upload,
+            "configured_effective": configured_effective,
+            "effective": effective,
+            "fault": fault,
+            "sla": sla,
+            "mtu": {
+                "inner": get_interface_mtu(inner),
+                "outer": get_interface_mtu(outer),
+                "bridge": get_interface_mtu(link.get("bridge")),
+            },
+        }
+
+        if include_qdisc:
+            state["qdisc"] = get_qdisc_state(inner)
+            state["outer_qdisc"] = (
+                get_qdisc_state(outer)
+                if outer
+                else {
                     "raw": "",
                     "parsed": {
                         "kind": None,
@@ -1452,61 +1441,193 @@ def index():
                         "loss_pct": None,
                         "rate_mbit": None,
                     },
-                },
-            }
-        )
+                }
+            )
 
+        states.append(state)
+
+    return states
+
+
+def redirect_after(default_endpoint):
+    """Redirect form actions to a known UI endpoint without allowing open redirects."""
+    requested = request.form.get("return_to")
+    allowed = {
+        "overview",
+        "wan_links",
+        "scenarios",
+        "traffic_security",
+        "analytics",
+        "integrations",
+        "settings",
+        "setup",
+        "presets",
+        "updates",
+    }
+    endpoint = requested if requested in allowed else default_endpoint
+    return redirect(url_for(endpoint))
+
+
+# ---------- Nav context ----------
+
+@app.context_processor
+def inject_nav():
+    cfg = load_config()
+    active_fault_labels = [
+        f"{link_id}: {fault.replace('_', ' ')}"
+        for link_id, fault in ACTIVE_FAULTS.items()
+        if fault != "normal"
+    ]
+    return {
+        "nav_groups": [
+            {
+                "label": "Operate",
+                "items": [
+                    {"id": "overview", "label": "Overview", "endpoint": "overview", "icon": "overview"},
+                    {"id": "wan", "label": "WAN Links", "endpoint": "wan_links", "icon": "wan"},
+                    {"id": "scenarios", "label": "Scenarios", "endpoint": "scenarios", "icon": "scenario"},
+                    {"id": "traffic", "label": "Traffic & Security", "endpoint": "traffic_security", "icon": "shield"},
+                ],
+            },
+            {
+                "label": "Observe",
+                "items": [
+                    {"id": "analytics", "label": "Analytics", "endpoint": "analytics", "icon": "analytics"},
+                    {"id": "integrations", "label": "Integrations", "endpoint": "integrations", "icon": "plug"},
+                ],
+            },
+            {
+                "label": "Configure",
+                "items": [
+                    {"id": "settings", "label": "Settings", "endpoint": "settings", "icon": "settings"},
+                ],
+            },
+        ],
+        "config": cfg,
+        "app_version": get_app_version(),
+        "global_runtime": {
+            "scenario": scenario_snapshot(),
+            "active_fault_count": len(active_fault_labels),
+            "active_fault_labels": active_fault_labels,
+            "capture": capture_snapshot(),
+        },
+    }
+
+
+# ---------- Routes ----------
+
+@app.route("/")
+def overview():
+    cfg = load_config()
+    if not cfg.get("wan_links"):
+        return redirect(url_for("setup"))
+
+    mgmt = cfg.get("mgmt_interface") or guess_mgmt_interface()
+    if mgmt and not cfg.get("mgmt_interface"):
+        cfg["mgmt_interface"] = mgmt
+        save_config(cfg)
+
+    links = build_link_states(cfg)
+    healthy = sum(1 for link in links if link["sla"]["pass"])
     return render_template(
-        "index.html",
-        page="dashboard",
+        "overview.html",
+        page="overview",
         mgmt_interface=mgmt,
-        nic_states=nic_states,
-        wan_links=cfg.get("wan_links", []),
-        presets=presets,
+        links=links,
+        healthy_links=healthy,
+        events=list(reversed(EVENT_LOG[-12:])),
+        scenario_state=scenario_snapshot(),
+        capture_state=capture_snapshot(),
+    )
+
+
+# Backward-compatible endpoint name for older links/bookmarks.
+app.add_url_rule("/dashboard", endpoint="index", view_func=overview)
+
+
+@app.route("/wan")
+def wan_links():
+    cfg = load_config()
+    if not cfg.get("wan_links"):
+        return redirect(url_for("setup"))
+    return render_template(
+        "wan_links.html",
+        page="wan",
+        links=build_link_states(cfg, include_qdisc=True),
+        presets=get_presets(cfg),
         bandwidth_options=BANDWIDTH_OPTIONS,
+        quality_curves=QUALITY_CURVES,
     )
 
 
 @app.route("/lab")
 def lab_tools():
+    return redirect(url_for("scenarios"))
+
+
+@app.route("/scenarios")
+def scenarios():
     cfg = load_config()
-    presets = get_presets(cfg)
-    sla_profile = get_sla_profile(cfg)
-    links = cfg.get("wan_links", [])
-    telemetry = []
-    for link in links:
-        link_id = link.get("id") or link.get("bridge")
-        effective = get_effective_profile(link, presets)
-        fault = ACTIVE_FAULTS.get(link_id, "normal")
-        telemetry.append(
-            {
-                "id": link_id,
-                "name": link.get("name", "WAN"),
-                "inner": link.get("inner"),
-                "outer": link.get("outer"),
-                "bridge": link.get("bridge"),
-                "quality": int(link.get("quality", 100)),
-                "fault": fault,
-                "mtu": {
-                    "inner": get_interface_mtu(link.get("inner")),
-                    "outer": get_interface_mtu(link.get("outer")),
-                    "bridge": get_interface_mtu(link.get("bridge")),
-                },
-                "effective": effective,
-                "sla": evaluate_sla(effective, sla_profile, fault),
-            }
-        )
     return render_template(
-        "lab.html",
-        page="lab",
-        links=telemetry,
+        "scenarios.html",
+        page="scenarios",
+        links=build_link_states(cfg),
         scenarios=get_scenarios(cfg),
         custom_scenarios=cfg.get("custom_scenarios", []),
         scenario_state=scenario_snapshot(),
-        sla_profile=sla_profile,
+        events=list(reversed([
+            event for event in EVENT_LOG
+            if event.get("kind") in ("scenario", "scenario-config", "fault", "mtu")
+        ][-30:])),
+    )
+
+
+@app.route("/traffic-security")
+def traffic_security():
+    cfg = load_config()
+    return render_template(
+        "traffic_security.html",
+        page="traffic",
+        links=build_link_states(cfg),
         capture_state=capture_snapshot(),
         tcpdump_available=bool(shutil.which("tcpdump")),
-        events=list(reversed(EVENT_LOG[-60:])),
+        events=list(reversed([
+            event for event in EVENT_LOG
+            if event.get("kind") in ("capture", "security-test")
+        ][-25:])),
+    )
+
+
+@app.route("/analytics")
+def analytics():
+    cfg = load_config()
+    return render_template(
+        "analytics.html",
+        page="analytics",
+        links=build_link_states(cfg),
+        sla_profile=get_sla_profile(cfg),
+        events=list(reversed(EVENT_LOG[-80:])),
+    )
+
+
+@app.route("/integrations")
+def integrations():
+    return render_template(
+        "integrations.html",
+        page="integrations",
+    )
+
+
+@app.route("/settings")
+def settings():
+    cfg = load_config()
+    return render_template(
+        "settings.html",
+        page="settings",
+        mgmt_interface=cfg.get("mgmt_interface") or guess_mgmt_interface(),
+        link_count=len(cfg.get("wan_links", [])),
+        preset_count=len(get_presets(cfg)),
+        update_status=git_update_status(fetch=False),
     )
 
 
@@ -1528,7 +1649,7 @@ def lab_fault():
             flash(f"Runtime fault for {link_id}: {fault}.", "success")
         else:
             flash("Failed to apply runtime fault: " + msg, "error")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/scenario/start", methods=["POST"])
@@ -1543,15 +1664,15 @@ def lab_scenario_start():
 
     if not get_link(cfg, link_id):
         flash("Unknown WAN link.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
     if not scenario:
         flash("Unknown scenario.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     with RUNTIME_LOCK:
         if SCENARIO_STATE["active"]:
             flash("A scenario is already running.", "error")
-            return redirect(url_for("lab_tools"))
+            return redirect_after("scenarios")
         SCENARIO_STOP.clear()
         SCENARIO_STATE.update(
             {
@@ -1571,7 +1692,7 @@ def lab_scenario_start():
         daemon=True,
     ).start()
     flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/scenario/stop", methods=["POST"])
@@ -1579,7 +1700,7 @@ def lab_scenario_stop():
     if scenario_snapshot().get("active"):
         SCENARIO_STOP.set()
         flash("Scenario stop requested. The configured WAN profile will be restored.", "info")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/scenario/save", methods=["POST"])
@@ -1591,14 +1712,14 @@ def lab_scenario_save():
 
     if not name:
         flash("Scenario name is required.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     try:
         parsed = json.loads(raw_steps)
         steps = validate_scenario_steps(parsed)
     except (json.JSONDecodeError, ValueError) as exc:
         flash(f"Scenario definition is invalid: {exc}", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "scenario"
     scenario_id = f"custom_{slug}"
@@ -1618,7 +1739,7 @@ def lab_scenario_save():
     save_config(cfg)
     log_event("scenario-config", f'Saved custom scenario "{name[:80]}"')
     flash(f'Scenario "{name[:80]}" saved.', "success")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/scenario/delete", methods=["POST"])
@@ -1634,7 +1755,7 @@ def lab_scenario_delete():
         save_config(cfg)
         log_event("scenario-config", f"Deleted custom scenario {scenario_id}")
         flash("Custom scenario deleted.", "info")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/mtu", methods=["POST"])
@@ -1660,7 +1781,7 @@ def lab_mtu():
             )
         else:
             flash("Failed to change path MTU: " + msg, "error")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/sla", methods=["POST"])
@@ -1678,13 +1799,13 @@ def lab_sla():
         }
     except ValueError:
         flash("SLA thresholds must be numeric.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     cfg["sla_profile"] = profile
     save_config(cfg)
     log_event("sla-config", f'SLA profile updated: {profile["name"]}')
     flash("Generic SLA thresholds saved.", "success")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/history.json")
@@ -1722,7 +1843,7 @@ def lab_history_clear():
     except OSError:
         pass
     flash("Runtime event history cleared.", "info")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/capture/start", methods=["POST"])
@@ -1732,7 +1853,7 @@ def lab_capture_start():
     tcpdump = shutil.which("tcpdump")
     if not tcpdump:
         flash("tcpdump is not installed on the NetEm VM.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     cfg = load_config()
     link_id = request.form.get("link_id") or ""
@@ -1740,12 +1861,12 @@ def lab_capture_start():
     link = get_link(cfg, link_id)
     if not link or side not in ("inner", "outer"):
         flash("Invalid capture interface.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     ifname = link.get(side)
     if not ifname:
         flash("Selected WAN side has no interface.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
 
     try:
         duration = max(5, min(120, int(request.form.get("duration", "30"))))
@@ -1755,7 +1876,7 @@ def lab_capture_start():
     with RUNTIME_LOCK:
         if CAPTURE_STATE["active"]:
             flash("A packet capture is already running.", "error")
-            return redirect(url_for("lab_tools"))
+            return redirect_after("scenarios")
 
         CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
         filename = f"{int(time.time())}-{link_id}-{side}.pcap"
@@ -1776,7 +1897,7 @@ def lab_capture_start():
             )
         except OSError as exc:
             flash(f"Unable to start tcpdump: {exc}", "error")
-            return redirect(url_for("lab_tools"))
+            return redirect_after("scenarios")
 
         CAPTURE_STATE.update(
             {
@@ -1797,7 +1918,7 @@ def lab_capture_start():
     ).start()
     log_event("capture", f"Packet capture started on {ifname}", duration=duration)
     flash(f"Packet capture started on {ifname} for up to {duration} seconds.", "success")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/capture/stop", methods=["POST"])
@@ -1808,7 +1929,7 @@ def lab_capture_stop():
     if process and process.poll() is None:
         process.terminate()
         flash("Packet capture stop requested.", "info")
-    return redirect(url_for("lab_tools"))
+    return redirect_after("scenarios")
 
 
 @app.route("/lab/capture/download")
@@ -1817,38 +1938,33 @@ def lab_capture_download():
     path = state.get("path")
     if not path or not Path(path).exists():
         flash("No packet capture is available.", "error")
-        return redirect(url_for("lab_tools"))
+        return redirect_after("scenarios")
     return send_file(path, as_attachment=True, download_name=Path(path).name)
 
 
 @app.route("/api/v1/state")
 def api_state():
     cfg = load_config()
-    presets = get_presets(cfg)
-    sla_profile = get_sla_profile(cfg)
     links = []
-    for link in cfg.get("wan_links", []):
-        link_id = link.get("id") or link.get("bridge")
-        fault = ACTIVE_FAULTS.get(link_id, "normal")
-        effective = get_effective_profile(link, presets)
+    for link in build_link_states(cfg):
         links.append(
             {
-                "id": link_id,
-                "name": link.get("name", "WAN"),
-                "bridge": link.get("bridge"),
-                "inner": link.get("inner"),
-                "outer": link.get("outer"),
-                "preset": link.get("preset", "broadband"),
-                "quality": int(link.get("quality", 100)),
-                "mode": link.get("mode", "quality"),
-                "fault": fault,
-                "mtu": {
-                    "inner": get_interface_mtu(link.get("inner")),
-                    "outer": get_interface_mtu(link.get("outer")),
-                    "bridge": get_interface_mtu(link.get("bridge")),
-                },
-                "effective": effective,
-                "sla": evaluate_sla(effective, sla_profile, fault),
+                "id": link["id"],
+                "name": link["label"],
+                "bridge": link["bridge"],
+                "inner": link["inner"],
+                "outer": link["outer"],
+                "preset": link["preset_id"],
+                "preset_name": link["preset_name"],
+                "quality": link["runtime_quality"],
+                "configured_quality": link["quality"],
+                "mode": link["runtime_mode"],
+                "fault": link["fault"],
+                "nominal_download_mbit": link["nominal_download_mbit"],
+                "nominal_upload_mbit": link["nominal_upload_mbit"],
+                "mtu": link["mtu"],
+                "effective": link["effective"],
+                "sla": link["sla"],
             }
         )
     return jsonify(
@@ -1858,7 +1974,8 @@ def api_state():
             "links": links,
             "scenario": scenario_snapshot(),
             "capture": capture_snapshot(),
-            "sla_profile": sla_profile,
+            "sla_profile": get_sla_profile(cfg),
+            "events": EVENT_LOG[-20:],
         }
     )
 
@@ -1885,6 +2002,15 @@ def api_telemetry():
             }
         )
     return jsonify({"timestamp": time.time(), "links": links})
+
+
+@app.route("/api/v1/events")
+def api_events():
+    try:
+        limit = max(1, min(500, int(request.args.get("limit", "100"))))
+    except ValueError:
+        limit = 100
+    return jsonify({"timestamp": time.time(), "events": EVENT_LOG[-limit:]})
 
 
 @app.route("/metrics")
@@ -2003,7 +2129,7 @@ def updates():
 
     return render_template(
         "updates.html",
-        page="updates",
+        page="settings",
         update_status=status,
         restarting=restarting,
     )
@@ -2105,7 +2231,7 @@ def setup():
 
         if wan_links:
             flash("WAN links saved and bridges created.", "success")
-            return redirect(url_for("index"))
+            return redirect_after("wan_links")
         else:
             flash("No WAN links configured – please select at least one inner/outer pair.", "info")
             return redirect(url_for("setup"))
@@ -2123,7 +2249,7 @@ def setup():
 
     return render_template(
         "setup.html",
-        page="setup",
+        page="settings",
         all_nics=setup_nics,
         config=cfg,
         wan1=links_by_id.get("wan1", {}),
@@ -2172,7 +2298,7 @@ def configure():
     preset = presets.get(preset_id)
     if not preset:
         flash("Unknown preset.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     link = next(
         (
@@ -2184,7 +2310,7 @@ def configure():
     )
     if not link:
         flash("Unknown WAN link.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     link["preset"] = preset_id
     link["quality"] = quality
@@ -2280,7 +2406,7 @@ def configure():
     else:
         flash("Failed to apply WAN profile: " + msg, "error")
 
-    return redirect(url_for("index"))
+    return redirect_after("wan_links")
 
 @app.route("/presets", methods=["GET", "POST"])
 def presets():
@@ -2338,7 +2464,7 @@ def presets():
 
     return render_template(
         "presets.html",
-        page="presets",
+        page="settings",
         presets=current,
         quality_models=QUALITY_MODELS,
     )
@@ -2363,7 +2489,7 @@ def clear():
     outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
     if not ifname:
         flash("Missing interface name.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     clear_qdisc(ifname)
     if outer_ifname:
@@ -2377,7 +2503,7 @@ def clear():
         save_config(cfg)
 
     flash("Cleared WAN shaping.", "info")
-    return redirect(url_for("index"))
+    return redirect_after("wan_links")
 
 
 if __name__ == "__main__":
