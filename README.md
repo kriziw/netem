@@ -6,6 +6,22 @@ A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failov
 
 This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
 
+## Resilience platform: top 5
+
+The current development direction is vendor-neutral: impairments are applied to the network path itself rather than relying on any one SD-WAN vendor's API.
+
+1. **Scenario engine** — repeatable brownout, failover, one-way failure and availability-stress sequences.
+2. **Runtime fault injection** — bidirectional or one-way blackholes while Ethernet link state remains up.
+3. **Advanced packet impairments** — correlated loss, packet duplication, corruption and reordering in addition to delay/jitter/loss/bandwidth.
+4. **Live observability + vendor-neutral integration** — live interface telemetry, runtime event history, JSON state/telemetry APIs and Prometheus metrics.
+5. **Safe security & traffic events** — harmless EICAR delivery, a benign beacon callback sink and a DDoS-impact scenario that simulates availability degradation without generating attack traffic.
+
+These capabilities live under the **Lab Tools** page. The initial implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the read-only API later.
+
+See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the implementation model and roadmap.
+
+---
+
 ## What this fork adds
 
 - **Persistent WAN topology**
