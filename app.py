@@ -2298,7 +2298,7 @@ def configure():
     preset = presets.get(preset_id)
     if not preset:
         flash("Unknown preset.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     link = next(
         (
@@ -2310,7 +2310,7 @@ def configure():
     )
     if not link:
         flash("Unknown WAN link.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     link["preset"] = preset_id
     link["quality"] = quality
@@ -2406,7 +2406,7 @@ def configure():
     else:
         flash("Failed to apply WAN profile: " + msg, "error")
 
-    return redirect(url_for("index"))
+    return redirect_after("wan_links")
 
 @app.route("/presets", methods=["GET", "POST"])
 def presets():
@@ -2489,7 +2489,7 @@ def clear():
     outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
     if not ifname:
         flash("Missing interface name.", "error")
-        return redirect(url_for("index"))
+        return redirect_after("wan_links")
 
     clear_qdisc(ifname)
     if outer_ifname:
@@ -2503,7 +2503,7 @@ def clear():
         save_config(cfg)
 
     flash("Cleared WAN shaping.", "info")
-    return redirect(url_for("index"))
+    return redirect_after("wan_links")
 
 
 if __name__ == "__main__":
