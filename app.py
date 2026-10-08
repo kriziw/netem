@@ -665,53 +665,67 @@ def reset_config():
 @app.route("/configure", methods=["POST"])
 def configure():
     """
-    Apply WAN impairment settings.
-
-    Delay, jitter and loss are applied on the inner interface. Download
-    bandwidth is limited on the inner interface (traffic toward the test
-    device) and upload bandwidth on the outer interface (traffic toward WAN).
+    Apply a persisted access preset at the requested quality level.
     """
-    ifname = request.form.get("itf") or request.args.get("itf")
-    outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
-    if not ifname:
-        flash("Missing interface name.", "error")
+    link_id = request.form.get("link_id") or ""
+    preset_id = request.form.get("preset_id") or ""
+
+    try:
+        quality = int(request.form.get("quality", "100"))
+    except ValueError:
+        quality = 100
+    quality = max(0, min(100, quality))
+
+    cfg = load_config()
+    presets = get_presets(cfg)
+    preset = presets.get(preset_id)
+    if not preset:
+        flash("Unknown preset.", "error")
         return redirect(url_for("index"))
 
-    def parse_float(field: str, default: float = 0.0):
-        val = request.form.get(field)
-        if val is None or val == "":
-            return default
-        try:
-            return float(val)
-        except ValueError:
-            return default
+    link = next(
+        (
+            item
+            for item in cfg.get("wan_links", [])
+            if (item.get("id") or item.get("bridge")) == link_id
+        ),
+        None,
+    )
+    if not link:
+        flash("Unknown WAN link.", "error")
+        return redirect(url_for("index"))
 
-    delay_ms = parse_float("delay_ms", 0.0)
-    jitter_ms = parse_float("jitter_ms", 0.0)
-    loss_pct = parse_float("loss_pct", 0.0)
-    download_mbit = parse_float("download_mbit", parse_float("rate_mbit", 0.0))
-    upload_mbit = parse_float("upload_mbit", download_mbit)
+    inner = link.get("inner")
+    outer = link.get("outer")
+    if not inner:
+        flash("WAN link has no inner interface.", "error")
+        return redirect(url_for("index"))
+
+    effective = calculate_profile(preset, quality)
 
     ok_down, msg_down = apply_netem(
-        ifname, delay_ms, jitter_ms, loss_pct, download_mbit
+        inner,
+        effective["delay_ms"],
+        effective["jitter_ms"],
+        effective["loss_pct"],
+        effective["download_mbit"],
     )
 
     ok_up, msg_up = True, "not configured"
-    if outer_ifname:
-        ok_up, msg_up = apply_netem(outer_ifname, 0.0, 0.0, 0.0, upload_mbit)
+    if outer:
+        ok_up, msg_up = apply_netem(
+            outer, 0.0, 0.0, 0.0, effective["upload_mbit"]
+        )
 
     if ok_down and ok_up:
-        cfg = load_config()
-        shaping = cfg.setdefault("shaping_profiles", {})
-        shaping[ifname] = {
-            "delay_ms": delay_ms,
-            "jitter_ms": jitter_ms,
-            "loss_pct": loss_pct,
-            "download_mbit": download_mbit,
-            "upload_mbit": upload_mbit,
-        }
+        link["preset"] = preset_id
+        link["quality"] = quality
         save_config(cfg)
-        flash("Applied WAN profile.", "success")
+        flash(
+            f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
+            f'at {quality}% ({quality_status(quality)}).',
+            "success",
+        )
     else:
         details = []
         if not ok_down:
@@ -721,6 +735,66 @@ def configure():
         flash("Failed to apply WAN profile: " + "; ".join(details), "error")
 
     return redirect(url_for("index"))
+
+
+@app.route("/presets", methods=["GET", "POST"])
+def presets():
+    cfg = load_config()
+    current = get_presets(cfg)
+
+    if request.method == "POST":
+        updated = {}
+        for preset_id, existing in current.items():
+            def field_float(field, default):
+                value = request.form.get(f"{preset_id}_{field}")
+                if value is None or value == "":
+                    return float(default)
+                try:
+                    return max(0.0, float(value))
+                except ValueError:
+                    return float(default)
+
+            updated[preset_id] = {
+                "name": (
+                    request.form.get(f"{preset_id}_name")
+                    or existing.get("name")
+                    or preset_id
+                ).strip(),
+                "delay_ms": field_float("delay_ms", existing.get("delay_ms", 0.0)),
+                "jitter_ms": field_float(
+                    "jitter_ms", existing.get("jitter_ms", 0.0)
+                ),
+                "loss_pct": min(
+                    100.0,
+                    field_float("loss_pct", existing.get("loss_pct", 0.0)),
+                ),
+                "download_mbit": field_float(
+                    "download_mbit", existing.get("download_mbit", 0.0)
+                ),
+                "upload_mbit": field_float(
+                    "upload_mbit", existing.get("upload_mbit", 0.0)
+                ),
+            }
+
+        cfg["presets"] = updated
+        save_config(cfg)
+        flash("Presets saved.", "success")
+        return redirect(url_for("presets"))
+
+    return render_template(
+        "presets.html",
+        page="presets",
+        presets=current,
+    )
+
+
+@app.route("/presets/reset", methods=["POST"])
+def reset_presets():
+    cfg = load_config()
+    cfg["presets"] = json.loads(json.dumps(DEFAULT_PRESETS))
+    save_config(cfg)
+    flash("Preset defaults restored.", "info")
+    return redirect(url_for("presets"))
 
 
 @app.route("/clear", methods=["POST"])
