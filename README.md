@@ -2,6 +2,8 @@
 
 A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failover labs.
 
+> **Lab use only.** This fork is developed and maintained by **Kristofer Wohlgang** for network architecture and SD-WAN lab use.
+
 This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
 
 ## What this fork adds
@@ -254,11 +256,11 @@ The preset table defines the **100% / nominal** state. The Dashboard stores one 
 | 1–24% | Critical |
 | 0% | Down |
 
-As quality is reduced, the emulator uses a **staged, access-specific curve**. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
+As quality is reduced, the emulator uses a **staged, access-specific curve with exponential easing between breakpoints**. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
 
 The model deliberately avoids changing every metric at the same time or by the same percentage. For example:
 
-- DIA remains nearly unchanged at high and medium quality; jitter moves before meaningful packet loss or bandwidth loss.
+- DIA remains very clean while healthy, but degradation becomes deliberately steep once quality falls into the poor range. With the default 1 Gbit/s DIA preset, 40% quality is approximately 40 ms delay, 18 ms jitter, 3% loss and 350/350 Mbit/s.
 - DSL can show rising jitter/errors before a substantial line-rate reduction.
 - Shared broadband tends to show queueing/jitter before material loss.
 - 4G/5G capacity and jitter typically move earlier as RF conditions or congestion worsen; sustained loss becomes prominent later.
@@ -385,4 +387,4 @@ If you are looking for the original project or its appliance offering, please re
 
 The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
-The upstream attribution above is retained to make the origin of the fork and subsequent changes clear.
+The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI also identifies the project as lab-use software developed by Kristofer Wohlgang and credits Techkarma NetEm as its foundation.
