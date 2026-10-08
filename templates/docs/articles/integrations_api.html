@@ -1,0 +1,73 @@
+
+<h2 id="principle">Vendor-neutral integration model</h2>
+<p>The core API describes what NetEm is doing without depending on Fortinet, Cisco, Palo Alto or another vendor. External tools can consume that state directly, and future vendor adapters can normalize appliance telemetry into a common model.</p>
+
+<h2 id="state-api">GET /api/v1/state</h2>
+<p>This is the primary high-level state endpoint. It returns application version, WAN definitions, runtime-effective impairment, configured quality, current fault, MTU, expected SLA, scenario state, capture state and recent events.</p>
+<pre>curl -s http://NETEM:8081/api/v1/state | python3 -m json.tool</pre>
+<p>Important WAN fields include:</p>
+<div class="docs-table"><table>
+<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td><code>id</code></td><td>Stable WAN identifier such as <code>wan1</code>.</td></tr>
+<tr><td><code>preset</code> / <code>preset_name</code></td><td>Selected access technology.</td></tr>
+<tr><td><code>configured_quality</code></td><td>Persisted quality slider value.</td></tr>
+<tr><td><code>quality</code></td><td>Current runtime-effective quality, including scenario stages.</td></tr>
+<tr><td><code>mode</code></td><td>Current quality/custom runtime mode.</td></tr>
+<tr><td><code>effective</code></td><td>Delay, jitter, loss, rate and advanced impairment values in effect.</td></tr>
+<tr><td><code>fault</code></td><td>Current runtime fault state.</td></tr>
+<tr><td><code>sla</code></td><td>Expected pass/fail result and individual checks.</td></tr>
+<tr><td><code>mtu</code></td><td>Current inner/outer/bridge MTU values.</td></tr>
+</tbody></table></div>
+
+<h2 id="telemetry-api">GET /api/v1/telemetry</h2>
+<p>This endpoint exposes cumulative Linux interface counters. Consumers calculate rates by taking deltas over time.</p>
+<pre>curl -s http://NETEM:8081/api/v1/telemetry | python3 -m json.tool</pre>
+<p>Each WAN contains both raw <code>inner</code>/<code>outer</code> counters and a preferred directional <code>traffic</code> view:</p>
+<ul>
+  <li><code>traffic.download</code> — inner-interface TX bytes/packets toward the appliance.</li>
+  <li><code>traffic.upload</code> — outer-interface TX bytes/packets toward the upstream router.</li>
+</ul>
+<div class="docs-note"><strong>Counters are cumulative.</strong> A single response does not contain Mbit/s. Sample twice and divide the byte delta by elapsed time, or use the built-in live UI.</div>
+
+<h2 id="events-api">GET /api/v1/events</h2>
+<p>Returns persistent runtime events. The optional <code>limit</code> query parameter is bounded to 1–500.</p>
+<pre>curl -s "http://NETEM:8081/api/v1/events?limit=50"</pre>
+<p>Event objects contain a Unix timestamp, event kind, human-readable message and structured details.</p>
+
+<h2 id="prometheus">GET /metrics</h2>
+<p>The Prometheus endpoint exports configured quality, runtime-fault state and raw RX/TX byte counters for each inner/outer interface. It is intended for external monitoring and long-term retention; Prometheus is not required for NetEm itself.</p>
+<pre>curl -s http://NETEM:8081/metrics</pre>
+
+<h2 id="history-downloads">History downloads</h2>
+<ul>
+  <li><code>GET /lab/history.json</code> — JSON export of retained events.</li>
+  <li><code>GET /lab/history.csv</code> — CSV export suitable for spreadsheets or analysis tools.</li>
+</ul>
+
+<h2 id="security-endpoints">Safe security endpoints</h2>
+<ul>
+  <li><code>GET /lab/security/eicar.txt</code> — harmless EICAR test artifact.</li>
+  <li><code>GET|POST /lab/security/beacon</code> — benign callback sink returning HTTP 204.</li>
+</ul>
+
+<h2 id="vendor-adapters">Future vendor adapters</h2>
+<p>The intended adapter output is a common model containing member health, observed latency/jitter/loss, SLA state and selected path. A Fortinet adapter and a Cisco adapter should therefore feed the same UI model rather than creating vendor-specific dashboard pages.</p>
+<div class="docs-flow">vendor API / manager
+       │
+       ▼
+optional adapter
+       │
+       ▼
+normalized member model
+       │
+       ├── health
+       ├── latency / jitter / loss
+       ├── SLA state
+       └── selected path
+       │
+       ▼
+Analytics: injected vs observed</div>
+
+<h2 id="api-stability">API use guidance</h2>
+<p>Prefer the normalized high-level fields in <code>/api/v1/state</code> and directional <code>traffic</code> object in <code>/api/v1/telemetry</code>. Raw counters and Linux interface names remain useful for diagnostics but are more tightly coupled to the underlying topology.</p>

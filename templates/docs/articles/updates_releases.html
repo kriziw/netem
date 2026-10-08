@@ -1,0 +1,55 @@
+
+<h2 id="stable-channel">Stable update channel</h2>
+<p>The in-app updater always compares the installed checkout with <code>origin/main</code>. It does this regardless of the local branch name. This prevents older installations from becoming stranded when an old feature branch is merged and deleted.</p>
+
+<h2 id="status">What the Updates page shows</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Field</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>Installed version</td><td>Value from local <code>version.txt</code>.</td></tr>
+<tr><td>Stable version</td><td><code>version.txt</code> read from <code>origin/main</code>.</td></tr>
+<tr><td>Available commits</td><td>Commit count in <code>HEAD..origin/main</code>.</td></tr>
+<tr><td>Local-only commits</td><td>Commit count in <code>origin/main..HEAD</code>.</td></tr>
+<tr><td>Working tree</td><td>Whether tracked application files have local changes.</td></tr>
+</tbody></table></div>
+
+<h2 id="check">Check stable channel</h2>
+<p><strong>Check stable channel</strong> performs a Git fetch of <code>origin main</code>, refreshes the remote version and recalculates ahead/behind state.</p>
+
+<h2 id="install">Install update</h2>
+<p>Updates are fast-forward only. The updater refuses to install when:</p>
+<ul>
+  <li>tracked application files are modified;</li>
+  <li>the local checkout and <code>origin/main</code> have diverged;</li>
+  <li>the stable remote branch cannot be found;</li>
+  <li>Git fetch/merge fails.</li>
+</ul>
+<p>On success, NetEm performs <code>git merge --ff-only origin/main</code>, then exits intentionally. A correctly configured systemd unit with <code>Restart=on-failure</code> starts the updated application again.</p>
+
+<h2 id="permissions">Repository ownership</h2>
+<p>The service runs as <code>techkarma</code>, so that user must be able to write the repository when the in-app updater fetches and fast-forwards. If manual Git commands are run as root, root-owned objects can be created under <code>.git/objects</code> and later block the service user.</p>
+<p>Preferred manual Git pattern:</p>
+<pre>runuser -u techkarma -- git -C /opt/techkarma-netem status
+runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin</pre>
+<p>If ownership has already become inconsistent:</p>
+<pre>systemctl stop techkarma-netem
+chown -R techkarma:techkarma /opt/techkarma-netem
+runuser -u techkarma -- git -C /opt/techkarma-netem status
+runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin
+systemctl start techkarma-netem</pre>
+<div class="docs-note"><strong>Design principle:</strong> system administration can be done as root, but repository/application-file operations should be performed as the service owner.</div>
+
+<h2 id="release-please">Release Please</h2>
+<p>The repository uses Release Please to manage semantic versions and release changelog PRs. The version source is <code>version.txt</code>; release configuration lives in <code>release-please-config.json</code> and <code>.release-please-manifest.json</code>.</p>
+<div class="docs-table"><table>
+<thead><tr><th>Commit convention</th><th>Typical release effect</th></tr></thead>
+<tbody>
+<tr><td><code>fix:</code></td><td>Patch release</td></tr>
+<tr><td><code>feat:</code></td><td>Minor release</td></tr>
+<tr><td>Breaking change</td><td>Major release</td></tr>
+<tr><td><code>docs:</code>, <code>chore:</code>, etc.</td><td>Included in changelog policy as configured; does not normally imply a feature bump by itself</td></tr>
+</tbody></table></div>
+<p>After qualifying changes reach <code>main</code>, Release Please prepares/updates a release PR. Merging that release PR updates the version/changelog and creates the corresponding tag/GitHub release.</p>
+
+<h2 id="manual-preview">Testing an unmerged feature branch</h2>
+<p>The in-app updater intentionally follows <code>main</code>, so it will not install an unmerged feature branch. For a one-time preview, stop the service and switch branches manually as <code>techkarma</code>, then restart the service. Return to <code>main</code> when testing is complete.</p>

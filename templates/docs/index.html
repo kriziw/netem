@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Documentation · NetEm WAN Lab{% endblock %}
+{% block crumb %}Documentation{% endblock %}
+
+{% block content %}
+<div class="docs-hero">
+  <div class="eyebrow">In-app wiki</div>
+  <h1>NetEm WAN Lab documentation</h1>
+  <p class="page-description">Operational guidance for every current function in the platform: topology, WAN impairment, scenarios, safe traffic/security tests, live analytics, APIs, updates and troubleshooting.</p>
+  <div class="docs-search">
+    <input id="docs-search" type="text" placeholder="Search documentation… e.g. blackhole, MTU, throughput, capture, API" autocomplete="off">
+  </div>
+</div>
+
+<div id="docs-catalog">
+  {% for group in docs_pages|groupby('category') %}
+    <div class="docs-category" data-doc-category>{{ group.grouper }}</div>
+    <div class="grid grid-3" data-doc-grid>
+      {% for item in group.list %}
+      <a class="docs-card" data-doc-card
+         data-search="{{ (item.title ~ ' ' ~ item.summary ~ ' ' ~ item.keywords ~ ' ' ~ item.category)|lower }}"
+         href="{{ url_for('documentation_page', slug=item.slug) }}">
+        <div class="docs-card-title">{{ item.title }}</div>
+        <div class="docs-card-summary">{{ item.summary }}</div>
+        <div class="docs-card-foot">Open guide →</div>
+      </a>
+      {% endfor %}
+    </div>
+  {% endfor %}
+  <div class="docs-no-results" id="docs-no-results">No documentation pages match that search.</div>
+</div>
+
+<div class="grid grid-3" style="margin-top:22px">
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">New to the lab?</div><div class="card-sub">Recommended starting sequence</div></div></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">1</div><div class="v"><a href="{{ url_for('documentation_page', slug='getting-started') }}">Getting started</a></div>
+        <div class="k">2</div><div class="v"><a href="{{ url_for('documentation_page', slug='architecture') }}">Architecture & traffic direction</a></div>
+        <div class="k">3</div><div class="v"><a href="{{ url_for('documentation_page', slug='wan-links') }}">WAN Links</a></div>
+        <div class="k">4</div><div class="v"><a href="{{ url_for('documentation_page', slug='scenarios') }}">Scenarios</a></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Something not working?</div><div class="card-sub">Use the runtime diagnostics guide</div></div></div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">Start with the troubleshooting decision tree for zero throughput, unexpected shaping, Git permission failures, packet capture and service startup issues.</p>
+      <a class="btn" style="margin-top:12px" href="{{ url_for('documentation_page', slug='troubleshooting') }}">Open troubleshooting</a>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">API consumer?</div><div class="card-sub">Vendor-neutral integration surface</div></div></div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">See endpoint semantics, directional telemetry, state models and Prometheus metrics before integrating external dashboards or SD-WAN adapters.</p>
+      <a class="btn" style="margin-top:12px" href="{{ url_for('documentation_page', slug='integrations-api') }}">Open API reference</a>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const input = document.getElementById("docs-search");
+  const cards = [...document.querySelectorAll("[data-doc-card]")];
+  const grids = [...document.querySelectorAll("[data-doc-grid]")];
+  const noResults = document.getElementById("docs-no-results");
+
+  function filter() {
+    const query = input.value.trim().toLowerCase();
+    let visible = 0;
+    cards.forEach(card => {
+      const show = !query || card.dataset.search.includes(query);
+      card.style.display = show ? "" : "none";
+      if (show) visible++;
+    });
+    grids.forEach(grid => {
+      const heading = grid.previousElementSibling;
+      const hasVisible = [...grid.querySelectorAll("[data-doc-card]")].some(card => card.style.display !== "none");
+      grid.style.display = hasVisible ? "" : "none";
+      if (heading && heading.hasAttribute("data-doc-category")) heading.style.display = hasVisible ? "" : "none";
+    });
+    noResults.style.display = visible ? "none" : "block";
+  }
+
+  input.addEventListener("input", filter);
+  const params = new URLSearchParams(location.search);
+  if (params.get("q")) {
+    input.value = params.get("q");
+    filter();
+  }
+})();
+</script>
+{% endblock %}

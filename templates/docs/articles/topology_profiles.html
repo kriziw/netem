@@ -1,0 +1,52 @@
+
+<h2 id="topology-settings">Topology & interfaces</h2>
+<p>Open <strong>Settings → Topology &amp; interfaces</strong> to define the physical/virtual NIC pairs used by WAN1 and WAN2. The setup page excludes loopback, the detected management NIC and existing <code>br-*</code> bridge devices from the selectable WAN NIC list.</p>
+
+<h3 id="mapping">Map each WAN</h3>
+<p>For each WAN, provide:</p>
+<ul>
+  <li><strong>Display name</strong> — human-readable label such as Primary DIA or Backup 5G.</li>
+  <li><strong>Inner interface</strong> — interface facing the firewall/SD-WAN appliance.</li>
+  <li><strong>Outer interface</strong> — interface facing the ISP/upstream router.</li>
+</ul>
+<p>Saving topology creates <code>br-wan1</code> and/or <code>br-wan2</code>, enslaves the selected ports and brings the bridge up.</p>
+
+<h3 id="editing-topology">What happens when topology is edited</h3>
+<p>When you save a changed topology, NetEm clears qdiscs and removes the old bridges first, then recreates the new mapping. It preserves the previous WAN's selected profile, quality, mode, custom impairment and bandwidth overrides where possible.</p>
+<div class="docs-warning"><strong>Traffic interruption:</strong> changing topology is a dataplane operation. Do not edit interface mapping during an active production-like lab test.</div>
+
+<h2 id="startup">Startup restore controls</h2>
+<ul>
+  <li><strong>Restore WAN bridges on application startup</strong> recreates the transparent bridges after service/VM restart.</li>
+  <li><strong>Restore selected WAN profiles and quality</strong> reapplies persisted shaping after the bridge exists.</li>
+</ul>
+<p>Both are recommended when NetEm is used as a persistent lab appliance.</p>
+
+<h2 id="reset-config">Reset appliance configuration</h2>
+<p><strong>Reset configuration</strong> clears qdiscs, removes configured bridges and deletes <code>config.json</code>. Use it only when rebuilding the appliance topology from scratch.</p>
+
+<h2 id="profiles">Access profiles</h2>
+<p>Open <strong>Settings → Access Profiles</strong> to edit the nominal 100% baseline for each technology. A profile contains a name, quality behavior model, latency, jitter, packet loss and nominal download/upload bandwidth.</p>
+
+<h3 id="defaults">Project defaults</h3>
+<div class="docs-table"><table>
+<thead><tr><th>Profile</th><th>Latency</th><th>Jitter</th><th>Loss</th><th>Down / Up</th><th>Quality model</th></tr></thead>
+<tbody>
+<tr><td>DIA</td><td>5 ms</td><td>1 ms</td><td>0%</td><td>1000 / 1000 Mbit/s</td><td>DIA</td></tr>
+<tr><td>DSL</td><td>25 ms</td><td>8 ms</td><td>0.1%</td><td>100 / 20</td><td>DSL</td></tr>
+<tr><td>Broadband</td><td>15 ms</td><td>5 ms</td><td>0.1%</td><td>300 / 50</td><td>Broadband</td></tr>
+<tr><td>4G</td><td>45 ms</td><td>20 ms</td><td>0.5%</td><td>80 / 20</td><td>Mobile</td></tr>
+<tr><td>5G</td><td>20 ms</td><td>8 ms</td><td>0.2%</td><td>300 / 50</td><td>Mobile</td></tr>
+<tr><td>Satellite</td><td>300 ms</td><td>30 ms</td><td>0.5%</td><td>100 / 20</td><td>Satellite</td></tr>
+</tbody></table></div>
+<p>These are representative lab starting points, not claims about a particular carrier or access network.</p>
+
+<h2 id="quality-models">Quality behavior models</h2>
+<p>The quality behavior model determines how a profile deteriorates below 100%. NetEm uses staged anchor points with exponential easing rather than a straight linear multiplier. Different metrics begin degrading at different quality levels.</p>
+<p>This is why changing a DIA circuit from 100% to 40% does more than simply make it “60% slower”: latency, jitter and loss increase sharply as the modeled circuit approaches failure.</p>
+
+<h2 id="wan-overrides">Profile baseline vs WAN override</h2>
+<p>Editing an Access Profile changes the shared baseline. Changing nominal download/upload under <strong>WAN Links → Profile</strong> changes only that WAN and does not modify the underlying access profile. Use per-WAN overrides when two links use the same technology but have different contracted speeds.</p>
+
+<h2 id="restore-defaults">Restore profile defaults</h2>
+<p><strong>Restore profile defaults</strong> replaces the editable profile set with the project defaults and reapplies the active WAN profiles. This can immediately change live shaping, so treat it as an operational action rather than a harmless UI reset.</p>

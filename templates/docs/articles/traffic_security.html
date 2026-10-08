@@ -1,0 +1,53 @@
+
+<h2 id="principle">Safety model</h2>
+<p>Traffic &amp; Security is designed for controlled lab validation, not unrestricted attack generation. Current security functions either produce harmless test artifacts, receive benign callbacks, simulate availability impact through WAN impairment, or capture packets on configured lab interfaces.</p>
+
+<h2 id="eicar">EICAR anti-malware test</h2>
+<p><strong>Download EICAR artifact</strong> serves the standard EICAR antivirus test string as a text attachment. It is not malware and does not execute code. Use it to verify whether an inline security control, endpoint product or policy detects the standard test signature.</p>
+<p>Requesting the artifact writes a <code>security-test</code> event to the NetEm history.</p>
+
+<h2 id="beacon">Benign beacon sink</h2>
+<p>The beacon endpoint accepts HTTP GET or POST callbacks and returns HTTP 204 with no command or executable content. It records the request method and a bounded user-agent string in event history.</p>
+<p>Typical use:</p>
+<ol>
+  <li>Copy the endpoint shown in Traffic &amp; Security.</li>
+  <li>From a controlled lab client, make periodic GET/POST requests to that URL.</li>
+  <li>Validate whether your security/logging stack sees the callback pattern.</li>
+  <li>Check the NetEm event timeline to confirm the callback reached the sink.</li>
+</ol>
+
+<h2 id="availability">Availability stress</h2>
+<p>The Availability stress / DDoS impact action uses the built-in scenario engine to degrade quality progressively. It does <strong>not</strong> send a flood or attack traffic. This makes it suitable for testing how an SD-WAN design reacts to the operational symptoms of saturation without running a denial-of-service tool.</p>
+
+<h2 id="capture">Bounded packet capture</h2>
+<p>Packet capture is an optional diagnostic wrapper around <code>tcpdump</code>. It is deliberately constrained:</p>
+<div class="docs-table"><table>
+<thead><tr><th>Guardrail</th><th>Current limit</th></tr></thead>
+<tbody>
+<tr><td>Interfaces</td><td>Configured WAN inner or outer interfaces only</td></tr>
+<tr><td>Concurrent captures</td><td>One</td></tr>
+<tr><td>Duration</td><td>5–120 seconds</td></tr>
+<tr><td>Packet count</td><td>20,000 maximum</td></tr>
+<tr><td>Snap length</td><td>256 bytes per packet</td></tr>
+<tr><td>Name resolution</td><td>Disabled (<code>-nn</code>)</td></tr>
+<tr><td>Storage</td><td><code>runtime/captures/</code></td></tr>
+</tbody></table></div>
+
+<h3 id="capture-use">How to capture</h3>
+<ol>
+  <li>Select the target WAN.</li>
+  <li>Select <strong>Inner</strong> for the firewall-facing side or <strong>Outer</strong> for the upstream-facing side.</li>
+  <li>Select 15, 30, 60 or 120 seconds.</li>
+  <li>Click <strong>Start capture</strong>.</li>
+  <li>Reproduce the problem while the capture runs.</li>
+  <li>Stop early if needed, then use <strong>Download last PCAP</strong>.</li>
+</ol>
+
+<h3 id="capture-permissions">Requirements</h3>
+<p><code>tcpdump</code> must be installed and the service needs packet-capture permission. In a systemd deployment, the service generally needs <code>CAP_NET_RAW</code> in addition to the existing <code>CAP_NET_ADMIN</code>.</p>
+<pre>AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW</pre>
+<div class="docs-warning"><strong>tcpdump installed is not enough by itself:</strong> if capture starts failing with a permission error, verify the systemd capability set and restart the service after changing it.</div>
+
+<h2 id="planned">Planned traffic/security functions</h2>
+<p>The UI reserves sections for a bounded <code>iperf3</code> traffic generator, sanitized <code>tcpreplay</code> workflow, DNS anomaly profiles and safe IDS/IPS signature tests. These are not active functions yet. When implemented, they should remain constrained to configured/allowlisted lab targets with explicit rate and duration limits.</p>

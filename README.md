@@ -39,6 +39,12 @@ The interface is organized around **operate / observe / configure** workflows:
 
 The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
 
+### In-app documentation
+
+The application includes a searchable **Documentation** section in the sidebar. It covers getting started, traffic direction, WAN controls, scenarios, safe security tests, packet capture, live analytics, SLA evaluation, topology, access profiles, REST/Prometheus integration, update/release management, troubleshooting and reference limits.
+
+Operational pages also expose a contextual **Guide** link in the top bar so the relevant documentation is one click away.
+
 ---
 
 ## What this fork adds
