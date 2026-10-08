@@ -244,6 +244,25 @@
       <button class="btn btn-primary" type="submit" style="margin-top:12px">Apply quality</button>
     </form>
 
+    <div class="section-title">Limit bandwidth</div>
+    <form method="post" action="{{ url_for('quick_wan_action') }}">
+      <input type="hidden" name="link_id" value="{{ link.id }}">
+      <input type="hidden" name="action" value="bandwidth">
+      <input type="hidden" name="return_to" value="overview">
+      <div class="form-grid">
+        <div>
+          <label>Download · Mbit/s</label>
+          <input type="number" name="download_mbit" min="1" max="100000" step="1" value="{{ link.nominal_download_mbit }}">
+        </div>
+        <div>
+          <label>Upload · Mbit/s</label>
+          <input type="number" name="upload_mbit" min="1" max="100000" step="1" value="{{ link.nominal_upload_mbit }}">
+        </div>
+      </div>
+      <div class="field-help">This changes the saved nominal line-rate override for this WAN, then reapplies its current profile/quality.</div>
+      <button class="btn" type="submit" style="margin-top:10px">Apply bandwidth</button>
+    </form>
+
     <div class="section-title">Fail or restore path</div>
     <div class="grid grid-2">
       {% for action,label,cls in [
