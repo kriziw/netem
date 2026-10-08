@@ -1,0 +1,60 @@
+
+<h2 id="purpose">What WAN Links controls</h2>
+<p>WAN Links is the manual control plane for each configured circuit. The page keeps live status visible while detailed configuration opens in a right-side drawer. Use it for one-off experiments and baseline setup; use Scenarios when the test should be repeatable.</p>
+
+<h2 id="profile">Profile tab</h2>
+<h3 id="access-technology">Access technology</h3>
+<p>Select DIA, DSL, Broadband, 4G, 5G, Satellite or any edited profile. A profile defines nominal latency, jitter, packet loss, download/upload bandwidth and the type of quality degradation curve.</p>
+<h3 id="line-rate">Nominal line rate</h3>
+<p>Download and upload can override the profile's default capacity without switching the link to Custom mode. This is useful when the technology is correct but the actual service speed is different—for example, Broadband at 500/50 Mbit/s or DIA at 2 Gbit/s.</p>
+<p><strong>Reset to profile defaults</strong> clears both per-WAN rate overrides.</p>
+
+<h2 id="quality">Quality tab</h2>
+<p>The Quality slider is a high-level way to degrade a circuit. NetEm does not change every metric linearly. Each access model has staged degradation curves so a mobile link, satellite path and DIA circuit deteriorate differently.</p>
+<div class="docs-table"><table>
+<thead><tr><th>Quality</th><th>Status label</th><th>General interpretation</th></tr></thead>
+<tbody>
+<tr><td>90–100</td><td>Excellent</td><td>Near-normal service</td></tr>
+<tr><td>75–89</td><td>Good</td><td>Mild degradation</td></tr>
+<tr><td>50–74</td><td>Fair</td><td>Noticeable impairment</td></tr>
+<tr><td>25–49</td><td>Poor</td><td>Severe impairment</td></tr>
+<tr><td>1–24</td><td>Critical</td><td>Near-unusable service</td></tr>
+<tr><td>0</td><td>Down</td><td>100% loss, extreme delay/jitter and 1 Mbit/s floor</td></tr>
+</tbody></table></div>
+
+<h3 id="manual-values">Manual impairment values</h3>
+<p>Latency, jitter, packet loss, download and upload can also be moved individually. As soon as you change one of these controls the WAN enters <strong>Custom</strong> mode. The values are then persisted exactly as configured rather than recalculated from the quality curve.</p>
+<p>Move the Quality slider again to return to quality-derived mode; doing so deliberately discards the manual custom overrides.</p>
+
+<h2 id="advanced">Advanced tab</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Control</th><th>What it simulates</th><th>Useful for</th></tr></thead>
+<tbody>
+<tr><td>Loss correlation</td><td>Losses becoming clustered instead of independent</td><td>Bursty underlay problems and recovery/hysteresis tests</td></tr>
+<tr><td>Duplication</td><td>Packets arriving more than once</td><td>Protocol tolerance and application behavior</td></tr>
+<tr><td>Corruption</td><td>Bit errors introduced by netem</td><td>Security/transport/application robustness tests</td></tr>
+<tr><td>Reordering</td><td>Packet delivery out of sequence</td><td>Tunnel, TCP and real-time traffic behavior</td></tr>
+</tbody></table></div>
+<p>These settings are part of Custom mode and use Linux <code>tc/netem</code> primitives.</p>
+
+<h2 id="faults">Faults tab</h2>
+<p>Faults are transient test actions; they do not overwrite the saved access profile.</p>
+<div class="docs-table"><table>
+<thead><tr><th>Fault</th><th>Behavior</th></tr></thead>
+<tbody>
+<tr><td>Bidirectional blackhole</td><td>Drops traffic both directions while link/carrier remains up.</td></tr>
+<tr><td>Downstream blackhole</td><td>Drops traffic returning toward the appliance.</td></tr>
+<tr><td>Upstream blackhole</td><td>Drops traffic leaving the appliance toward the upstream network.</td></tr>
+<tr><td>Restore normal</td><td>Removes the runtime fault and reapplies the saved WAN profile.</td></tr>
+</tbody></table></div>
+<div class="docs-warning"><strong>Scenario lock:</strong> manual faults and MTU changes are blocked while a scenario is running. Stop the scenario first so two control paths cannot fight over the same WAN.</div>
+
+<h2 id="mtu">Path MTU testing</h2>
+<p>Temporary MTU constraints are applied to the inner interface, outer interface and bridge. Preset choices include 1500, 1492, 1400, 1380, 1300 and 1200 bytes. Selecting <strong>Restore original</strong> returns the interfaces to the MTUs captured before the first change.</p>
+<p>This is an MTU-constriction test. It is not a complete PMTUD-blackhole simulator that selectively drops oversized traffic while suppressing ICMP feedback.</p>
+
+<h2 id="diagnostics">Diagnostics tab</h2>
+<p>Diagnostics shows the mapped interface names, bridge, active fault and raw <code>tc qdisc</code> state for inner and outer sides. Use it to verify that the kernel accepted the intended impairment and bandwidth qdiscs.</p>
+
+<h2 id="apply">Apply behavior</h2>
+<p><strong>Apply WAN configuration</strong> saves the profile, quality/custom values and line-rate overrides, then reapplies the qdisc. The previous root qdisc is cleared first so the new state does not stack on top of stale settings.</p>
