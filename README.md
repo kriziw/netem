@@ -22,10 +22,12 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
   - 5G
   - Satellite
 
-- **One quality control per WAN**
+- **Quality control + custom overrides per WAN**
   - Each technology preset represents nominal 100% conditions.
   - A 0–100% quality slider progressively worsens latency, jitter, loss and available bandwidth.
   - Status is shown as Excellent, Good, Fair, Poor, Critical or Down.
+  - Any individual parameter can still be edited directly. Doing so switches that WAN to **Custom** mode.
+  - In Custom mode the quality slider is visually muted but still usable; moving it again removes the manual overrides and returns to quality-derived values.
 
 - **Asymmetric bandwidth simulation**
   - Independent nominal download and upload capacity per preset.
@@ -276,9 +278,12 @@ The Dashboard exposes:
 - Access preset
 - Quality slider
 - Derived quality status
-- Derived latency, jitter, packet loss, download and upload values
+- Editable latency, jitter, packet loss, download and upload values
+- Automatic **Custom** mode when any individual value is changed
 
-The Presets menu exposes the editable nominal values for each access technology. WAN aliases, the selected preset and the quality level are stored in `config.json`. When startup profile restoration is enabled, those selections are reapplied after restart.
+For example, a WAN can remain on the 5G preset at 100% quality, then have only jitter manually increased. The WAN becomes Custom while the remaining values stay at their current derived values. Moving the quality slider again deliberately discards those custom values and recalculates the full profile from the selected preset and quality.
+
+The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
 
 ---
 
