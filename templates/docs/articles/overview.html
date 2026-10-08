@@ -1,0 +1,45 @@
+
+<h2 id="purpose">Purpose of Overview</h2>
+<p>Overview is the primary screen to leave open while running a test. It combines the state NetEm is injecting with measured traffic counters and recent runtime events, without exposing most configuration controls.</p>
+
+<h2 id="kpis">Top status indicators</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Indicator</th><th>Meaning</th></tr></thead>
+<tbody>
+<tr><td>WAN health</td><td>Number of configured links whose generic expected SLA currently passes.</td></tr>
+<tr><td>Active impairments</td><td>Runtime faults such as blackholes. Saved quality degradation alone is not counted as a runtime fault.</td></tr>
+<tr><td>Scenario</td><td>Current scenario name and stage, or Idle when none is running.</td></tr>
+<tr><td>Packet capture</td><td>Whether a bounded tcpdump capture is currently active.</td></tr>
+</tbody></table></div>
+
+<h2 id="topology">Live path topology</h2>
+<p>The topology panel shows the appliance under test on the left, each emulated WAN in the middle and the upstream network on the right. Each WAN row displays:</p>
+<ul>
+  <li>display name and selected access profile;</li>
+  <li>nominal download/upload bandwidth;</li>
+  <li>currently injected latency, jitter and packet loss;</li>
+  <li>health/SLA status;</li>
+  <li>live measured directional throughput once at least two telemetry samples have been collected.</li>
+</ul>
+<p>Use <strong>Manage WANs</strong> to open the full WAN Links control page when you need to change the path.</p>
+
+<h2 id="throughput">Live throughput chart</h2>
+<p>The Overview chart plots measured downstream traffic for each WAN. Values are derived from Linux interface byte counters sampled by the browser. The Y axis dynamically scales in Mbit/s and the X axis shows the rolling elapsed-time window.</p>
+<p>A flat zero line is legitimate if no traffic is crossing that path. If you know traffic is flowing but the value stays at zero, use the Troubleshooting guide to compare <code>/api/v1/telemetry</code> with the interface counters.</p>
+
+<h2 id="wan-summary">WAN summary</h2>
+<p>The WAN summary distinguishes the selected access model from the current effective values. <strong>Effective down/up</strong> is the bandwidth limit NetEm intends to apply after the selected quality curve or custom values are evaluated. It is not the same as current traffic utilization.</p>
+
+<h2 id="events">Recent events</h2>
+<p>The timeline shows recent runtime activity such as scenarios, faults, MTU changes, capture activity and safe security-test events. Events are also persisted to <code>runtime/events.jsonl</code> and are available from Analytics and the API.</p>
+
+<h2 id="status-colors">Status language</h2>
+<ul>
+  <li><strong>Green:</strong> path is within expected SLA and no runtime fault is active.</li>
+  <li><strong>Amber:</strong> degraded quality that is still within the configured generic SLA.</li>
+  <li><strong>Red:</strong> expected SLA failure or an explicit runtime fault.</li>
+</ul>
+<div class="docs-note"><strong>Important:</strong> an expected SLA PASS/FAIL is calculated from what NetEm is injecting. It is not yet the SD-WAN appliance's own measured SLA state. Vendor adapters are designed to add that second perspective later.</div>
+
+<h2 id="refresh">Live refresh behavior</h2>
+<p>The browser polls the state and telemetry REST APIs approximately every 1.5 seconds. The rolling history currently lives in the browser, so reloading the page clears the chart history. Persistent time-series storage is a future capability; event history is already persistent.</p>
