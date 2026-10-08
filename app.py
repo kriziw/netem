@@ -215,6 +215,11 @@ QUALITY_MODELS = {
     "satellite": "Satellite",
 }
 
+BANDWIDTH_OPTIONS = [
+    1, 2, 5, 10, 20, 25, 50, 75, 100, 150, 200, 300, 500,
+    1000, 2000, 2500, 5000, 10000,
+]
+
 
 def get_presets(cfg: dict):
     """Return editable presets and migrate older stored presets in place."""
@@ -410,7 +415,12 @@ QUALITY_CURVES = {
 }
 
 
-def calculate_profile(preset: dict, quality: int):
+def calculate_profile(
+    preset: dict,
+    quality: int,
+    download_mbit=None,
+    upload_mbit=None,
+):
     """
     Convert a technology preset + relative quality into effective shaping values.
 
@@ -431,6 +441,17 @@ def calculate_profile(preset: dict, quality: int):
     model = preset.get("quality_model", "broadband")
     curves = QUALITY_CURVES.get(model, QUALITY_CURVES["broadband"])
 
+    base_download = (
+        int(round(float(download_mbit)))
+        if download_mbit is not None
+        else int(round(float(preset.get("download_mbit", 0.0))))
+    )
+    base_upload = (
+        int(round(float(upload_mbit)))
+        if upload_mbit is not None
+        else int(round(float(preset.get("upload_mbit", 0.0))))
+    )
+
     delay_factor = _curve_value(q, curves["delay_factor"])
     jitter_factor = _curve_value(q, curves["jitter_factor"])
     loss_add = _curve_value(q, curves["loss_add"])
@@ -442,12 +463,8 @@ def calculate_profile(preset: dict, quality: int):
     loss = min(100.0, float(preset.get("loss_pct", 0.0)) + loss_add)
 
     # tc/tbf compatibility: bandwidth is always an integer Mbit/s.
-    download = int(round(max(
-        1.0, float(preset.get("download_mbit", 0.0)) * download_factor
-    )))
-    upload = int(round(max(
-        1.0, float(preset.get("upload_mbit", 0.0)) * upload_factor
-    )))
+    download = int(round(max(1.0, base_download * download_factor)))
+    upload = int(round(max(1.0, base_upload * upload_factor)))
 
     return {
         "delay_ms": round(delay, 1),
@@ -469,6 +486,8 @@ def apply_selected_profile(link: dict, presets: dict):
 
     mode = link.get("mode", "quality")
     quality = max(0, min(100, int(link.get("quality", 100))))
+    bandwidth_download = link.get("bandwidth_download_mbit")
+    bandwidth_upload = link.get("bandwidth_upload_mbit")
 
     if mode == "custom" and link.get("custom_profile"):
         custom = link["custom_profile"]
@@ -480,7 +499,12 @@ def apply_selected_profile(link: dict, presets: dict):
             "upload_mbit": int(round(max(0.0, float(custom.get("upload_mbit", 0.0))))),
         }
     else:
-        effective = calculate_profile(preset, quality)
+        effective = calculate_profile(
+            preset,
+            quality,
+            bandwidth_download,
+            bandwidth_upload,
+        )
 
     ok_down, msg_down = apply_netem(
         inner,
@@ -807,6 +831,18 @@ def index():
         preset = presets.get(preset_id, {})
         quality = max(0, min(100, int(link.get("quality", 100))))
         mode = link.get("mode", "quality")
+        bandwidth_download = link.get("bandwidth_download_mbit")
+        bandwidth_upload = link.get("bandwidth_upload_mbit")
+        nominal_download = (
+            int(bandwidth_download)
+            if bandwidth_download is not None
+            else int(round(float(preset.get("download_mbit", 0.0))))
+        )
+        nominal_upload = (
+            int(bandwidth_upload)
+            if bandwidth_upload is not None
+            else int(round(float(preset.get("upload_mbit", 0.0))))
+        )
         if mode == "custom" and link.get("custom_profile"):
             effective = {
                 "delay_ms": float(link["custom_profile"].get("delay_ms", 0.0)),
@@ -816,7 +852,15 @@ def index():
                 "upload_mbit": int(round(float(link["custom_profile"].get("upload_mbit", 0.0)))),
             }
         else:
-            effective = calculate_profile(preset, quality) if preset else {}
+            effective = (
+                calculate_profile(
+                    preset,
+                    quality,
+                    bandwidth_download,
+                    bandwidth_upload,
+                )
+                if preset else {}
+            )
             mode = "quality"
 
         nic_states.append(
@@ -828,6 +872,10 @@ def index():
                 "preset_id": preset_id,
                 "quality": quality,
                 "mode": mode,
+                "bandwidth_download_mbit": bandwidth_download,
+                "bandwidth_upload_mbit": bandwidth_upload,
+                "nominal_download_mbit": nominal_download,
+                "nominal_upload_mbit": nominal_upload,
                 "quality_status": "Custom" if mode == "custom" else quality_status(quality),
                 "effective": effective,
                 "qdisc": get_qdisc_state(inner),
@@ -851,6 +899,7 @@ def index():
         nic_states=nic_states,
         wan_links=cfg.get("wan_links", []),
         presets=presets,
+        bandwidth_options=BANDWIDTH_OPTIONS,
     )
 
 
@@ -966,6 +1015,8 @@ def setup():
                     "quality": int(previous.get("quality", 100)),
                     "mode": previous.get("mode", "quality"),
                     "custom_profile": previous.get("custom_profile"),
+                    "bandwidth_download_mbit": previous.get("bandwidth_download_mbit"),
+                    "bandwidth_upload_mbit": previous.get("bandwidth_upload_mbit"),
                 }
             )
 
@@ -984,6 +1035,8 @@ def setup():
                     "quality": int(previous.get("quality", 100)),
                     "mode": previous.get("mode", "quality"),
                     "custom_profile": previous.get("custom_profile"),
+                    "bandwidth_download_mbit": previous.get("bandwidth_download_mbit"),
+                    "bandwidth_upload_mbit": previous.get("bandwidth_upload_mbit"),
                 }
             )
 
@@ -1082,10 +1135,39 @@ def configure():
 
     link["preset"] = preset_id
     link["quality"] = quality
+
+    def selected_bandwidth(field):
+        value = (request.form.get(field) or "").strip()
+        if not value:
+            return None
+        try:
+            parsed = int(round(float(value)))
+        except ValueError:
+            return None
+        return max(1, parsed)
+
+    bandwidth_download = selected_bandwidth("bandwidth_download_mbit")
+    bandwidth_upload = selected_bandwidth("bandwidth_upload_mbit")
+
+    if bandwidth_download is None:
+        link.pop("bandwidth_download_mbit", None)
+    else:
+        link["bandwidth_download_mbit"] = bandwidth_download
+
+    if bandwidth_upload is None:
+        link.pop("bandwidth_upload_mbit", None)
+    else:
+        link["bandwidth_upload_mbit"] = bandwidth_upload
+
     link["mode"] = mode
 
     if mode == "custom":
-        baseline = calculate_profile(preset, quality)
+        baseline = calculate_profile(
+            preset,
+            quality,
+            bandwidth_download,
+            bandwidth_upload,
+        )
 
         def custom_float(field, default):
             value = request.form.get(field)
