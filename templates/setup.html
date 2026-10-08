@@ -324,6 +324,33 @@
       margin-bottom: 10px;
     }
 
+    .option-block {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid #1f2937;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin: 9px 0;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+    }
+
+    .check-row input {
+      margin-top: 2px;
+    }
+
+    .check-help {
+      display: block;
+      margin-top: 2px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      line-height: 1.35;
+    }
+
     .btn-primary {
       background: var(--accent);
       color: #020617;
@@ -494,6 +521,36 @@
                 {% endfor %}
               </select>
             </div>
+          </div>
+
+          <div class="option-block">
+            <div class="card-title" style="margin-bottom:8px;">Startup persistence</div>
+
+            <label class="check-row">
+              <input
+                type="checkbox"
+                name="restore_bridges_on_startup"
+                {% if config.get('restore_bridges_on_startup', true) %}checked{% endif %}>
+              <span>
+                Restore WAN bridges when the application starts
+                <span class="check-help">
+                  Recommended. Recreates the saved br-wan1/br-wan2 topology after a VM reboot.
+                </span>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input
+                type="checkbox"
+                name="restore_shaping_on_startup"
+                {% if config.get('restore_shaping_on_startup', false) %}checked{% endif %}>
+              <span>
+                Restore the last applied shaping profile on startup
+                <span class="check-help">
+                  Optional. Leave disabled if you want every reboot to start with clean, unimpaired links.
+                </span>
+              </span>
+            </label>
           </div>
 
           <button class="btn btn-primary" type="submit">
