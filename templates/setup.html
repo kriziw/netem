@@ -180,6 +180,14 @@
       .top { flex-direction:column; }
       .wan-grid { grid-template-columns:1fr; }
     }
+    .lab-watermark {
+      position:fixed; right:14px; bottom:10px; z-index:20;
+      padding:4px 8px; border-radius:999px;
+      border:1px solid rgba(71,85,105,.45);
+      background:rgba(2,6,23,.74); backdrop-filter:blur(6px);
+      color:#64748b; font-size:.60rem; letter-spacing:.04em;
+      pointer-events:none; user-select:none;
+    }
   </style>
 </head>
 <body>
@@ -348,5 +356,6 @@
     </div>
   </main>
 </div>
+<div class="lab-watermark">LAB USE ONLY · Kristofer Wohlgang · foundation: Techkarma NetEm</div>
 </body>
 </html>
