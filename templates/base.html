@@ -21,7 +21,7 @@
     {% for group in nav_groups %}
       <div class="nav-group">
         <div class="nav-group-title">{{ group.label }}</div>
-        {% for item in group.items %}
+        {% for item in group['items'] %}
           <a class="nav-link {% if page == item.id %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="nav-icon">
               {% if item.icon == 'overview' %}
