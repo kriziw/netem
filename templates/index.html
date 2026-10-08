@@ -649,6 +649,7 @@
       <div class="cards-row">
         {% for nic in nic_states %}
           {% set q = nic.qdisc.parsed %}
+          {% set q_up = nic.outer_qdisc.parsed %}
           <div class="card" data-ifname="{{ nic.name }}">
             <div class="card-header">
               <div class="card-title">
@@ -667,6 +668,7 @@
 
             <form method="post" action="{{ url_for('configure') }}" class="netem-form">
               <input type="hidden" name="itf" value="{{ nic.name }}" />
+              <input type="hidden" name="outer_itf" value="{{ nic.outer or '' }}" />
 
               <!-- Delay -->
               <div class="slider-block">
@@ -728,11 +730,11 @@
                   value="{% if q.loss_pct is not none %}{{ q.loss_pct }}{% else %}0{% endif %}">
               </div>
 
-              <!-- Rate -->
+              <!-- Download rate: inner-interface egress toward the test device -->
               <div class="slider-block">
                 <div class="slider-label-row">
-                  <span>Rate</span>
-                  <span class="slider-label-value" data-label="rate">
+                  <span>Download rate</span>
+                  <span class="slider-label-value" data-label="download">
                     {% if q.rate_mbit is not none and q.rate_mbit > 0 %}
                       {{ "%.1f"|format(q.rate_mbit) }} Mbit/s
                     {% else %}
@@ -743,14 +745,35 @@
                 <input
                   type="range"
                   min="0" max="1000" step="10"
-                  name="rate_mbit"
-                  data-role="rate"
+                  name="download_mbit"
+                  data-role="download"
                   value="{% if q.rate_mbit is not none and q.rate_mbit > 0 %}{{ q.rate_mbit|int }}{% else %}0{% endif %}">
+              </div>
+
+              <!-- Upload rate: outer-interface egress toward the WAN -->
+              <div class="slider-block">
+                <div class="slider-label-row">
+                  <span>Upload rate</span>
+                  <span class="slider-label-value" data-label="upload">
+                    {% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}
+                      {{ "%.1f"|format(q_up.rate_mbit) }} Mbit/s
+                    {% else %}
+                      unlimited
+                    {% endif %}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0" max="1000" step="10"
+                  name="upload_mbit"
+                  data-role="upload"
+                  value="{% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}{{ q_up.rate_mbit|int }}{% else %}0{% endif %}">
               </div>
 
               <!-- Profiles -->
               <div class="profile-row">
                 <button type="button" class="profile-pill" data-profile="dia">DIA</button>
+                <button type="button" class="profile-pill" data-profile="dsl">DSL</button>
                 <button type="button" class="profile-pill" data-profile="broadband">Broadband</button>
                 <button type="button" class="profile-pill" data-profile="4g">4G</button>
                 <button type="button" class="profile-pill" data-profile="5g">5G</button>
@@ -768,6 +791,7 @@
             </form>
                 <form method="post" action="{{ url_for('clear') }}">
                   <input type="hidden" name="itf" value="{{ nic.name }}" />
+                  <input type="hidden" name="outer_itf" value="{{ nic.outer or '' }}" />
                   <button class="btn btn-reset" type="submit">
                     <span class="btn-icon">⨯</span>
                     reset
@@ -789,10 +813,18 @@
               <strong>
                 {% if q.loss_pct is not none %}{{ "%.3f"|format(q.loss_pct) }} %{% else %}0 %{% endif %}
               </strong>
-              · Rate:
+              · Download:
               <strong>
                 {% if q.rate_mbit is not none and q.rate_mbit > 0 %}
                   {{ "%.1f"|format(q.rate_mbit) }} Mbit/s
+                {% else %}
+                  unlimited
+                {% endif %}
+              </strong>
+              · Upload:
+              <strong>
+                {% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}
+                  {{ "%.1f"|format(q_up.rate_mbit) }} Mbit/s
                 {% else %}
                   unlimited
                 {% endif %}
@@ -827,12 +859,14 @@
       const delay = card.querySelector('input[data-role="delay"]');
       const jitter = card.querySelector('input[data-role="jitter"]');
       const loss = card.querySelector('input[data-role="loss"]');
-      const rate = card.querySelector('input[data-role="rate"]');
+      const download = card.querySelector('input[data-role="download"]');
+      const upload = card.querySelector('input[data-role="upload"]');
 
       const delayLabel = card.querySelector('[data-label="delay"]');
       const jitterLabel = card.querySelector('[data-label="jitter"]');
       const lossLabel = card.querySelector('[data-label="loss"]');
-      const rateLabel = card.querySelector('[data-label="rate"]');
+      const downloadLabel = card.querySelector('[data-label="download"]');
+      const uploadLabel = card.querySelector('[data-label="upload"]');
 
       if (delay) {
         const updateDelay = () => { delayLabel.textContent = delay.value + " ms"; };
@@ -849,40 +883,59 @@
         loss.addEventListener("input", updateLoss);
         updateLoss();
       }
-      if (rate) {
-        const updateRate = () => {
-          rateLabel.textContent = (parseInt(rate.value, 10) > 0)
-            ? rate.value + " Mbit/s"
+      if (download) {
+        const updateDownload = () => {
+          downloadLabel.textContent = (parseInt(download.value, 10) > 0)
+            ? download.value + " Mbit/s"
             : "unlimited";
         };
-        rate.addEventListener("input", updateRate);
-        updateRate();
+        download.addEventListener("input", updateDownload);
+        updateDownload();
+      }
+      if (upload) {
+        const updateUpload = () => {
+          uploadLabel.textContent = (parseInt(upload.value, 10) > 0)
+            ? upload.value + " Mbit/s"
+            : "unlimited";
+        };
+        upload.addEventListener("input", updateUpload);
+        updateUpload();
       }
 
       // Profiles
       const applyProfile = (profile) => {
-        if (!delay || !jitter || !loss || !rate) return;
-        // The presets are intentionally representative rather than carrier-specific.
-        // Values model one-way impairment on the shaped interface.
+        if (!delay || !jitter || !loss || !download || !upload) return;
+        // Representative lab starting points, not carrier-specific guarantees.
         if (profile === "dia") {
-          delay.value = 5; jitter.value = 1; loss.value = 0; rate.value = 1000;
+          delay.value = 5; jitter.value = 1; loss.value = 0;
+          download.value = 1000; upload.value = 1000;
+        } else if (profile === "dsl") {
+          delay.value = 25; jitter.value = 8; loss.value = 0.1;
+          download.value = 100; upload.value = 20;
         } else if (profile === "broadband") {
-          delay.value = 15; jitter.value = 5; loss.value = 0.1; rate.value = 300;
+          delay.value = 15; jitter.value = 5; loss.value = 0.1;
+          download.value = 300; upload.value = 50;
         } else if (profile === "4g") {
-          delay.value = 45; jitter.value = 20; loss.value = 0.5; rate.value = 80;
+          delay.value = 45; jitter.value = 20; loss.value = 0.5;
+          download.value = 80; upload.value = 20;
         } else if (profile === "5g") {
-          delay.value = 20; jitter.value = 8; loss.value = 0.2; rate.value = 300;
+          delay.value = 20; jitter.value = 8; loss.value = 0.2;
+          download.value = 300; upload.value = 50;
         } else if (profile === "satellite") {
-          delay.value = 300; jitter.value = 30; loss.value = 0.5; rate.value = 100;
+          delay.value = 300; jitter.value = 30; loss.value = 0.5;
+          download.value = 100; upload.value = 20;
         } else if (profile === "degraded") {
-          delay.value = 100; jitter.value = 40; loss.value = 2; rate.value = 20;
+          delay.value = 100; jitter.value = 40; loss.value = 2;
+          download.value = 20; upload.value = 5;
         } else if (profile === "dead") {
-          delay.value = 1000; jitter.value = 200; loss.value = 100; rate.value = 1;
+          delay.value = 1000; jitter.value = 200; loss.value = 100;
+          download.value = 1; upload.value = 1;
         }
         delay.dispatchEvent(new Event("input"));
         jitter.dispatchEvent(new Event("input"));
         loss.dispatchEvent(new Event("input"));
-        rate.dispatchEvent(new Event("input"));
+        download.dispatchEvent(new Event("input"));
+        upload.dispatchEvent(new Event("input"));
       };
 
       card.querySelectorAll(".profile-pill").forEach(btn => {
