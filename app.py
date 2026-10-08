@@ -4,6 +4,7 @@ import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -18,6 +19,7 @@ from flask import (
     flash,
     jsonify,
     Response,
+    send_file,
 )
 
 app = Flask(__name__)
@@ -25,6 +27,9 @@ app.secret_key = "techkarma-netem"
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
+RUNTIME_DIR = BASE_DIR / "runtime"
+EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
+CAPTURE_DIR = RUNTIME_DIR / "captures"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
@@ -43,6 +48,17 @@ SCENARIO_STATE = {
     "started_at": None,
     "step": 0,
     "step_label": None,
+}
+ORIGINAL_MTUS = {}
+CAPTURE_PROCESS = None
+CAPTURE_STATE = {
+    "active": False,
+    "link_id": None,
+    "interface": None,
+    "started_at": None,
+    "duration": None,
+    "path": None,
+    "error": None,
 }
 
 
