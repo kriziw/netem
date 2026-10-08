@@ -1,199 +1,90 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>NetEm · Presets</title>
-  <style>
-    :root {
-      --bg: #020617; --card: rgba(15,23,42,.96); --border: #1f2937;
-      --accent: #22e6b8; --accent-soft: rgba(34,230,184,.12);
-      --text: #e5e7eb; --muted: #9ca3af; --danger: #ef4444;
-    }
-    * { box-sizing: border-box; }
-    body {
-      margin: 0; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background:
-        radial-gradient(circle at top left, rgba(34,230,184,.16), transparent 60%),
-        radial-gradient(circle at bottom right, rgba(37,99,235,.15), transparent 60%),
-        var(--bg);
-      color: var(--text);
-    }
-    a { color: inherit; text-decoration: none; }
-    .layout { display: flex; min-height: 100vh; }
-    .sidebar {
-      width: 250px; padding: 22px 20px; border-right: 1px solid var(--border);
-      background: #020617; display:flex; flex-direction:column;
-    }
-    .sidebar-header { margin-bottom: 26px; }
-    .brand { font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-    .brand span { color:var(--accent); }
-    .brand-sub { margin-top:3px; font-size:.76rem; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
-    .nav-title { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; margin-bottom:7px; }
-    .nav-list { list-style:none; padding:0; margin:0; }
-    .nav-item { margin-bottom:4px; }
-    .nav-link { display:flex; gap:9px; align-items:center; padding:8px 10px; border-radius:999px; color:#cbd5e1; font-size:.86rem; }
-    .nav-dot { width:7px; height:7px; border-radius:50%; background:#475569; }
-    .nav-item-active .nav-link { background:var(--accent-soft); color:var(--accent); font-weight:600; }
-    .nav-item-active .nav-dot { background:var(--accent); }
-    .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
-    .lab-badge {
-      display:inline-block; margin-bottom:7px; padding:3px 7px; border-radius:999px;
-      border:1px solid rgba(234,179,8,.45); background:rgba(234,179,8,.08);
-      color:#fde68a; font-size:.64rem; font-weight:700; letter-spacing:.10em;
-    }
-    .project-credit { margin-top:3px; line-height:1.3; font-size:.68rem; color:#64748b; }
-    .project-credit strong { color:#94a3b8; font-weight:600; }
-    .project-credit a { color:#94a3b8; text-decoration:underline; text-decoration-color:#475569; }
-    .main { flex:1; padding:24px; }
-    .top { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }
-    .title { font-size:1.12rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); }
-    .subtitle { margin-top:5px; max-width:820px; font-size:.86rem; line-height:1.45; color:var(--muted); }
-    .btn {
-      border-radius:999px; padding:7px 14px; border:1px solid var(--border);
-      background:rgba(15,23,42,.95); color:#cbd5e1; cursor:pointer; font-size:.82rem;
-    }
-    .btn-primary { background:var(--accent); color:#020617; border-color:var(--accent); font-weight:700; }
-    .btn-danger { color:#fecaca; border-color:rgba(239,68,68,.6); background:rgba(239,68,68,.08); }
-    .flash { margin-bottom:10px; padding:9px 11px; border-radius:10px; font-size:.82rem; border:1px solid var(--border); }
-    .flash.success { border-color:rgba(34,197,94,.7); color:#bbf7d0; background:rgba(34,197,94,.08); }
-    .flash.info { border-color:rgba(59,130,246,.7); color:#bfdbfe; background:rgba(59,130,246,.08); }
-    .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(330px,1fr)); gap:16px; }
-    .card { padding:16px; border-radius:16px; border:1px solid #334155; background:var(--card); }
-    .card-head { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:12px; }
-    .preset-id { color:var(--muted); font-size:.72rem; font-family:ui-monospace, monospace; }
-    label { display:block; color:var(--muted); font-size:.74rem; margin-bottom:4px; }
-    input[type="text"], input[type="number"], select {
-      width:100%; padding:8px 9px; border-radius:9px; border:1px solid var(--border);
-      background:rgba(2,6,23,.75); color:var(--text); margin-bottom:10px;
-    }
-    .fields { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px 10px; }
-    .actions { margin-top:18px; display:flex; gap:8px; flex-wrap:wrap; }
-    .note { margin-top:16px; padding:12px; border-radius:12px; border:1px solid #334155; color:var(--muted); font-size:.78rem; line-height:1.45; }
-    @media (max-width:900px) {
-      .layout { flex-direction:column; }
-      .sidebar { width:100%; }
-      .sidebar-footer { display:none; }
-      .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
-      .main { padding:16px; }
-    }
-    .lab-watermark {
-      position:fixed; right:14px; bottom:10px; z-index:20;
-      padding:4px 8px; border-radius:999px;
-      border:1px solid rgba(71,85,105,.45);
-      background:rgba(2,6,23,.74); backdrop-filter:blur(6px);
-      color:#64748b; font-size:.60rem; letter-spacing:.04em;
-      pointer-events:none; user-select:none;
-    }
-  </style>
-</head>
-<body>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <div class="brand">NetEm <span>WAN Lab</span></div>
-      <div class="brand-sub">SD-WAN impairment emulator</div>
-    </div>
-    <div class="nav-title">Navigation</div>
-    <ul class="nav-list">
-      {% for item in nav_items %}
-      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
-        <a class="nav-link" href="{{ url_for(item.endpoint) }}"><span class="nav-dot"></span>{{ item.label }}</a>
-      </li>
-      {% endfor %}
-    </ul>
-    <div class="sidebar-footer">
-      <div class="lab-badge">LAB USE ONLY</div>
-      <div class="project-credit">Fork maintained &amp; extended by <strong>Kristofer Wohlgang</strong></div>
-      <div class="project-credit">Foundation: <a href="https://github.com/techkarma-no/techkarma-netem" target="_blank" rel="noopener">Techkarma NetEm</a></div>
-      <div class="project-credit">Version <strong>v{{ app_version }}</strong> · Powered by Linux tc/netem</div>
-    </div>
-  </aside>
+{% extends "base.html" %}
+{% block title %}Access Profiles · NetEm WAN Lab{% endblock %}
+{% block crumb %}Settings / Access Profiles{% endblock %}
 
-  <main class="main">
-    <div class="top">
-      <div>
-        <div class="title">Preset editor</div>
-        <div class="subtitle">
-          Edit the nominal characteristics for each access technology. These values represent 100% quality.
-          The dashboard quality slider derives degraded conditions from this baseline.
-        </div>
-      </div>
-      <a class="btn" href="{{ url_for('index') }}">Back to dashboard</a>
-    </div>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-
-    <form method="post">
-      <div class="grid">
-        {% for preset_id, preset in presets.items() %}
-        <div class="card">
-          <div class="card-head">
-            <strong>{{ preset.name }}</strong>
-            <span class="preset-id">{{ preset_id }}</span>
-          </div>
-
-          <label>Display name</label>
-          <input type="text" name="{{ preset_id }}_name" value="{{ preset.name }}">
-
-          <label>Quality degradation behaviour</label>
-          <select name="{{ preset_id }}_quality_model">
-            {% for model_id, model_name in quality_models.items() %}
-              <option value="{{ model_id }}" {% if preset.get('quality_model', 'broadband') == model_id %}selected{% endif %}>
-                {{ model_name }}
-              </option>
-            {% endfor %}
-          </select>
-
-          <div class="fields">
-            <div>
-              <label>Latency (ms)</label>
-              <input type="number" min="0" step="0.1" name="{{ preset_id }}_delay_ms" value="{{ preset.delay_ms }}">
-            </div>
-            <div>
-              <label>Jitter (ms)</label>
-              <input type="number" min="0" step="0.1" name="{{ preset_id }}_jitter_ms" value="{{ preset.jitter_ms }}">
-            </div>
-            <div>
-              <label>Packet loss (%)</label>
-              <input type="number" min="0" max="100" step="0.01" name="{{ preset_id }}_loss_pct" value="{{ preset.loss_pct }}">
-            </div>
-            <div>
-              <label>Download (Mbit/s)</label>
-              <input type="number" min="0" step="1" name="{{ preset_id }}_download_mbit" value="{{ preset.download_mbit }}">
-            </div>
-            <div>
-              <label>Upload (Mbit/s)</label>
-              <input type="number" min="0" step="1" name="{{ preset_id }}_upload_mbit" value="{{ preset.upload_mbit }}">
-            </div>
-          </div>
-        </div>
-        {% endfor %}
-      </div>
-
-      <div class="actions">
-        <button class="btn btn-primary" type="submit">Save presets</button>
-      </div>
-    </form>
-
-    <form method="post" action="{{ url_for('reset_presets') }}"
-          onsubmit="return confirm('Restore all preset values to the project defaults?');">
-      <div class="actions">
-        <button class="btn btn-danger" type="submit">Restore preset defaults</button>
-      </div>
-    </form>
-
-    <div class="note">
-      Quality is relative to each preset. At 100%, the values above are used as-is. The selected degradation
-      behaviour determines which characteristics deteriorate first and how aggressively they change. For example,
-      mobile profiles lose capacity and gain jitter earlier, while DIA stays stable until much poorer quality.
-      At 0%, the link is treated as effectively down.
-    </div>
-  </main>
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Settings</div>
+    <h1>Access profiles</h1>
+    <p class="page-description">Define the nominal 100% characteristics of each access technology. WAN-specific line-rate overrides remain configured under WAN Links.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('settings') }}">Back to settings</a>
+  </div>
 </div>
-<div class="lab-watermark">LAB USE ONLY · fork maintained & extended by Kristofer Wohlgang · foundation: Techkarma NetEm</div>
-</body>
-</html>
+
+<form method="post" action="{{ url_for('presets') }}">
+  <div class="grid grid-2">
+    {% for preset_id, preset in presets.items() %}
+    <section class="card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">{{ preset.name }}</div>
+          <div class="card-sub mono">{{ preset_id }} · {{ quality_models.get(preset.quality_model, preset.quality_model) }}</div>
+        </div>
+        <span class="status info">100% baseline</span>
+      </div>
+      <div class="card-pad">
+        <div class="form-grid">
+          <div>
+            <label>Profile name</label>
+            <input type="text" name="{{ preset_id }}_name" value="{{ preset.name }}">
+          </div>
+          <div>
+            <label>Quality behavior</label>
+            <select name="{{ preset_id }}_quality_model">
+              {% for model_id, model_name in quality_models.items() %}
+                <option value="{{ model_id }}" {% if model_id == preset.quality_model %}selected{% endif %}>{{ model_name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+
+        <div class="section-title">Nominal network characteristics</div>
+        <div class="form-grid-3">
+          <div>
+            <label>Latency · ms</label>
+            <input type="number" min="0" step="0.1" name="{{ preset_id }}_delay_ms" value="{{ preset.delay_ms }}">
+          </div>
+          <div>
+            <label>Jitter · ms</label>
+            <input type="number" min="0" step="0.1" name="{{ preset_id }}_jitter_ms" value="{{ preset.jitter_ms }}">
+          </div>
+          <div>
+            <label>Packet loss · %</label>
+            <input type="number" min="0" max="100" step="0.1" name="{{ preset_id }}_loss_pct" value="{{ preset.loss_pct }}">
+          </div>
+          <div>
+            <label>Download · Mbit/s</label>
+            <input type="number" min="0" step="1" name="{{ preset_id }}_download_mbit" value="{{ preset.download_mbit|int }}">
+          </div>
+          <div>
+            <label>Upload · Mbit/s</label>
+            <input type="number" min="0" step="1" name="{{ preset_id }}_upload_mbit" value="{{ preset.upload_mbit|int }}">
+          </div>
+        </div>
+
+        <div class="field-help">These values define the nominal link. The selected quality model determines how latency, jitter, loss and capacity deteriorate below 100%.</div>
+      </div>
+    </section>
+    {% endfor %}
+  </div>
+
+  <div class="actions" style="margin-top:14px">
+    <button class="btn btn-primary" type="submit">Save access profiles</button>
+    <a class="btn" href="{{ url_for('wan_links') }}">View WAN links</a>
+  </div>
+</form>
+
+<section class="card" style="margin-top:22px">
+  <div class="card-head">
+    <div><div class="card-title">Project defaults</div><div class="card-sub">Restore the original generic lab baselines shipped with this fork.</div></div>
+  </div>
+  <div class="card-pad">
+    <form method="post" action="{{ url_for('reset_presets') }}" onsubmit="return confirm('Restore all access profiles to project defaults?');">
+      <button class="btn btn-warning" type="submit">Restore profile defaults</button>
+    </form>
+  </div>
+</section>
+{% endblock %}
