@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block title %}Sessions · NetEm WAN Lab{% endblock %}
+{% block crumb %}Sessions{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Lab context</div>
+    <h1>Sessions</h1>
+    <p class="page-description">Group tests, faults, captures and runtime events into one named lab run so results remain understandable after the experiment is over.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('tests') }}">Open tests</a>
+    <a class="btn" href="{{ url_for('analytics') }}">Open analytics</a>
+  </div>
+</div>
+
+{% if active_session.active %}
+<section class="card session-active" style="margin-bottom:14px">
+  <div class="card-pad">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:18px">
+      <div>
+        <div class="eyebrow">Active lab session</div>
+        <div class="wan-name">{{ active_session.name }}</div>
+        <div class="card-sub">Started <span data-session-start="{{ active_session.started_at }}"></span> · new runtime events are automatically associated with this session.</div>
+      </div>
+      <form method="post" action="{{ url_for('session_stop') }}">
+        <input type="hidden" name="return_to" value="sessions">
+        <button class="btn btn-primary" type="submit">Complete session</button>
+      </form>
+    </div>
+  </div>
+</section>
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Session activity</div><div class="card-sub">Events generated since this session started</div></div>
+      <button class="btn btn-sm" type="button" onclick="document.getElementById('activity-toggle').click()">Live activity</button>
+    </div>
+    <div class="card-pad">
+      <div class="timeline">
+        {% if active_events %}
+          {% for event in active_events[:20] %}
+          <div class="timeline-item">
+            <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+            <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+            <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+          </div>
+          {% endfor %}
+        {% else %}
+          <div class="empty-state"><strong>No session events yet</strong>Run a test or change a WAN from the Command Center.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Suggested workflow</div><div class="card-sub">Use a session as the container for one validation objective</div></div></div>
+    <div class="card-pad">
+      <div class="docs-flow">1. Establish healthy baseline
+2. Start session
+3. Run one or more tests
+4. Observe failover / recovery
+5. Capture traffic if needed
+6. Complete session
+7. Review Analytics + event history</div>
+      <div class="quick-actions">
+        <a class="quick-action" href="{{ url_for('overview') }}"><strong>Command Center</strong><span>Watch the live paths and make manual changes</span></a>
+        <a class="quick-action" href="{{ url_for('tests') }}"><strong>Run tests</strong><span>Brownout, failover, flaky link and diagnostics</span></a>
+      </div>
+    </div>
+  </section>
+</div>
+{% else %}
+<div class="grid grid-2" style="margin-bottom:14px">
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Start a lab session</div><div class="card-sub">Name the objective rather than the individual test</div></div></div>
+    <div class="card-pad">
+      <form method="post" action="{{ url_for('session_start') }}">
+        <input type="hidden" name="return_to" value="sessions">
+        <label>Session name</label>
+        <input type="text" name="name" maxlength="100" placeholder="FortiGate SD-WAN failover validation" required>
+        <div class="field-help">While active, scenario, fault, MTU, capture and security events are tagged with this session ID.</div>
+        <button class="btn btn-primary" type="submit" style="margin-top:12px">Start session</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Why sessions?</div><div class="card-sub">A simple layer above individual tests</div></div></div>
+    <div class="card-pad">
+      <p class="page-description" style="margin-top:0">A session answers “what were we validating?” while tests answer “what impairment did we run?”. This is the foundation for future automatic pass/fail reports, vendor-response timing and downloadable test evidence.</p>
+      <div class="kv" style="margin-top:13px">
+        <div class="k">Current</div><div class="v">named run · start/end time · associated event count</div>
+        <div class="k">Next</div><div class="v">baseline snapshot · test results · captures · vendor observations · report export</div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endif %}
+
+<section class="card">
+  <div class="card-head">
+    <div><div class="card-title">Session history</div><div class="card-sub">Most recent lab runs stored on this appliance</div></div>
+  </div>
+  <div class="card-pad">
+    {% if sessions %}
+    <div class="session-list">
+      {% for item in sessions %}
+      <div class="session-row">
+        <div>
+          <div class="session-name">{{ item.name }}</div>
+          <div class="session-meta mono">{{ item.id }}</div>
+        </div>
+        <div><div class="metric-label">Started</div><div class="session-meta" data-ts-full="{{ item.started_at }}"></div></div>
+        <div><div class="metric-label">Duration</div><div class="session-meta" data-duration-start="{{ item.started_at }}" data-duration-end="{{ item.ended_at or '' }}">{{ "Active" if not item.ended_at else "—" }}</div></div>
+        <div><div class="metric-label">Events</div><div class="session-name">{{ item.event_count }}</div></div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><strong>No completed sessions yet</strong>Start a session before your next validation run.</div>
+    {% endif %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+function fullTime(ts) {
+  return new Date(Number(ts)*1000).toLocaleString([], {dateStyle:"medium", timeStyle:"medium"});
+}
+function duration(start,end) {
+  if (!end) return "Active";
+  let s=Math.max(0,Number(end)-Number(start));
+  const h=Math.floor(s/3600); s-=h*3600;
+  const m=Math.floor(s/60); const sec=Math.round(s-m*60);
+  return (h ? h+"h " : "") + (m ? m+"m " : "") + sec+"s";
+}
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent=NetEmUI.eventTime(el.dataset.ts));
+document.querySelectorAll("[data-ts-full]").forEach(el => el.textContent=fullTime(el.dataset.tsFull));
+document.querySelectorAll("[data-duration-start]").forEach(el => el.textContent=duration(el.dataset.durationStart,el.dataset.durationEnd));
+document.querySelectorAll("[data-session-start]").forEach(el => el.textContent=fullTime(el.dataset.sessionStart));
+
+{% if active_session.active %}
+setInterval(() => {
+  document.querySelectorAll("[data-duration-start][data-duration-end='']").forEach(el => {
+    el.textContent=duration(el.dataset.durationStart, Date.now()/1000);
+  });
+},1000);
+{% endif %}
+</script>
+{% endblock %}
