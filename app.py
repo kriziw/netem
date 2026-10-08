@@ -286,6 +286,41 @@ def delete_bridge(br_name: str):
     run_cmd(f"{IP} link delete {br_name} type bridge")
 
 
+def restore_runtime_state():
+    """
+    Restore optional runtime state from config.json.
+
+    Linux bridges and qdiscs are runtime objects and disappear after reboot.
+    The GUI controls whether saved bridges and shaping should be recreated
+    automatically when the application starts.
+    """
+    cfg = load_config()
+    links = cfg.get("wan_links", [])
+
+    if cfg.get("restore_bridges_on_startup", True):
+        for link in links:
+            bridge = link.get("bridge")
+            inner = link.get("inner")
+            outer = link.get("outer")
+            if bridge and inner and outer:
+                ensure_bridge(bridge, inner, outer)
+
+    if cfg.get("restore_shaping_on_startup", False):
+        shaping = cfg.get("shaping_profiles", {})
+        for link in links:
+            inner = link.get("inner")
+            profile = shaping.get(inner) if inner else None
+            if not profile:
+                continue
+            apply_netem(
+                inner,
+                float(profile.get("delay_ms", 0.0)),
+                float(profile.get("jitter_ms", 0.0)),
+                float(profile.get("loss_pct", 0.0)),
+                float(profile.get("rate_mbit", 0.0)),
+            )
+
+
 # ---------- Nav context ----------
 
 @app.context_processor
@@ -361,6 +396,9 @@ def setup():
         wan1_name = (request.form.get("wan1_name") or "").strip()
         wan2_name = (request.form.get("wan2_name") or "").strip()
 
+        restore_bridges_on_startup = request.form.get("restore_bridges_on_startup") == "on"
+        restore_shaping_on_startup = request.form.get("restore_shaping_on_startup") == "on"
+
         # Tear down old bridges
         old_links = cfg.get("wan_links", [])
         for link in old_links:
@@ -398,6 +436,8 @@ def setup():
             )
 
         cfg["wan_links"] = wan_links
+        cfg["restore_bridges_on_startup"] = restore_bridges_on_startup
+        cfg["restore_shaping_on_startup"] = restore_shaping_on_startup
         save_config(cfg)
 
         if wan_links:
@@ -465,6 +505,15 @@ def configure():
 
     ok, msg = apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit)
     if ok:
+        cfg = load_config()
+        shaping = cfg.setdefault("shaping_profiles", {})
+        shaping[ifname] = {
+            "delay_ms": delay_ms,
+            "jitter_ms": jitter_ms,
+            "loss_pct": loss_pct,
+            "rate_mbit": rate_mbit,
+        }
+        save_config(cfg)
         flash(f"Applied netem on {ifname}: {msg}", "success")
     else:
         flash(f"Failed to apply netem on {ifname}: {msg}", "error")
@@ -480,10 +529,18 @@ def clear():
         return redirect(url_for("index"))
 
     clear_qdisc(ifname)
+
+    cfg = load_config()
+    shaping = cfg.get("shaping_profiles", {})
+    if ifname in shaping:
+        shaping.pop(ifname, None)
+        cfg["shaping_profiles"] = shaping
+        save_config(cfg)
+
     flash(f"Cleared qdisc on {ifname}", "info")
     return redirect(url_for("index"))
 
 
 if __name__ == "__main__":
-    # For devel 
-    app.run(host="0.0.0.0", port=8081, debug=True)
+    restore_runtime_state()
+    app.run(host="0.0.0.0", port=8081, debug=False)
