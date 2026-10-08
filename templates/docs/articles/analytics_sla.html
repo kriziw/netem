@@ -1,0 +1,64 @@
+
+<h2 id="two-data-types">Measured traffic vs injected conditions</h2>
+<p>Analytics intentionally combines two different types of data. Understanding the distinction is essential when interpreting the graphs.</p>
+<div class="docs-table"><table>
+<thead><tr><th>Data</th><th>Source</th><th>What it means</th></tr></thead>
+<tbody>
+<tr><td>Throughput</td><td>Linux interface byte counters</td><td>Traffic actually crossing the selected WAN path.</td></tr>
+<tr><td>Packet rate</td><td>Linux interface packet counters</td><td>Packets actually crossing the path per second.</td></tr>
+<tr><td>Latency</td><td>Current NetEm runtime state</td><td>Delay NetEm intends to inject, not a remote active-probe result.</td></tr>
+<tr><td>Jitter</td><td>Current NetEm runtime state</td><td>Configured/injected jitter.</td></tr>
+<tr><td>Packet loss</td><td>Current NetEm runtime state</td><td>Configured/injected loss percentage.</td></tr>
+<tr><td>Quality</td><td>Current NetEm runtime state</td><td>Selected quality percentage or scenario quality stage.</td></tr>
+</tbody></table></div>
+
+<h2 id="target">Live analysis target</h2>
+<p>Select the WAN at the top of Analytics. The four chart panels then use that WAN's browser-side rolling history. Switching target changes the visible series without changing the WAN configuration.</p>
+
+<h2 id="throughput">Throughput chart</h2>
+<p>Downstream and upstream rates are calculated from differences between successive counter samples:</p>
+<div class="docs-flow">rate (Mbit/s) = (new byte counter − previous byte counter) × 8
+                ÷ elapsed seconds ÷ 1,000,000</div>
+<p>Directional mapping is explicit: downstream uses the inner interface TX counter and upstream uses the outer interface TX counter. Both series share the same dynamic Y-axis scale so their visual relationship is meaningful.</p>
+
+<h2 id="pps">Packet-rate chart</h2>
+<p>Packet rate uses the equivalent packet-counter delta and is shown as downstream/upstream packets per second. It can reveal behavior that bandwidth alone hides—for example, a high PPS stream of small packets.</p>
+
+<h2 id="impairment-charts">Latency, jitter, loss and quality</h2>
+<p>Latency and jitter share one dynamic millisecond scale. Loss and quality share a fixed 0–100% scale. These graphs show NetEm's current injected state, including temporary scenario stages, because the runtime state API tracks the effective profile actually applied.</p>
+
+<h2 id="window">Sampling and time window</h2>
+<p>The UI polls approximately every 1.5 seconds. Analytics stores up to 200 samples per WAN in the current browser page, giving roughly a five-minute rolling view at that sampling interval. Reloading the page resets this chart history. The event log is persistent; the chart time series is not yet stored server-side.</p>
+
+<h2 id="sla">Generic SLA evaluator</h2>
+<p>The SLA profile defines maximum accepted latency, jitter and packet loss. The default profile is:</p>
+<div class="docs-table"><table>
+<thead><tr><th>Metric</th><th>Default threshold</th></tr></thead>
+<tbody>
+<tr><td>Latency</td><td>100 ms</td></tr>
+<tr><td>Jitter</td><td>30 ms</td></tr>
+<tr><td>Packet loss</td><td>2%</td></tr>
+</tbody></table></div>
+<p>The expected SLA passes only when all three metrics are within threshold and no runtime data-plane fault is active. A blackhole therefore fails the <strong>data_plane</strong> check even if the saved latency/jitter/loss values are otherwise healthy.</p>
+
+<h3 id="edit-sla">Edit the SLA profile</h3>
+<ol>
+  <li>Open Analytics.</li>
+  <li>Scroll to <strong>Generic SLA evaluator</strong>.</li>
+  <li>Give the profile a descriptive name.</li>
+  <li>Set maximum latency, jitter and loss.</li>
+  <li>Click <strong>Save SLA profile</strong>.</li>
+</ol>
+<p>The profile is persisted in <code>config.json</code> and immediately affects expected PASS/FAIL status across Overview, WAN Links, Analytics and the state API.</p>
+
+<h2 id="expected-observed">Injected vs observed</h2>
+<p>The current <strong>Injected vs observed</strong> table only has the NetEm side populated. The observed column is reserved for future SD-WAN/firewall adapters. The intended model is:</p>
+<div class="docs-flow">NetEm injected state       Appliance observed state
+80 ms latency             84 ms SLA latency
+3.0% loss                 3.2% SLA loss
+expected SLA FAIL         appliance SLA FAIL
+                          selected path = WAN2</div>
+<p>With that data, future scenario reports can calculate detection delay, failover delay and recovery convergence rather than only displaying impairment values.</p>
+
+<h2 id="events">Event timeline and export</h2>
+<p>Analytics shows recent persistent events newest first. Use the JSON or CSV buttons to export up to the retained event-history window. Events are operational records, not packet-level telemetry.</p>
