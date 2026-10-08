@@ -579,14 +579,12 @@ def calculate_profile(
     }
 
 
-def apply_selected_profile(link: dict, presets: dict):
-    """Apply either the quality-derived or custom profile stored on one WAN."""
-    inner = link.get("inner")
-    outer = link.get("outer")
+def get_effective_profile(link: dict, presets: dict):
+    """Return the currently configured effective impairment values without applying them."""
     preset_id = link.get("preset", "broadband")
     preset = presets.get(preset_id) or presets.get("broadband")
-    if not inner or not preset:
-        return False, "Missing interface or preset", {}
+    if not preset:
+        return {}
 
     mode = link.get("mode", "quality")
     quality = max(0, min(100, int(link.get("quality", 100))))
@@ -595,7 +593,7 @@ def apply_selected_profile(link: dict, presets: dict):
 
     if mode == "custom" and link.get("custom_profile"):
         custom = link["custom_profile"]
-        effective = {
+        return {
             "delay_ms": max(0.0, float(custom.get("delay_ms", 0.0))),
             "jitter_ms": max(0.0, float(custom.get("jitter_ms", 0.0))),
             "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
@@ -606,13 +604,25 @@ def apply_selected_profile(link: dict, presets: dict):
             "corrupt_pct": min(100.0, max(0.0, float(custom.get("corrupt_pct", 0.0)))),
             "reorder_pct": min(100.0, max(0.0, float(custom.get("reorder_pct", 0.0)))),
         }
-    else:
-        effective = calculate_profile(
-            preset,
-            quality,
-            bandwidth_download,
-            bandwidth_upload,
-        )
+
+    return calculate_profile(
+        preset,
+        quality,
+        bandwidth_download,
+        bandwidth_upload,
+    )
+
+
+def apply_selected_profile(link: dict, presets: dict):
+    """Apply either the quality-derived or custom profile stored on one WAN."""
+    inner = link.get("inner")
+    outer = link.get("outer")
+    if not inner:
+        return False, "Missing interface or preset", {}
+
+    effective = get_effective_profile(link, presets)
+    if not effective:
+        return False, "Missing interface or preset", {}
 
     ok_down, msg_down = apply_netem(
         inner,
