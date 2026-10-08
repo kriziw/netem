@@ -1,0 +1,82 @@
+
+<h2 id="method">Troubleshooting method</h2>
+<p>Separate problems into four layers: application, Linux topology, impairment/qdisc, and traffic itself. Verify one layer at a time instead of changing multiple settings simultaneously.</p>
+<div class="docs-flow">Web/UI problem?
+  ↓
+Flask/service status
+  ↓
+correct bridge/interface mapping
+  ↓
+tc/qdisc state
+  ↓
+Linux interface counters
+  ↓
+firewall/SD-WAN behavior</div>
+
+<h2 id="zero-throughput">Live throughput stays at 0</h2>
+<ol>
+  <li>Confirm traffic is actually using the selected WAN on the firewall.</li>
+  <li>Open <code>/api/v1/telemetry</code> and note <code>traffic.download.bytes</code> and <code>traffic.upload.bytes</code>.</li>
+  <li>Refresh after a few seconds while generating traffic. The relevant counters should increase.</li>
+  <li>If they do not, compare the raw inner/outer counters and verify topology mapping.</li>
+</ol>
+<p>On the VM, inspect counters directly:</p>
+<pre>ip -s link show enp6s19
+ip -s link show enp6s20
+ip -s link show enp6s21
+ip -s link show enp6s22</pre>
+<p>If Linux counters increase but the UI does not, check browser developer tools for failed requests to <code>/api/v1/telemetry</code> or <code>/api/v1/state</code>.</p>
+
+<h2 id="shaping">Latency/loss works but bandwidth limiting does not</h2>
+<p>Open <strong>WAN Links → Adjust link → Diagnostics</strong> and inspect the raw qdisc output on inner and outer interfaces. NetEm expects the relevant netem/TBF qdiscs to be accepted by the kernel.</p>
+<pre>tc -s qdisc show dev enp6s19
+tc -s qdisc show dev enp6s20
+tc -s qdisc show dev enp6s21
+tc -s qdisc show dev enp6s22</pre>
+<p>If the UI reports an Apply error or TBF is missing, preserve the exact command/error output before changing the topology. This differentiates a UI/state issue from a kernel traffic-control hierarchy issue.</p>
+
+<h2 id="bridges">WAN traffic stops after reboot</h2>
+<p>Check <strong>Settings → Topology &amp; interfaces</strong> and confirm startup bridge restore is enabled. Then inspect:</p>
+<pre>ip link show br-wan1
+ip link show br-wan2
+bridge link</pre>
+<p>If the bridges are absent, check the service log for startup errors.</p>
+
+<h2 id="service">Service will not start</h2>
+<pre>systemctl status techkarma-netem --no-pager
+journalctl -u techkarma-netem -n 100 --no-pager</pre>
+<p>Also validate Python imports from the repository:</p>
+<pre>cd /opt/techkarma-netem
+./.venv/bin/python -m py_compile app.py netem_core.py
+./.venv/bin/python -c 'from app import app; print(app.url_map)'</pre>
+
+<h2 id="git-permission">Update fails with “insufficient permission for adding an object”</h2>
+<p>This normally means Git objects were created by a different user, commonly root. Normalize ownership and test Git as the service user:</p>
+<pre>systemctl stop techkarma-netem
+chown -R techkarma:techkarma /opt/techkarma-netem
+runuser -u techkarma -- git -C /opt/techkarma-netem status
+runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin
+systemctl start techkarma-netem</pre>
+<p>Avoid plain root-owned Git operations in this checkout afterward.</p>
+
+<h2 id="capture">Packet capture does not start</h2>
+<p>Check both the executable and service capabilities:</p>
+<pre>command -v tcpdump
+systemctl show techkarma-netem -p User -p AmbientCapabilities -p CapabilityBoundingSet</pre>
+<p><code>tcpdump</code> should be present and the service should have <code>CAP_NET_RAW</code>. Shaping itself normally needs <code>CAP_NET_ADMIN</code>.</p>
+
+<h2 id="scenario-stuck">Scenario appears stuck</h2>
+<p>Check the Scenarios active banner and the event timeline. Each <code>after</code> value is a wait before the next action, so a long interval may be intentional. Use <strong>Stop &amp; restore WAN</strong> to request termination. If the service was interrupted mid-test, reapply the normal saved profile from WAN Links.</p>
+
+<h2 id="sla-unexpected">Expected SLA result looks wrong</h2>
+<p>Remember that the generic SLA evaluates NetEm's injected values, not the firewall's measured probe. Verify the SLA thresholds in Analytics and the current effective delay/jitter/loss in <code>/api/v1/state</code>. Any active blackhole makes the data-plane check fail.</p>
+
+<h2 id="logs-paths">Useful paths</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Path</th><th>Purpose</th></tr></thead>
+<tbody>
+<tr><td><code>/opt/techkarma-netem/config.json</code></td><td>Persisted topology, profiles, scenarios and SLA settings</td></tr>
+<tr><td><code>/opt/techkarma-netem/runtime/events.jsonl</code></td><td>Persistent runtime event history</td></tr>
+<tr><td><code>/opt/techkarma-netem/runtime/captures/</code></td><td>Bounded PCAP files</td></tr>
+<tr><td><code>/opt/techkarma-netem/version.txt</code></td><td>Installed application version</td></tr>
+</tbody></table></div>
