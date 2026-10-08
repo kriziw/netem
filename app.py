@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import copy
 import json
 import math
 import os
@@ -15,6 +16,8 @@ from flask import (
     redirect,
     url_for,
     flash,
+    jsonify,
+    Response,
 )
 
 app = Flask(__name__)
@@ -26,6 +29,20 @@ CONFIG_PATH = BASE_DIR / "config.json"
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
 GIT = "/usr/bin/git"
+
+RUNTIME_LOCK = threading.Lock()
+ACTIVE_FAULTS = {}
+EVENT_LOG = []
+SCENARIO_STOP = threading.Event()
+SCENARIO_STATE = {
+    "active": False,
+    "scenario_id": None,
+    "scenario_name": None,
+    "link_id": None,
+    "started_at": None,
+    "step": 0,
+    "step_label": None,
+}
 
 
 # ---------- Helper: shell ----------
@@ -218,6 +235,44 @@ QUALITY_MODELS = {
 BANDWIDTH_OPTIONS = [
     1, 2, 5, 10, 20, 25, 50, 75, 100, 150, 200, 300, 500,
     1000, 2000, 2500, 5000, 10000,
+]
+
+DEFAULT_SCENARIOS = [
+    {
+        "id": "progressive_brownout",
+        "name": "Progressive brownout",
+        "description": "Gradually degrades one WAN, holds it in a poor state, then restores it.",
+        "steps": [
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
+            {"after": 10, "action": "quality", "value": 80, "label": "Minor degradation"},
+            {"after": 10, "action": "quality", "value": 60, "label": "Noticeable degradation"},
+            {"after": 10, "action": "quality", "value": 40, "label": "Severe brownout"},
+            {"after": 20, "action": "quality", "value": 70, "label": "Partial recovery"},
+            {"after": 10, "action": "quality", "value": 100, "label": "Recovered"},
+        ],
+    },
+    {
+        "id": "sla_failover",
+        "name": "SLA failover",
+        "description": "Starts healthy, blackholes the WAN while link state remains up, then restores it.",
+        "steps": [
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
+            {"after": 10, "action": "fault", "value": "blackhole", "label": "Blackhole"},
+            {"after": 30, "action": "fault", "value": "normal", "label": "Connectivity restored"},
+        ],
+    },
+    {
+        "id": "flaky_underlay",
+        "name": "Flaky underlay",
+        "description": "Alternates between healthy and one-way failure to exercise SLA hysteresis.",
+        "steps": [
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
+            {"after": 8, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure"},
+            {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
+            {"after": 8, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure"},
+            {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
+        ],
+    },
 ]
 
 
@@ -436,6 +491,10 @@ def calculate_profile(
             "loss_pct": 100.0,
             "download_mbit": 1,
             "upload_mbit": 1,
+            "loss_correlation_pct": 0.0,
+            "duplicate_pct": 0.0,
+            "corrupt_pct": 0.0,
+            "reorder_pct": 0.0,
         }
 
     model = preset.get("quality_model", "broadband")
@@ -472,6 +531,10 @@ def calculate_profile(
         "loss_pct": round(loss, 3),
         "download_mbit": download,
         "upload_mbit": upload,
+        "loss_correlation_pct": 0.0,
+        "duplicate_pct": 0.0,
+        "corrupt_pct": 0.0,
+        "reorder_pct": 0.0,
     }
 
 
@@ -497,6 +560,10 @@ def apply_selected_profile(link: dict, presets: dict):
             "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
             "download_mbit": int(round(max(0.0, float(custom.get("download_mbit", 0.0))))),
             "upload_mbit": int(round(max(0.0, float(custom.get("upload_mbit", 0.0))))),
+            "loss_correlation_pct": min(100.0, max(0.0, float(custom.get("loss_correlation_pct", 0.0)))),
+            "duplicate_pct": min(100.0, max(0.0, float(custom.get("duplicate_pct", 0.0)))),
+            "corrupt_pct": min(100.0, max(0.0, float(custom.get("corrupt_pct", 0.0)))),
+            "reorder_pct": min(100.0, max(0.0, float(custom.get("reorder_pct", 0.0)))),
         }
     else:
         effective = calculate_profile(
@@ -512,6 +579,10 @@ def apply_selected_profile(link: dict, presets: dict):
         effective["jitter_ms"],
         effective["loss_pct"],
         effective["download_mbit"],
+        effective.get("loss_correlation_pct", 0.0),
+        effective.get("duplicate_pct", 0.0),
+        effective.get("corrupt_pct", 0.0),
+        effective.get("reorder_pct", 0.0),
     )
 
     ok_up, msg_up = True, "OK"
@@ -683,10 +754,22 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
-def apply_netem(ifname: str, delay_ms: float, jitter_ms: float,
-                loss_pct: float, rate_mbit: float):
+def apply_netem(
+    ifname: str,
+    delay_ms: float,
+    jitter_ms: float,
+    loss_pct: float,
+    rate_mbit: float,
+    loss_correlation_pct: float = 0.0,
+    duplicate_pct: float = 0.0,
+    corrupt_pct: float = 0.0,
+    reorder_pct: float = 0.0,
+):
     """
     Apply netem + optional tbf on interface.
+
+    Advanced impairment controls are intentionally bounded to tc/netem
+    primitives and operate only on configured lab interfaces.
     """
     # Always start clean
     clear_qdisc(ifname)
@@ -699,7 +782,21 @@ def apply_netem(ifname: str, delay_ms: float, jitter_ms: float,
             parts.append(f"delay {delay_ms:.1f}ms")
 
     if loss_pct and loss_pct > 0:
-        parts.append(f"loss {loss_pct:.3f}%")
+        if loss_correlation_pct and loss_correlation_pct > 0:
+            parts.append(
+                f"loss {loss_pct:.3f}% {min(100.0, loss_correlation_pct):.3f}%"
+            )
+        else:
+            parts.append(f"loss {loss_pct:.3f}%")
+
+    if duplicate_pct and duplicate_pct > 0:
+        parts.append(f"duplicate {min(100.0, duplicate_pct):.3f}%")
+
+    if corrupt_pct and corrupt_pct > 0:
+        parts.append(f"corrupt {min(100.0, corrupt_pct):.3f}%")
+
+    if reorder_pct and reorder_pct > 0:
+        parts.append(f"reorder {min(100.0, reorder_pct):.3f}%")
 
     netem_cmd = f"{TC} qdisc add dev {ifname} root handle 1:0 " + " ".join(parts)
     rc, out, err = run_cmd(netem_cmd)
@@ -785,6 +882,158 @@ def restore_runtime_state():
             apply_selected_profile(link, presets)
 
 
+
+# ---------- Lab runtime / observability ----------
+
+def log_event(kind: str, message: str, **details):
+    EVENT_LOG.append(
+        {
+            "timestamp": time.time(),
+            "kind": kind,
+            "message": message,
+            "details": details,
+        }
+    )
+    del EVENT_LOG[:-200]
+
+
+def get_link(cfg: dict, link_id: str):
+    return next(
+        (
+            link for link in cfg.get("wan_links", [])
+            if (link.get("id") or link.get("bridge")) == link_id
+        ),
+        None,
+    )
+
+
+def interface_counters(ifname: str):
+    result = {
+        "rx_bytes": 0,
+        "tx_bytes": 0,
+        "rx_packets": 0,
+        "tx_packets": 0,
+        "rx_dropped": 0,
+        "tx_dropped": 0,
+        "rx_errors": 0,
+        "tx_errors": 0,
+    }
+    if not ifname:
+        return result
+
+    stats_dir = Path("/sys/class/net") / ifname / "statistics"
+    for key in result:
+        try:
+            result[key] = int((stats_dir / key).read_text().strip())
+        except (OSError, ValueError):
+            result[key] = 0
+    return result
+
+
+def apply_runtime_fault(link: dict, fault: str, presets: dict):
+    """
+    Apply a transient fault without changing the persisted WAN profile.
+
+    Blackholes deliberately leave the Linux link/bridge up so an SD-WAN device
+    must detect the data-plane failure with its own health checks.
+    """
+    inner = link.get("inner")
+    outer = link.get("outer")
+    link_id = link.get("id") or link.get("bridge") or inner
+    if not inner:
+        return False, "WAN has no inner interface."
+
+    if fault == "normal":
+        ok, msg, _ = apply_selected_profile(link, presets)
+        if ok:
+            ACTIVE_FAULTS.pop(link_id, None)
+            log_event("fault", f"{link_id} restored to normal", link_id=link_id)
+        return ok, msg
+
+    # First restore the configured state so one-way faults leave the opposite
+    # direction in its normal configured condition.
+    ok, msg, _ = apply_selected_profile(link, presets)
+    if not ok:
+        return False, msg
+
+    if fault in ("blackhole", "downstream_blackhole"):
+        ok_down, msg_down = apply_netem(inner, 0.0, 0.0, 100.0, 0.0)
+        if not ok_down:
+            return False, msg_down
+
+    if fault in ("blackhole", "upstream_blackhole") and outer:
+        ok_up, msg_up = apply_netem(outer, 0.0, 0.0, 100.0, 0.0)
+        if not ok_up:
+            return False, msg_up
+
+    if fault not in ("blackhole", "downstream_blackhole", "upstream_blackhole"):
+        return False, "Unknown runtime fault."
+
+    ACTIVE_FAULTS[link_id] = fault
+    log_event("fault", f"{link_id}: {fault}", link_id=link_id, fault=fault)
+    return True, "OK"
+
+
+def scenario_snapshot():
+    with RUNTIME_LOCK:
+        return dict(SCENARIO_STATE)
+
+
+def run_scenario(link_id: str, scenario: dict):
+    cfg = load_config()
+    presets = get_presets(cfg)
+    link = get_link(cfg, link_id)
+    if not link:
+        with RUNTIME_LOCK:
+            SCENARIO_STATE["active"] = False
+        return
+
+    original = copy.deepcopy(link)
+    try:
+        for index, step in enumerate(scenario.get("steps", []), start=1):
+            if SCENARIO_STOP.wait(max(0, int(step.get("after", 0)))):
+                break
+
+            with RUNTIME_LOCK:
+                SCENARIO_STATE["step"] = index
+                SCENARIO_STATE["step_label"] = step.get("label") or step.get("action")
+
+            action = step.get("action")
+            if action == "quality":
+                transient = copy.deepcopy(original)
+                transient["mode"] = "quality"
+                transient["quality"] = int(step.get("value", 100))
+                transient.pop("custom_profile", None)
+                apply_selected_profile(transient, presets)
+                ACTIVE_FAULTS.pop(link_id, None)
+                log_event(
+                    "scenario",
+                    f'{scenario["name"]}: {step.get("label", "quality")}',
+                    link_id=link_id,
+                    quality=transient["quality"],
+                )
+            elif action == "fault":
+                apply_runtime_fault(original, step.get("value", "normal"), presets)
+
+    finally:
+        apply_selected_profile(original, presets)
+        ACTIVE_FAULTS.pop(link_id, None)
+        log_event("scenario", f'{scenario["name"]} finished', link_id=link_id)
+        with RUNTIME_LOCK:
+            SCENARIO_STATE.update(
+                {
+                    "active": False,
+                    "scenario_id": None,
+                    "scenario_name": None,
+                    "link_id": None,
+                    "started_at": None,
+                    "step": 0,
+                    "step_label": None,
+                }
+            )
+        SCENARIO_STOP.clear()
+
+
 # ---------- Nav context ----------
 
 @app.context_processor
@@ -793,6 +1042,7 @@ def inject_nav():
     return {
         "nav_items": [
             {"id": "dashboard", "label": "Dashboard", "endpoint": "index"},
+            {"id": "lab", "label": "Lab Tools", "endpoint": "lab_tools"},
             {"id": "presets", "label": "Presets", "endpoint": "presets"},
             {"id": "updates", "label": "Updates", "endpoint": "updates"},
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
@@ -850,6 +1100,10 @@ def index():
                 "loss_pct": float(link["custom_profile"].get("loss_pct", 0.0)),
                 "download_mbit": int(round(float(link["custom_profile"].get("download_mbit", 0.0)))),
                 "upload_mbit": int(round(float(link["custom_profile"].get("upload_mbit", 0.0)))),
+                "loss_correlation_pct": float(link["custom_profile"].get("loss_correlation_pct", 0.0)),
+                "duplicate_pct": float(link["custom_profile"].get("duplicate_pct", 0.0)),
+                "corrupt_pct": float(link["custom_profile"].get("corrupt_pct", 0.0)),
+                "reorder_pct": float(link["custom_profile"].get("reorder_pct", 0.0)),
             }
         else:
             effective = (
@@ -901,6 +1155,194 @@ def index():
         presets=presets,
         bandwidth_options=BANDWIDTH_OPTIONS,
     )
+
+
+@app.route("/lab")
+def lab_tools():
+    cfg = load_config()
+    links = cfg.get("wan_links", [])
+    telemetry = []
+    for link in links:
+        telemetry.append(
+            {
+                "id": link.get("id") or link.get("bridge"),
+                "name": link.get("name", "WAN"),
+                "inner": link.get("inner"),
+                "outer": link.get("outer"),
+                "quality": int(link.get("quality", 100)),
+                "fault": ACTIVE_FAULTS.get(
+                    link.get("id") or link.get("bridge"),
+                    "normal",
+                ),
+            }
+        )
+    return render_template(
+        "lab.html",
+        page="lab",
+        links=telemetry,
+        scenarios=DEFAULT_SCENARIOS,
+        scenario_state=scenario_snapshot(),
+        events=list(reversed(EVENT_LOG[-30:])),
+    )
+
+
+@app.route("/lab/fault", methods=["POST"])
+def lab_fault():
+    link_id = request.form.get("link_id") or ""
+    fault = request.form.get("fault") or "normal"
+    cfg = load_config()
+    presets = get_presets(cfg)
+    link = get_link(cfg, link_id)
+
+    if not link:
+        flash("Unknown WAN link.", "error")
+    elif scenario_snapshot().get("active"):
+        flash("Stop the active scenario before applying a manual fault.", "error")
+    else:
+        ok, msg = apply_runtime_fault(link, fault, presets)
+        if ok:
+            flash(f"Runtime fault for {link_id}: {fault}.", "success")
+        else:
+            flash("Failed to apply runtime fault: " + msg, "error")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/scenario/start", methods=["POST"])
+def lab_scenario_start():
+    link_id = request.form.get("link_id") or ""
+    scenario_id = request.form.get("scenario_id") or ""
+    scenario = next(
+        (item for item in DEFAULT_SCENARIOS if item["id"] == scenario_id),
+        None,
+    )
+    cfg = load_config()
+
+    if not get_link(cfg, link_id):
+        flash("Unknown WAN link.", "error")
+        return redirect(url_for("lab_tools"))
+    if not scenario:
+        flash("Unknown scenario.", "error")
+        return redirect(url_for("lab_tools"))
+
+    with RUNTIME_LOCK:
+        if SCENARIO_STATE["active"]:
+            flash("A scenario is already running.", "error")
+            return redirect(url_for("lab_tools"))
+        SCENARIO_STOP.clear()
+        SCENARIO_STATE.update(
+            {
+                "active": True,
+                "scenario_id": scenario_id,
+                "scenario_name": scenario["name"],
+                "link_id": link_id,
+                "started_at": time.time(),
+                "step": 0,
+                "step_label": "Starting",
+            }
+        )
+
+    threading.Thread(
+        target=run_scenario,
+        args=(link_id, scenario),
+        daemon=True,
+    ).start()
+    flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/scenario/stop", methods=["POST"])
+def lab_scenario_stop():
+    if scenario_snapshot().get("active"):
+        SCENARIO_STOP.set()
+        flash("Scenario stop requested. The configured WAN profile will be restored.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/api/v1/state")
+def api_state():
+    cfg = load_config()
+    links = []
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge")
+        links.append(
+            {
+                "id": link_id,
+                "name": link.get("name", "WAN"),
+                "bridge": link.get("bridge"),
+                "inner": link.get("inner"),
+                "outer": link.get("outer"),
+                "preset": link.get("preset", "broadband"),
+                "quality": int(link.get("quality", 100)),
+                "mode": link.get("mode", "quality"),
+                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+            }
+        )
+    return jsonify(
+        {
+            "timestamp": time.time(),
+            "links": links,
+            "scenario": scenario_snapshot(),
+        }
+    )
+
+
+@app.route("/api/v1/telemetry")
+def api_telemetry():
+    cfg = load_config()
+    links = []
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge")
+        links.append(
+            {
+                "id": link_id,
+                "name": link.get("name", "WAN"),
+                "inner": {
+                    "interface": link.get("inner"),
+                    "counters": interface_counters(link.get("inner")),
+                },
+                "outer": {
+                    "interface": link.get("outer"),
+                    "counters": interface_counters(link.get("outer")),
+                },
+                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+            }
+        )
+    return jsonify({"timestamp": time.time(), "links": links})
+
+
+@app.route("/metrics")
+def prometheus_metrics():
+    cfg = load_config()
+    lines = [
+        "# HELP netem_link_quality Configured NetEm quality percentage.",
+        "# TYPE netem_link_quality gauge",
+        "# HELP netem_interface_rx_bytes Interface received bytes.",
+        "# TYPE netem_interface_rx_bytes counter",
+        "# HELP netem_interface_tx_bytes Interface transmitted bytes.",
+        "# TYPE netem_interface_tx_bytes counter",
+        "# HELP netem_runtime_fault Runtime fault state (1 when a fault is active).",
+        "# TYPE netem_runtime_fault gauge",
+    ]
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge") or "unknown"
+        quality = int(link.get("quality", 100))
+        lines.append(f'netem_link_quality{{link="{link_id}"}} {quality}')
+        lines.append(
+            f'netem_runtime_fault{{link="{link_id}"}} '
+            + ("0" if ACTIVE_FAULTS.get(link_id, "normal") == "normal" else "1")
+        )
+        for direction in ("inner", "outer"):
+            ifname = link.get(direction)
+            counters = interface_counters(ifname)
+            lines.append(
+                f'netem_interface_rx_bytes{{link="{link_id}",side="{direction}",interface="{ifname}"}} '
+                f'{counters["rx_bytes"]}'
+            )
+            lines.append(
+                f'netem_interface_tx_bytes{{link="{link_id}",side="{direction}",interface="{ifname}"}} '
+                f'{counters["tx_bytes"]}'
+            )
+    return Response("\n".join(lines) + "\n", mimetype="text/plain; version=0.0.4")
 
 
 @app.route("/updates", methods=["GET", "POST"])
@@ -1191,6 +1633,18 @@ def configure():
             "upload_mbit": int(round(custom_float(
                 "custom_upload_mbit", baseline["upload_mbit"]
             ))),
+            "loss_correlation_pct": min(
+                100.0, custom_float("custom_loss_correlation_pct", 0.0)
+            ),
+            "duplicate_pct": min(
+                100.0, custom_float("custom_duplicate_pct", 0.0)
+            ),
+            "corrupt_pct": min(
+                100.0, custom_float("custom_corrupt_pct", 0.0)
+            ),
+            "reorder_pct": min(
+                100.0, custom_float("custom_reorder_pct", 0.0)
+            ),
         }
     else:
         # Returning to the quality slider deliberately discards manual overrides.
