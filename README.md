@@ -35,6 +35,9 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 
 - **Asymmetric bandwidth simulation**
   - Independent nominal download and upload capacity per preset.
+  - Each WAN can override its nominal download/upload line rate without changing the selected access technology.
+  - Bandwidth overrides remain part of the normal profile state; they do **not** put the WAN into Custom mode.
+  - Quality degradation is calculated from the selected WAN line rate, while the profile continues to define latency, jitter, loss and degradation behaviour.
   - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
 
 - **GUI preset editor**
@@ -294,15 +297,18 @@ tc qdisc add dev <outer-nic> parent ... tbf rate <upload>
 The Dashboard exposes:
 
 - Access preset
+- Independent nominal download/upload bandwidth selectors
 - Quality slider
 - Derived quality status
 - Manual sliders for latency, jitter, packet loss, download and upload
-- Automatic **Custom** mode when any individual value is changed
+- Automatic **Custom** mode when an impairment/performance slider is changed
 - Integer Mbit/s bandwidth values for compatibility with the traffic shaper
+
+The nominal bandwidth selectors are deliberately separate from Custom mode. For example, a DIA profile can be configured as a 200/100 Mbit/s circuit while still remaining at 100% quality and using DIA latency/jitter/loss characteristics. Reducing quality then degrades performance from that 200/100 Mbit/s baseline rather than from the preset's original 1000/1000 Mbit/s line rate.
 
 For example, a WAN can remain on the 5G preset at 100% quality, then have only jitter manually increased. The WAN becomes Custom while the remaining values stay at their current derived values. Moving the quality slider again deliberately discards those custom values and recalculates the full profile from the selected preset and quality.
 
-The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
+The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, per-WAN nominal bandwidth overrides, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
 
 ---
 
