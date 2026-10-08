@@ -504,11 +504,14 @@ def reset_config():
 @app.route("/configure", methods=["POST"])
 def configure():
     """
-    Apply netem settings to a single interface.
-    Expect form fields:
-      itf, delay_ms, jitter_ms, loss_pct, rate_mbit
+    Apply WAN impairment settings.
+
+    Delay, jitter and loss are applied on the inner interface. Download
+    bandwidth is limited on the inner interface (traffic toward the test
+    device) and upload bandwidth on the outer interface (traffic toward WAN).
     """
     ifname = request.form.get("itf") or request.args.get("itf")
+    outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
     if not ifname:
         flash("Missing interface name.", "error")
         return redirect(url_for("index"))
