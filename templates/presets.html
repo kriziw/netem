@@ -54,7 +54,7 @@
     .card-head { display:flex; justify-content:space-between; gap:10px; align-items:center; margin-bottom:12px; }
     .preset-id { color:var(--muted); font-size:.72rem; font-family:ui-monospace, monospace; }
     label { display:block; color:var(--muted); font-size:.74rem; margin-bottom:4px; }
-    input[type="text"], input[type="number"] {
+    input[type="text"], input[type="number"], select {
       width:100%; padding:8px 9px; border-radius:9px; border:1px solid var(--border);
       background:rgba(2,6,23,.75); color:var(--text); margin-bottom:10px;
     }
@@ -118,6 +118,15 @@
           <label>Display name</label>
           <input type="text" name="{{ preset_id }}_name" value="{{ preset.name }}">
 
+          <label>Quality degradation behaviour</label>
+          <select name="{{ preset_id }}_quality_model">
+            {% for model_id, model_name in quality_models.items() %}
+              <option value="{{ model_id }}" {% if preset.get('quality_model', 'broadband') == model_id %}selected{% endif %}>
+                {{ model_name }}
+              </option>
+            {% endfor %}
+          </select>
+
           <div class="fields">
             <div>
               <label>Latency (ms)</label>
@@ -157,8 +166,9 @@
     </form>
 
     <div class="note">
-      Quality is relative to each preset. At 100%, the values above are used as-is. As quality falls,
-      the emulator progressively increases latency, jitter and loss while reducing download and upload capacity.
+      Quality is relative to each preset. At 100%, the values above are used as-is. The selected degradation
+      behaviour determines which characteristics deteriorate first and how aggressively they change. For example,
+      mobile profiles lose capacity and gain jitter earlier, while DIA stays stable until much poorer quality.
       At 0%, the link is treated as effectively down.
     </div>
   </main>

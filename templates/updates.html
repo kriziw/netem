@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>NetEm · Updates</title>
+  <style>
+    :root {
+      --bg:#020617; --card:rgba(15,23,42,.96); --border:#1f2937;
+      --accent:#22e6b8; --accent-soft:rgba(34,230,184,.12);
+      --text:#e5e7eb; --muted:#9ca3af; --danger:#ef4444;
+    }
+    * { box-sizing:border-box; }
+    body {
+      margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      background:
+        radial-gradient(circle at top left,rgba(34,230,184,.16),transparent 60%),
+        radial-gradient(circle at bottom right,rgba(37,99,235,.15),transparent 60%),
+        var(--bg);
+      color:var(--text);
+    }
+    a { color:inherit; text-decoration:none; }
+    .layout { display:flex; min-height:100vh; }
+    .sidebar {
+      width:250px; padding:22px 20px; border-right:1px solid var(--border);
+      background:#020617; display:flex; flex-direction:column;
+    }
+    .sidebar-header { margin-bottom:26px; }
+    .brand { font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
+    .brand span { color:var(--accent); }
+    .brand-sub { margin-top:3px; font-size:.76rem; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
+    .nav-title { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; margin-bottom:7px; }
+    .nav-list { list-style:none; padding:0; margin:0; }
+    .nav-item { margin-bottom:4px; }
+    .nav-link { display:flex; gap:9px; align-items:center; padding:8px 10px; border-radius:999px; color:#cbd5e1; font-size:.86rem; }
+    .nav-dot { width:7px; height:7px; border-radius:50%; background:#475569; }
+    .nav-item-active .nav-link { background:var(--accent-soft); color:var(--accent); font-weight:600; }
+    .nav-item-active .nav-dot { background:var(--accent); }
+    .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
+    .main { flex:1; padding:24px; }
+    .title { font-size:1.12rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); }
+    .subtitle { margin-top:5px; max-width:780px; font-size:.86rem; line-height:1.45; color:var(--muted); }
+    .card {
+      max-width:760px; margin-top:18px; padding:18px; border-radius:16px;
+      border:1px solid #334155; background:var(--card);
+    }
+    .rows { display:grid; grid-template-columns:160px 1fr; gap:9px 14px; font-size:.84rem; }
+    .key { color:var(--muted); }
+    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; word-break:break-all; }
+    .state { margin-top:16px; padding:10px 12px; border-radius:10px; border:1px solid var(--border); color:#cbd5e1; }
+    .state.good { border-color:rgba(34,197,94,.65); color:#bbf7d0; background:rgba(34,197,94,.08); }
+    .state.warn { border-color:rgba(234,179,8,.65); color:#fef08a; background:rgba(234,179,8,.08); }
+    .state.bad { border-color:rgba(239,68,68,.65); color:#fecaca; background:rgba(239,68,68,.08); }
+    .actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:16px; }
+    .btn {
+      border-radius:999px; padding:8px 15px; border:1px solid var(--border);
+      background:rgba(15,23,42,.95); color:#cbd5e1; cursor:pointer; font-size:.82rem;
+    }
+    .btn-primary { background:var(--accent); color:#020617; border-color:var(--accent); font-weight:700; }
+    .btn:disabled { opacity:.45; cursor:not-allowed; }
+    .flash { max-width:760px; margin-top:10px; padding:9px 11px; border-radius:10px; font-size:.82rem; border:1px solid var(--border); }
+    .flash.success { border-color:rgba(34,197,94,.7); color:#bbf7d0; background:rgba(34,197,94,.08); }
+    .flash.error { border-color:rgba(239,68,68,.7); color:#fecaca; background:rgba(239,68,68,.08); }
+    .flash.info { border-color:rgba(59,130,246,.7); color:#bfdbfe; background:rgba(59,130,246,.08); }
+    .note { max-width:760px; margin-top:14px; color:var(--muted); font-size:.76rem; line-height:1.45; }
+    @media (max-width:900px) {
+      .layout { flex-direction:column; }
+      .sidebar { width:100%; }
+      .sidebar-footer { display:none; }
+      .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
+      .main { padding:16px; }
+      .rows { grid-template-columns:1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">NetEm <span>WAN Lab</span></div>
+      <div class="brand-sub">SD-WAN impairment emulator</div>
+    </div>
+    <div class="nav-title">Navigation</div>
+    <ul class="nav-list">
+      {% for item in nav_items %}
+      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
+        <a class="nav-link" href="{{ url_for(item.endpoint) }}"><span class="nav-dot"></span>{{ item.label }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="sidebar-footer">powered by Linux tc/netem</div>
+  </aside>
+
+  <main class="main">
+    <div class="title">Application updates</div>
+    <div class="subtitle">
+      Check the configured GitHub remote for updates to the currently installed branch.
+      Updates are fast-forward only and are refused if tracked application files have local changes.
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <div class="card">
+      <div class="rows">
+        <div class="key">Branch</div>
+        <div class="mono">{{ update_status.branch or "unknown" }}</div>
+
+        <div class="key">Installed commit</div>
+        <div><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
+
+        <div class="key">Remote</div>
+        <div class="mono">{{ update_status.remote_url or "unknown" }}</div>
+
+        <div class="key">Remote commits available</div>
+        <div>{{ update_status.behind }}</div>
+
+        <div class="key">Local-only commits</div>
+        <div>{{ update_status.ahead }}</div>
+
+        <div class="key">Tracked local changes</div>
+        <div>{{ "Yes" if update_status.dirty else "No" }}</div>
+      </div>
+
+      {% if not update_status.ok %}
+        <div class="state bad">{{ update_status.error or "Unable to determine update status." }}</div>
+      {% elif update_status.dirty %}
+        <div class="state bad">Update blocked until tracked local changes are resolved.</div>
+      {% elif update_status.ahead > 0 and update_status.behind > 0 %}
+        <div class="state bad">Local and remote branches have diverged. Resolve this from Git before using in-app updates.</div>
+      {% elif update_status.behind > 0 %}
+        <div class="state warn">{{ update_status.behind }} remote commit(s) available.</div>
+      {% else %}
+        <div class="state good">Application is up to date with the last checked remote state.</div>
+      {% endif %}
+
+      <div class="actions">
+        <form method="post">
+          <input type="hidden" name="action" value="check">
+          <button class="btn" type="submit">Check for updates</button>
+        </form>
+        <form method="post" onsubmit="return confirm('Install the available update and restart NetEm?');">
+          <input type="hidden" name="action" value="update">
+          <button class="btn btn-primary" type="submit"
+                  {% if not update_status.ok or update_status.dirty or (update_status.ahead > 0 and update_status.behind > 0) %}disabled{% endif %}>
+            Install update
+          </button>
+        </form>
+      </div>
+    </div>
+
+    <div class="note">
+      NetEm updates the currently checked-out branch from <span class="mono">origin</span> using a fast-forward merge only.
+      After a successful update the process exits intentionally so the systemd service can restart it.
+      The service therefore needs <span class="mono">Restart=on-failure</span> or <span class="mono">Restart=always</span>.
+    </div>
+  </main>
+</div>
+
+{% if restarting %}
+<script>
+setTimeout(() => {
+  const timer = setInterval(async () => {
+    try {
+      const response = await fetch("{{ url_for('updates') }}", {cache: "no-store"});
+      if (response.ok) {
+        clearInterval(timer);
+        window.location.reload();
+      }
+    } catch (_) {}
+  }, 1500);
+}, 1800);
+</script>
+{% endif %}
+</body>
+</html>

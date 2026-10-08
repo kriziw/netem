@@ -88,16 +88,13 @@
     .quality-control.custom input[type="range"] { filter: grayscale(1); }
     input[type="range"] { width: 100%; accent-color: var(--accent); cursor: pointer; }
     .quality-scale { display: flex; justify-content: space-between; color: #64748b; font-size: .68rem; margin-top: 2px; }
-    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; margin: 17px 0 14px; }
-    .metric { padding: 9px 8px; border-radius: 11px; border: 1px solid var(--border); background: rgba(2,6,23,.55); min-width: 0; }
+    .metrics { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; margin: 17px 0 14px; }
+    .metric { padding: 10px; border-radius: 11px; border: 1px solid var(--border); background: rgba(2,6,23,.55); min-width: 0; }
+    .metric-head { display:flex; justify-content:space-between; gap:8px; align-items:baseline; margin-bottom:6px; }
     .metric-label { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
-    .metric-value { margin-top: 4px; font-size: .88rem; font-weight: 700; }
-    .metric-input {
-      width: 100%; margin-top: 5px; padding: 5px 6px; border-radius: 7px;
-      border: 1px solid #334155; background: rgba(15,23,42,.9); color: var(--text);
-      font-size: .84rem; font-weight: 700;
-    }
-    .metric-unit { margin-top: 3px; color: #64748b; font-size: .64rem; }
+    .metric-value { font-size: .82rem; font-weight: 700; color:#e2e8f0; white-space:nowrap; }
+    .metric-slider { width:100%; accent-color:var(--accent); cursor:pointer; }
+    .metric-scale { display:flex; justify-content:space-between; margin-top:2px; color:#64748b; font-size:.61rem; }
     .custom-note { margin: 4px 0 12px; color: var(--muted); font-size: .7rem; line-height: 1.35; }
     .actions { display: flex; gap: 8px; align-items: center; }
     .hint { color: var(--muted); font-size: .72rem; line-height: 1.35; margin-top: 11px; }
@@ -189,44 +186,59 @@
 
           <div class="metrics">
             <div class="metric">
-              <div class="metric-label">Latency</div>
-              <input class="metric-input" type="number" min="0" step="0.1"
-                     name="custom_delay_ms" value="{{ '%.3f'|format(nic.effective.delay_ms) }}"
+              <div class="metric-head">
+                <div class="metric-label">Latency</div>
+                <div class="metric-value" data-value-for="delay">{{ nic.effective.delay_ms|round|int }} ms</div>
+              </div>
+              <input class="metric-slider" type="range" min="0" max="2000" step="1"
+                     name="custom_delay_ms" value="{{ nic.effective.delay_ms|round|int }}"
                      data-role="delay">
-              <div class="metric-unit">ms</div>
+              <div class="metric-scale"><span>0 ms</span><span>2000 ms</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Jitter</div>
-              <input class="metric-input" type="number" min="0" step="0.1"
-                     name="custom_jitter_ms" value="{{ '%.3f'|format(nic.effective.jitter_ms) }}"
+              <div class="metric-head">
+                <div class="metric-label">Jitter</div>
+                <div class="metric-value" data-value-for="jitter">{{ nic.effective.jitter_ms|round|int }} ms</div>
+              </div>
+              <input class="metric-slider" type="range" min="0" max="1000" step="1"
+                     name="custom_jitter_ms" value="{{ nic.effective.jitter_ms|round|int }}"
                      data-role="jitter">
-              <div class="metric-unit">ms</div>
+              <div class="metric-scale"><span>0 ms</span><span>1000 ms</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Loss</div>
-              <input class="metric-input" type="number" min="0" max="100" step="0.01"
-                     name="custom_loss_pct" value="{{ '%.3f'|format(nic.effective.loss_pct) }}"
+              <div class="metric-head">
+                <div class="metric-label">Packet loss</div>
+                <div class="metric-value" data-value-for="loss">{{ "%.1f"|format(nic.effective.loss_pct) }}%</div>
+              </div>
+              <input class="metric-slider" type="range" min="0" max="100" step="0.1"
+                     name="custom_loss_pct" value="{{ '%.1f'|format(nic.effective.loss_pct) }}"
                      data-role="loss">
-              <div class="metric-unit">%</div>
+              <div class="metric-scale"><span>0%</span><span>100%</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Download</div>
-              <input class="metric-input" type="number" min="0" step="1"
-                     name="custom_download_mbit" value="{{ '%.3f'|format(nic.effective.download_mbit) }}"
+              <div class="metric-head">
+                <div class="metric-label">Download</div>
+                <div class="metric-value" data-value-for="download">{{ nic.effective.download_mbit|int }} Mbit/s</div>
+              </div>
+              <input class="metric-slider" type="range" min="0" max="5000" step="1"
+                     name="custom_download_mbit" value="{{ nic.effective.download_mbit|int }}"
                      data-role="download">
-              <div class="metric-unit">Mbit/s</div>
+              <div class="metric-scale"><span>Unlimited (0)</span><span>5000</span></div>
             </div>
             <div class="metric">
-              <div class="metric-label">Upload</div>
-              <input class="metric-input" type="number" min="0" step="1"
-                     name="custom_upload_mbit" value="{{ '%.3f'|format(nic.effective.upload_mbit) }}"
+              <div class="metric-head">
+                <div class="metric-label">Upload</div>
+                <div class="metric-value" data-value-for="upload">{{ nic.effective.upload_mbit|int }} Mbit/s</div>
+              </div>
+              <input class="metric-slider" type="range" min="0" max="5000" step="1"
+                     name="custom_upload_mbit" value="{{ nic.effective.upload_mbit|int }}"
                      data-role="upload">
-              <div class="metric-unit">Mbit/s</div>
+              <div class="metric-scale"><span>Unlimited (0)</span><span>5000</span></div>
             </div>
           </div>
           <div class="custom-note">
-            Editing any value switches this WAN to <strong>Custom</strong>. The quality slider becomes inactive-looking,
-            but remains usable: moving it again discards the manual overrides and returns to quality-based simulation.
+            Moving any parameter slider switches this WAN to <strong>Custom</strong>. The quality slider becomes muted,
+            but remains usable: moving it again discards all manual adjustments and returns to the preset's quality model.
           </div>
 
           <div class="actions">
@@ -265,6 +277,56 @@ function qualityStatus(q) {
   return "Critical";
 }
 
+const qualityCurves = {
+  dia: {
+    delay_factor: [[100,1.00],[80,1.00],[60,1.15],[35,1.8],[10,4.5]],
+    jitter_factor: [[100,1.00],[90,1.05],[70,1.8],[40,5.0],[10,14.0]],
+    loss_add: [[100,0],[65,0],[45,0.15],[25,2.0],[10,12.0]],
+    rate_factor: [[100,1.00],[70,1.00],[50,0.95],[30,0.65],[10,0.20]]
+  },
+  dsl: {
+    delay_factor: [[100,1.00],[90,1.00],[70,1.15],[45,1.8],[10,4.5]],
+    jitter_factor: [[100,1.00],[90,1.15],[70,2.2],[45,5.0],[10,12.0]],
+    loss_add: [[100,0],[85,0],[65,0.15],[40,1.5],[10,10.0]],
+    rate_factor: [[100,1.00],[80,1.00],[60,0.90],[35,0.55],[10,0.18]]
+  },
+  broadband: {
+    delay_factor: [[100,1.00],[90,1.00],[75,1.20],[50,1.8],[10,5.0]],
+    jitter_factor: [[100,1.00],[95,1.05],[80,1.8],[55,4.5],[10,14.0]],
+    loss_add: [[100,0],[75,0],[55,0.10],[35,1.5],[10,12.0]],
+    rate_factor: [[100,1.00],[90,1.00],[75,0.95],[50,0.70],[10,0.18]]
+  },
+  mobile: {
+    delay_factor: [[100,1.00],[92,1.05],[75,1.25],[50,1.9],[10,4.5]],
+    jitter_factor: [[100,1.00],[95,1.10],[80,1.8],[55,4.0],[10,10.0]],
+    loss_add: [[100,0],[80,0],[60,0.20],[40,2.0],[10,15.0]],
+    rate_factor: [[100,1.00],[92,0.95],[75,0.72],[50,0.40],[10,0.10]]
+  },
+  satellite: {
+    delay_factor: [[100,1.00],[90,1.02],[70,1.08],[45,1.20],[10,1.55]],
+    jitter_factor: [[100,1.00],[95,1.15],[80,1.8],[55,3.5],[10,9.0]],
+    loss_add: [[100,0],[75,0],[55,0.25],[35,3.0],[10,20.0]],
+    rate_factor: [[100,1.00],[90,0.98],[70,0.85],[45,0.55],[10,0.18]]
+  }
+};
+
+function curveValue(q, points) {
+  const ordered = [...points].sort((a,b) => b[0] - a[0]);
+  if (q >= ordered[0][0]) return Number(ordered[0][1]);
+  if (q <= ordered[ordered.length - 1][0]) return Number(ordered[ordered.length - 1][1]);
+
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const [qHigh, vHigh] = ordered[i];
+    const [qLow, vLow] = ordered[i + 1];
+    if (qHigh >= q && q >= qLow) {
+      let t = (qHigh - q) / (qHigh - qLow);
+      t = t * t * (3 - 2 * t);
+      return Number(vHigh) + (Number(vLow) - Number(vHigh)) * t;
+    }
+  }
+  return Number(ordered[ordered.length - 1][1]);
+}
+
 function effective(preset, q) {
   if (q === 0) {
     return {
@@ -275,15 +337,20 @@ function effective(preset, q) {
       upload_mbit: 1
     };
   }
-  const d = (100 - q) / 100;
-  const curve = d * d;
-  const factor = 0.05 + 0.95 * Math.pow(q / 100, 1.3);
+
+  const model = preset.quality_model || "broadband";
+  const curves = qualityCurves[model] || qualityCurves.broadband;
+  const delayFactor = curveValue(q, curves.delay_factor);
+  const jitterFactor = curveValue(q, curves.jitter_factor);
+  const lossAdd = curveValue(q, curves.loss_add);
+  const rateFactor = curveValue(q, curves.rate_factor);
+
   return {
-    delay_ms: Number(preset.delay_ms || 0) * (1 + 4 * curve),
-    jitter_ms: Number(preset.jitter_ms || 0) * (1 + 6 * curve),
-    loss_pct: Math.min(100, Number(preset.loss_pct || 0) + 20 * Math.pow(d, 3)),
-    download_mbit: Math.max(1, Number(preset.download_mbit || 0) * factor),
-    upload_mbit: Math.max(1, Number(preset.upload_mbit || 0) * factor)
+    delay_ms: Math.round(Number(preset.delay_ms || 0) * delayFactor * 10) / 10,
+    jitter_ms: Math.round(Number(preset.jitter_ms || 0) * jitterFactor * 10) / 10,
+    loss_pct: Math.round(Math.min(100, Number(preset.loss_pct || 0) + lossAdd) * 1000) / 1000,
+    download_mbit: Math.max(1, Math.round(Number(preset.download_mbit || 0) * rateFactor)),
+    upload_mbit: Math.max(1, Math.round(Number(preset.upload_mbit || 0) * rateFactor))
   };
 }
 
@@ -302,13 +369,29 @@ document.querySelectorAll(".wan-card").forEach(card => {
     download_mbit: card.querySelector('[data-role="download"]'),
     upload_mbit: card.querySelector('[data-role="upload"]')
   };
+  const valueLabels = {
+    delay_ms: card.querySelector('[data-value-for="delay"]'),
+    jitter_ms: card.querySelector('[data-value-for="jitter"]'),
+    loss_pct: card.querySelector('[data-value-for="loss"]'),
+    download_mbit: card.querySelector('[data-value-for="download"]'),
+    upload_mbit: card.querySelector('[data-value-for="upload"]')
+  };
+
+  const refreshValueLabels = () => {
+    valueLabels.delay_ms.textContent = Math.round(Number(fields.delay_ms.value)) + " ms";
+    valueLabels.jitter_ms.textContent = Math.round(Number(fields.jitter_ms.value)) + " ms";
+    valueLabels.loss_pct.textContent = Number(fields.loss_pct.value).toFixed(1) + "%";
+    valueLabels.download_mbit.textContent = Math.round(Number(fields.download_mbit.value)) + " Mbit/s";
+    valueLabels.upload_mbit.textContent = Math.round(Number(fields.upload_mbit.value)) + " Mbit/s";
+  };
 
   const writeFields = (v) => {
-    fields.delay_ms.value = Number(v.delay_ms).toFixed(3);
-    fields.jitter_ms.value = Number(v.jitter_ms).toFixed(3);
-    fields.loss_pct.value = Number(v.loss_pct).toFixed(3);
-    fields.download_mbit.value = Number(v.download_mbit).toFixed(3);
-    fields.upload_mbit.value = Number(v.upload_mbit).toFixed(3);
+    fields.delay_ms.value = Math.round(Number(v.delay_ms));
+    fields.jitter_ms.value = Math.round(Number(v.jitter_ms));
+    fields.loss_pct.value = Number(v.loss_pct).toFixed(1);
+    fields.download_mbit.value = Math.round(Number(v.download_mbit));
+    fields.upload_mbit.value = Math.round(Number(v.upload_mbit));
+    refreshValueLabels();
   };
 
   const showQualityMode = () => {
@@ -337,7 +420,10 @@ document.querySelectorAll(".wan-card").forEach(card => {
 
   // Touching any exact parameter creates a per-WAN custom state.
   Object.values(fields).forEach(field => {
-    field.addEventListener("input", showCustomMode);
+    field.addEventListener("input", () => {
+      refreshValueLabels();
+      showCustomMode();
+    });
   });
 
   // Moving quality again intentionally discards manual values and derives
@@ -348,6 +434,7 @@ document.querySelectorAll(".wan-card").forEach(card => {
   presetSelect.addEventListener("change", showQualityMode);
 
   if (mode.value === "custom") {
+    refreshValueLabels();
     showCustomMode();
   } else {
     showQualityMode();
