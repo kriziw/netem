@@ -158,8 +158,8 @@
       <div class="feature"><div class="feature-num">01</div><div class="feature-name">Scenario engine</div><div class="feature-state">MVP active</div></div>
       <div class="feature"><div class="feature-num">02</div><div class="feature-name">Fault injection</div><div class="feature-state">MVP active</div></div>
       <div class="feature"><div class="feature-num">03</div><div class="feature-name">Advanced impairments</div><div class="feature-state">MVP active</div></div>
-      <div class="feature"><div class="feature-num">04</div><div class="feature-name">Live observability</div><div class="feature-state">MVP active</div></div>
-      <div class="feature"><div class="feature-num">05</div><div class="feature-name">Vendor-neutral API</div><div class="feature-state">MVP active</div></div>
+      <div class="feature"><div class="feature-num">04</div><div class="feature-name">Observability &amp; vendor-neutral API</div><div class="feature-state">MVP active</div></div>
+      <div class="feature"><div class="feature-num">05</div><div class="feature-name">Safe security &amp; traffic events</div><div class="feature-state">MVP started</div></div>
     </div>
 
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -268,6 +268,21 @@
         <div class="api-row"><code>GET /metrics</code> · Prometheus exposition format</div>
         <div class="note">
           Direct Fortinet/Cisco/Palo Alto/Juniper adapters can be layered on later without coupling the impairment engine to any one vendor.
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Safe security &amp; traffic events</div>
+        <div class="card-sub">
+          Initial security-testing primitives are deliberately benign and vendor-neutral. They create observable test events without deploying malware or exposing a generic attack launcher.
+        </div>
+        <div class="api-row">
+          <a class="btn" href="{{ url_for('security_eicar') }}">Download EICAR test artifact</a>
+        </div>
+        <div class="api-row"><code>GET/POST /lab/security/beacon</code> · harmless callback sink for C2-like beacon visibility testing</div>
+        <div class="api-row"><strong>Availability stress / DDoS impact</strong> · available in the Scenario engine; emulates the link impact without transmitting attack traffic</div>
+        <div class="note">
+          A bounded traffic-generator module can be added later for lab-only PPS/connection-load testing, with explicit target allowlists, duration limits and rate caps.
         </div>
       </div>
 
