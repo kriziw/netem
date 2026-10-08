@@ -29,6 +29,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
 GIT = "/usr/bin/git"
+UPDATE_BRANCH = "main"
 
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
@@ -78,11 +79,19 @@ def run_process(args, timeout=45):
 
 
 def git_update_status(fetch=False):
-    """Return local/remote version information for the currently checked out branch."""
+    """
+    Compare the installed checkout against the stable update channel.
+
+    The application always checks origin/main, regardless of the local branch
+    name. This lets older installations that were originally deployed from a
+    feature branch continue receiving stable releases after that branch is
+    merged or deleted.
+    """
     status = {
         "ok": False,
         "error": "",
         "branch": "",
+        "target_branch": UPDATE_BRANCH,
         "commit": "",
         "subject": "",
         "remote_url": "",
@@ -102,7 +111,10 @@ def git_update_status(fetch=False):
         status["remote_url"] = remote_url
 
     if fetch:
-        rc, _out, err = run_process([GIT, "fetch", "--prune", "origin", branch], timeout=90)
+        rc, _out, err = run_process(
+            [GIT, "fetch", "--prune", "origin", UPDATE_BRANCH],
+            timeout=90,
+        )
         if rc != 0:
             status["error"] = err or "git fetch failed."
             return status
@@ -119,20 +131,20 @@ def git_update_status(fetch=False):
     rc, dirty, _ = run_process([GIT, "status", "--porcelain", "--untracked-files=no"])
     status["dirty"] = rc != 0 or bool(dirty.strip())
 
-    remote_ref = f"origin/{branch}"
+    remote_ref = f"origin/{UPDATE_BRANCH}"
     rc, _out, _err = run_process([GIT, "rev-parse", "--verify", remote_ref])
     if rc != 0:
-        status["error"] = f"Remote branch {remote_ref} was not found."
+        status["error"] = f"Stable update branch {remote_ref} was not found."
         return status
 
     rc, behind, err = run_process([GIT, "rev-list", "--count", f"HEAD..{remote_ref}"])
     if rc != 0:
-        status["error"] = err or "Unable to compare local and remote versions."
+        status["error"] = err or "Unable to compare local and stable versions."
         return status
 
     rc, ahead, err = run_process([GIT, "rev-list", "--count", f"{remote_ref}..HEAD"])
     if rc != 0:
-        status["error"] = err or "Unable to compare local and remote versions."
+        status["error"] = err or "Unable to compare local and stable versions."
         return status
 
     status["behind"] = int(behind or 0)
@@ -1421,7 +1433,7 @@ def updates():
             elif status["behind"] == 0:
                 flash("The application is already up to date.", "info")
             else:
-                remote_ref = f'origin/{status["branch"]}'
+                remote_ref = f'origin/{status["target_branch"]}'
                 rc, out, err = run_process(
                     [GIT, "merge", "--ff-only", remote_ref],
                     timeout=90,
