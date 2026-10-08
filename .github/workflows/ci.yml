@@ -43,6 +43,11 @@ jobs:
               "overview",
               "index",
               "wan_links",
+              "tests",
+              "sessions",
+              "session_start",
+              "session_stop",
+              "quick_wan_action",
               "scenarios",
               "traffic_security",
               "analytics",
@@ -92,6 +97,8 @@ jobs:
                   "/",
                   "/dashboard",
                   "/wan",
+                  "/tests",
+                  "/sessions",
                   "/scenarios",
                   "/traffic-security",
                   "/analytics",
@@ -105,6 +112,8 @@ jobs:
                   "/docs/getting-started",
                   "/docs/architecture",
                   "/docs/overview",
+                  "/docs/tests",
+                  "/docs/sessions",
                   "/docs/wan-links",
                   "/docs/scenarios",
                   "/docs/traffic-security",
@@ -120,9 +129,35 @@ jobs:
                   if response.status_code != 200:
                       raise SystemExit(f"{path} returned HTTP {response.status_code}")
                   print(f"PASS {path}")
+
+              response = client.post(
+                  "/sessions/start",
+                  data={"name": "CI validation session", "return_to": "sessions"},
+                  follow_redirects=True,
+              )
+              if response.status_code != 200:
+                  raise SystemExit("Session start failed")
+              state = client.get("/api/v1/state").get_json()
+              if not state.get("session", {}).get("active"):
+                  raise SystemExit("Session did not become active")
+
+              response = client.post(
+                  "/sessions/stop",
+                  data={"return_to": "sessions"},
+                  follow_redirects=True,
+              )
+              if response.status_code != 200:
+                  raise SystemExit("Session stop failed")
+              state = client.get("/api/v1/state").get_json()
+              if state.get("session", {}).get("active"):
+                  raise SystemExit("Session remained active after stop")
+              print("PASS session lifecycle")
           finally:
               if CONFIG_PATH.exists():
                   CONFIG_PATH.unlink()
+              from app import SESSIONS_PATH
+              if SESSIONS_PATH.exists():
+                  SESSIONS_PATH.unlink()
           PY
 
       - name: Validate release configuration
