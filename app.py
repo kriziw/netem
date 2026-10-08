@@ -557,9 +557,18 @@ def setup():
         restore_bridges_on_startup = request.form.get("restore_bridges_on_startup") == "on"
         restore_shaping_on_startup = request.form.get("restore_shaping_on_startup") == "on"
 
-        # Tear down old bridges
+        # Preserve the selected access preset and quality while interface
+        # mappings or aliases are edited.
         old_links = cfg.get("wan_links", [])
+        old_by_id = {}
         for link in old_links:
+            link_id = link.get("id") or (
+                "wan1" if link.get("bridge") == "br-wan1" else
+                "wan2" if link.get("bridge") == "br-wan2" else ""
+            )
+            if link_id:
+                old_by_id[link_id] = link
+
             for dev in (link.get("inner"), link.get("outer")):
                 if dev:
                     clear_qdisc(dev)
@@ -571,25 +580,33 @@ def setup():
 
         # WAN 1
         if wan1_inner and wan1_outer:
+            previous = old_by_id.get("wan1", {})
             ensure_bridge("br-wan1", wan1_inner, wan1_outer)
             wan_links.append(
                 {
+                    "id": "wan1",
                     "name": wan1_name or "WAN 1",
                     "bridge": "br-wan1",
                     "inner": wan1_inner,
                     "outer": wan1_outer,
+                    "preset": previous.get("preset", "broadband"),
+                    "quality": int(previous.get("quality", 100)),
                 }
             )
 
         # WAN 2
         if wan2_inner and wan2_outer:
+            previous = old_by_id.get("wan2", {})
             ensure_bridge("br-wan2", wan2_inner, wan2_outer)
             wan_links.append(
                 {
+                    "id": "wan2",
                     "name": wan2_name or "WAN 2",
                     "bridge": "br-wan2",
                     "inner": wan2_inner,
                     "outer": wan2_outer,
+                    "preset": previous.get("preset", "broadband"),
+                    "quality": int(previous.get("quality", 100)),
                 }
             )
 
@@ -607,12 +624,22 @@ def setup():
 
     # GET
     setup_nics = get_setup_nics(cfg)
+    links_by_id = {}
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or (
+            "wan1" if link.get("bridge") == "br-wan1" else
+            "wan2" if link.get("bridge") == "br-wan2" else ""
+        )
+        if link_id:
+            links_by_id[link_id] = link
 
     return render_template(
         "setup.html",
         page="setup",
         all_nics=setup_nics,
         config=cfg,
+        wan1=links_by_id.get("wan1", {}),
+        wan2=links_by_id.get("wan2", {}),
     )
 
 
