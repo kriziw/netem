@@ -1,0 +1,27 @@
+<h2 id="purpose">What a Lab Session is</h2>
+<p>A session is a named container for a validation objective. Tests describe the impairment you run; the session describes why you are running it. Example: <em>FortiGate SD-WAN failover validation</em>.</p>
+
+<h2 id="start">Start a session</h2>
+<ol>
+  <li>Open <strong>Sessions</strong>.</li>
+  <li>Enter a short objective-oriented name.</li>
+  <li>Click <strong>Start session</strong>.</li>
+  <li>Operate the lab normally from Command Center, Tests and Analytics.</li>
+</ol>
+<p>The active session appears in the global top bar. Newly written runtime events automatically receive the session ID.</p>
+
+<h2 id="events">What is associated</h2>
+<p>Any event created through the common runtime logger while the session is active is tagged. This includes scenario stages, manual quality changes from the Command Center, faults, MTU actions, bandwidth quick changes, packet capture activity and safe security-test events.</p>
+
+<h2 id="complete">Complete a session</h2>
+<p>Click <strong>Complete session</strong> when the validation run is finished. This records the end time and writes a final session event. Completing a session does not itself alter WAN state, so restore/finish any active test first if you want a clean end state.</p>
+
+<h2 id="history">Session history</h2>
+<p>The appliance retains up to 100 session records in <code>runtime/sessions.json</code>. The history currently shows name, ID, start time, duration and the number of retained events associated with the session.</p>
+<div class="docs-note"><strong>Event-count scope:</strong> the event log itself retains up to 500 events, so very old session event counts can decrease after older events roll out of retention.</div>
+
+<h2 id="restart">Service restart behavior</h2>
+<p>Active sessions are intentionally not resumed after an application restart because the in-memory test context may no longer be reliable. A session that was active when the process stops is marked <strong>interrupted</strong> when history is loaded again.</p>
+
+<h2 id="future">What Sessions enable next</h2>
+<p>The current implementation establishes identity, timing and event correlation. It is intentionally the foundation for richer evidence later: baseline snapshots, individual test results, attached PCAPs, vendor-observed SLA/path changes, pass/fail assertions and downloadable HTML/PDF reports.</p>
