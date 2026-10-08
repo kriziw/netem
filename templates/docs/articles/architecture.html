@@ -1,0 +1,53 @@
+
+<h2 id="topology">Transparent inline topology</h2>
+<p>Each emulated WAN is a transparent Layer-2 path. NetEm does not need an IP address on the WAN bridge or WAN-facing ports. Only the management interface needs normal IP connectivity for the web interface, SSH and updates.</p>
+<div class="docs-flow">SD-WAN / firewall
+      │
+   inner NIC
+      │
+   br-wanX
+      │
+   outer NIC
+      │
+upstream / ISP router</div>
+<p>The bridge forwards Ethernet frames between the two physical/virtual interfaces while Linux traffic control applies impairments to egress traffic on those ports.</p>
+
+<h2 id="inner-outer">Inner and outer interfaces</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Term</th><th>Meaning</th><th>Traffic leaving that interface</th></tr></thead>
+<tbody>
+<tr><td>Inner</td><td>Side facing the firewall/SD-WAN appliance</td><td>Upstream → appliance, treated as downstream/download traffic</td></tr>
+<tr><td>Outer</td><td>Side facing the ISP/upstream router</td><td>Appliance → upstream, treated as upstream/upload traffic</td></tr>
+<tr><td>Bridge</td><td>Transparent L2 bridge joining inner + outer</td><td>Forwards frames; also participates in temporary MTU changes</td></tr>
+<tr><td>Management</td><td>Separate interface with normal IP connectivity</td><td>Web UI, SSH, Git updates; not part of the impaired datapath</td></tr>
+</tbody></table></div>
+
+<h2 id="direction">Direction mapping</h2>
+<p>The directional telemetry model follows the physical datapath, not interface naming conventions:</p>
+<ul>
+  <li><strong>Download:</strong> bytes/packets transmitted on the inner interface toward the firewall.</li>
+  <li><strong>Upload:</strong> bytes/packets transmitted on the outer interface toward the upstream router.</li>
+</ul>
+<p>The REST telemetry endpoint also retains all raw RX/TX counters for diagnostics.</p>
+
+<h2 id="impairment-placement">Where impairments are applied</h2>
+<p>The normal profile applies latency, jitter, loss and advanced packet behavior on the inner interface. Upload bandwidth is separately rate-limited on the outer interface so asymmetric circuits can be modeled. The UI presents this as one WAN even though Linux applies controls at specific egress points.</p>
+<div class="docs-warning"><strong>Interpretation:</strong> the latency value is an injected one-way impairment on the configured path. A ping through the path may observe roughly that additional delay as part of round-trip behavior depending on where the probe originates and returns.</div>
+
+<h2 id="bridge-persistence">Bridge persistence</h2>
+<p>Linux bridges and qdiscs are runtime objects; they disappear across reboot unless recreated. NetEm stores topology and profile settings in <code>config.json</code> and can recreate the bridges and saved shaping when the service starts.</p>
+<p>These settings are controlled under <strong>Settings → Topology &amp; interfaces</strong>:</p>
+<ul>
+  <li><strong>Restore WAN bridges on application startup</strong> — recreates the transparent bridges and reattaches inner/outer interfaces.</li>
+  <li><strong>Restore selected WAN profiles and quality</strong> — reapplies the persisted profile/qdisc after startup.</li>
+</ul>
+
+<h2 id="management-separation">Why management is separate</h2>
+<p>The management interface is intentionally excluded from WAN interface selection. This prevents a test that blackholes, rate-limits or reconfigures a WAN from cutting off the NetEm web UI itself. In a virtual lab, place the management NIC on a dedicated management bridge/VLAN and use separate virtual NICs for every WAN datapath.</p>
+
+<h2 id="netem-tc">Linux traffic-control model</h2>
+<p>NetEm uses Linux <code>tc</code> with the <code>netem</code> qdisc for delay, jitter, packet loss, correlation, duplication, corruption and reordering. Bandwidth limiting is applied with TBF. The Diagnostics tab shows the raw qdisc output so you can verify what the kernel accepted.</p>
+<p>NetEm clears the current root qdisc before applying a new profile. This keeps each Apply operation deterministic rather than incrementally stacking old settings.</p>
+
+<h2 id="carrier">Carrier state vs data-plane failure</h2>
+<p>Blackhole faults intentionally preserve Ethernet carrier. That matters for SD-WAN testing: the appliance cannot simply react to “interface down”; it must detect that the data plane or health-check path has failed. One-way blackholes let you test asymmetrical failures that are harder for SLA logic to diagnose correctly.</p>
