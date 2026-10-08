@@ -62,6 +62,9 @@
         <div class="breadcrumb"><span>NetEm</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
+        {% if help_doc_slug %}
+          <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
+        {% endif %}
         {% if global_runtime.scenario.active %}
           <span class="top-pill scenario">Scenario · {{ global_runtime.scenario.scenario_name }}</span>
         {% endif %}
