@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block title %}Scenarios · NetEm WAN Lab{% endblock %}
+{% block crumb %}Scenarios{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Test orchestration</div>
+    <h1>Scenarios</h1>
+    <p class="page-description">Run repeatable WAN failure sequences, build reusable lab tests and follow scenario progress without modifying the saved WAN configuration.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="#builder">Create scenario</a>
+    <a class="btn" href="{{ url_for('analytics') }}">View analytics</a>
+  </div>
+</div>
+
+{% if scenario_state.active %}
+<section class="card" style="margin-bottom:14px;border-color:rgba(54,214,176,.35)">
+  <div class="card-pad">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:14px">
+      <div>
+        <div class="eyebrow">Running now</div>
+        <div class="wan-name">{{ scenario_state.scenario_name }}</div>
+        <div class="card-sub">Target {{ scenario_state.link_id }} · step <span data-role="scenario-step">{{ scenario_state.step }}</span> · <span data-role="scenario-label">{{ scenario_state.step_label }}</span></div>
+      </div>
+      <form method="post" action="{{ url_for('lab_scenario_stop') }}">
+        <input type="hidden" name="return_to" value="scenarios">
+        <button class="btn btn-danger" type="submit">Stop &amp; restore WAN</button>
+      </form>
+    </div>
+  </div>
+</section>
+{% endif %}
+
+<div class="grid grid-3">
+  {% for scenario in scenarios %}
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">{{ scenario.name }}</div>
+        <div class="card-sub">{{ scenario.description }}</div>
+      </div>
+      {% if scenario.id.startswith('custom_') %}<span class="status info">Custom</span>{% else %}<span class="status good">Built-in</span>{% endif %}
+    </div>
+    <div class="card-pad">
+      <div class="scenario-strip">
+        {% set ns = namespace(elapsed=0) %}
+        {% for step in scenario.steps %}
+          {% set ns.elapsed = ns.elapsed + step.after %}
+          <div class="step">
+            <div class="step-time">+{{ ns.elapsed }} sec</div>
+            <div class="step-label">{{ step.label }}</div>
+            <div class="step-action">{{ step.action }} · {{ step.value }}</div>
+          </div>
+        {% endfor %}
+      </div>
+
+      <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:13px">
+        <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+        <input type="hidden" name="return_to" value="scenarios">
+        <label>Run against WAN</label>
+        <div style="display:flex;gap:8px">
+          <select name="link_id" required style="margin:0">
+            {% for link in links %}<option value="{{ link.id }}">{{ link.label }} · {{ link.preset_name }}</option>{% endfor %}
+          </select>
+          <button class="btn btn-primary" type="submit" {% if scenario_state.active %}disabled{% endif %}>Run</button>
+        </div>
+      </form>
+
+      {% if scenario.id.startswith('custom_') %}
+      <form method="post" action="{{ url_for('lab_scenario_delete') }}" style="margin-top:8px" onsubmit="return confirm('Delete this custom scenario?');">
+        <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+        <input type="hidden" name="return_to" value="scenarios">
+        <button class="btn btn-sm btn-ghost" type="submit">Delete custom scenario</button>
+      </form>
+      {% endif %}
+    </div>
+  </section>
+  {% endfor %}
+
+  <section class="card future-card">
+    <div class="card-head">
+      <div><div class="card-title">Conditional orchestration</div><div class="card-sub">Future capability</div></div>
+      <span class="future-tag">Roadmap</span>
+    </div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Wait until</div><div class="v">SLA state / vendor condition / traffic threshold</div>
+        <div class="k">Then</div><div class="v">Continue, branch, fail test or trigger capture</div>
+        <div class="k">Targets</div><div class="v">Parallel WAN1 + WAN2 actions</div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="grid grid-2" style="margin-top:14px">
+  <section class="card" id="builder">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Scenario builder</div>
+        <div class="card-sub">Validated JSON definition today; structured visual stages are reserved in the design for a later release.</div>
+      </div>
+    </div>
+    <div class="card-pad">
+      <form method="post" action="{{ url_for('lab_scenario_save') }}">
+        <input type="hidden" name="return_to" value="scenarios">
+        <div class="form-grid">
+          <div><label>Name</label><input type="text" name="name" placeholder="Branch brownout + MTU fault" required></div>
+          <div><label>Description</label><input type="text" name="description" placeholder="Optional lab objective"></div>
+        </div>
+        <label>Scenario stages</label>
+        <textarea name="steps_json" class="mono" style="min-height:250px" required>[
+  {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
+  {"after": 10, "action": "quality", "value": 45, "label": "Brownout"},
+  {"after": 15, "action": "mtu", "value": 1300, "label": "MTU constrained"},
+  {"after": 15, "action": "fault", "value": "blackhole", "label": "Data-plane outage"},
+  {"after": 15, "action": "fault", "value": "normal", "label": "Restore"},
+  {"after": 5, "action": "mtu", "value": 0, "label": "MTU restored"}
+]</textarea>
+        <div class="field-help">Actions: quality, fault, mtu · max 30 stages · each wait capped at 3600 seconds.</div>
+        <div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="submit">Save scenario</button></div>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Scenario activity</div>
+        <div class="card-sub">Most recent orchestration, fault and MTU events</div>
+      </div>
+      <a class="btn btn-sm" href="{{ url_for('analytics') }}">Full history</a>
+    </div>
+    <div class="card-pad">
+      <div class="timeline">
+      {% if events %}
+        {% for event in events[:14] %}
+        <div class="timeline-item">
+          <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+          <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+          <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+        </div>
+        {% endfor %}
+      {% else %}
+        <div class="empty-state"><strong>No scenario history yet</strong>Run a built-in scenario to start a timeline.</div>
+      {% endif %}
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
+const wasActive = {{ 'true' if scenario_state.active else 'false' }};
+if (wasActive) {
+  NetEmUI.createLiveClient({
+    interval:1000,
+    maxPoints:20,
+    onSample({state}) {
+      const s = state.scenario || {};
+      const step = document.querySelector('[data-role="scenario-step"]');
+      const label = document.querySelector('[data-role="scenario-label"]');
+      if (step && s.active) step.textContent = s.step;
+      if (label && s.active) label.textContent = s.step_label || "";
+      if (!s.active) window.location.reload();
+    }
+  });
+}
+</script>
+{% endblock %}
