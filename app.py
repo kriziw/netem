@@ -1982,21 +1982,52 @@ def api_state():
 
 @app.route("/api/v1/telemetry")
 def api_telemetry():
+    """
+    Return raw interface counters plus a vendor-neutral directional view.
+
+    For the transparent WAN topology:
+      * download traffic exits the inner interface toward the appliance
+      * upload traffic exits the outer interface toward the upstream router
+
+    Raw inner/outer counters remain exposed for diagnostics and backwards
+    compatibility. The directional counters are the preferred UI/API surface.
+    """
     cfg = load_config()
     links = []
     for link in cfg.get("wan_links", []):
         link_id = link.get("id") or link.get("bridge")
+        inner_if = link.get("inner")
+        outer_if = link.get("outer")
+        inner = interface_counters(inner_if)
+        outer = interface_counters(outer_if)
+
         links.append(
             {
                 "id": link_id,
                 "name": link.get("name", "WAN"),
                 "inner": {
-                    "interface": link.get("inner"),
-                    "counters": interface_counters(link.get("inner")),
+                    "interface": inner_if,
+                    "counters": inner,
                 },
                 "outer": {
-                    "interface": link.get("outer"),
-                    "counters": interface_counters(link.get("outer")),
+                    "interface": outer_if,
+                    "counters": outer,
+                },
+                "traffic": {
+                    "download": {
+                        "interface": inner_if,
+                        "bytes": inner["tx_bytes"],
+                        "packets": inner["tx_packets"],
+                        "dropped": inner["tx_dropped"],
+                        "errors": inner["tx_errors"],
+                    },
+                    "upload": {
+                        "interface": outer_if,
+                        "bytes": outer["tx_bytes"],
+                        "packets": outer["tx_packets"],
+                        "dropped": outer["tx_dropped"],
+                        "errors": outer["tx_errors"],
+                    },
                 },
                 "fault": ACTIVE_FAULTS.get(link_id, "normal"),
             }
