@@ -2,949 +2,283 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>techkarma · network · wan emulator</title>
+  <title>NetEm · WAN Lab</title>
   <style>
     :root {
       --bg: #020617;
-      --bg-elevated: #020a1b;
       --card-bg: rgba(15, 23, 42, 0.96);
-      --border-subtle: #1f2937;
+      --border: #1f2937;
       --accent: #22e6b8;
       --accent-soft: rgba(34, 230, 184, 0.12);
-      --accent-soft2: rgba(34, 230, 184, 0.05);
-      --text-main: #e5e7eb;
-      --text-muted: #9ca3af;
-      --danger: #f97373;
-      --danger-soft: rgba(239, 68, 68, 0.16);
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --green: #22c55e;
+      --yellow: #eab308;
+      --orange: #f97316;
+      --red: #ef4444;
     }
-
-    * {
-      box-sizing: border-box;
-    }
-
+    * { box-sizing: border-box; }
     body {
       margin: 0;
       font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       background:
-        radial-gradient(circle at top left, rgba(34, 230, 184, 0.18), transparent 60%),
-        radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.18), transparent 60%),
+        radial-gradient(circle at top left, rgba(34, 230, 184, 0.16), transparent 60%),
+        radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.15), transparent 60%),
         var(--bg);
-      color: var(--text-main);
+      color: var(--text);
     }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    .layout {
-      display: flex;
-      min-height: 100vh;
-    }
-
-    /* Sidebar */
-
+    a { color: inherit; text-decoration: none; }
+    .layout { display: flex; min-height: 100vh; }
     .sidebar {
-      width: 250px;
-      padding: 22px 20px;
-      border-right: 1px solid var(--border-subtle);
-      background:
-        radial-gradient(circle at top, rgba(34, 230, 184, 0.12), transparent 65%),
-        #020617;
-      display: flex;
-      flex-direction: column;
+      width: 250px; padding: 22px 20px; border-right: 1px solid var(--border);
+      background: #020617; display: flex; flex-direction: column;
     }
-
-    .sidebar-header {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 26px;
-    }
-
-    .sidebar-logo-box {
-      width: 30px;
-      height: 30px;
-      border-radius: 9px;
-      background: radial-gradient(circle at 30% 20%, #22e6b8, #0ea5e9);
-      box-shadow: 0 0 18px rgba(34, 230, 184, 0.8);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-size: 0.8rem;
-      font-weight: 700;
-      color: #020617;
-    }
-
-    .sidebar-title {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-
-    .logo-wordmark {
-      font-weight: 700;
-      letter-spacing: 0.06em;
-      font-size: 0.98rem;
-      text-transform: uppercase;
-    }
-
-    .logo-tech {
-      color: #f9fafb;
-    }
-
-    .logo-karma {
-      color: var(--accent);
-    }
-
-    .sidebar-title-sub {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      letter-spacing: 0.14em;
-      text-transform: uppercase;
-    }
-
-    .nav-section-title {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-
-    .nav-list {
-      list-style: none;
-      margin: 0;
-      padding: 0;
-    }
-
-    .nav-item {
-      margin-bottom: 4px;
-    }
-
-    .nav-link {
-      display: flex;
-      align-items: center;
-      gap: 9px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      font-size: 0.85rem;
-      color: #cbd5e1;
-      transition: background 0.15s ease, color 0.15s ease, transform 0.08s ease;
-    }
-
-    .nav-link:hover {
-      background: rgba(15, 23, 42, 0.92);
-      transform: translateX(1px);
-    }
-
-    .nav-link-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #475569;
-    }
-
-    .nav-item-active .nav-link {
-      background: var(--accent-soft);
-      color: var(--accent);
-      font-weight: 600;
-    }
-
-    .nav-item-active .nav-link-dot {
-      background: var(--accent);
-      box-shadow: 0 0 10px rgba(34, 230, 184, 0.7);
-    }
-
-    .sidebar-footer {
-      margin-top: auto;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      border-top: 1px solid #1e293b;
-      padding-top: 10px;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      padding: 3px 8px;
-      border-radius: 999px;
-      background: rgba(15, 23, 42, 0.9);
-      font-size: 0.7rem;
-      color: #9ca3af;
-      gap: 4px;
-    }
-
-    .pill-dot {
-      width: 6px;
-      height: 6px;
-      border-radius: 999px;
-      background: #22e6b8;
-    }
-
-    /* Main */
-
-    .main {
-      flex: 1;
-      padding: 20px 24px;
-      display: flex;
-      flex-direction: column;
-      gap: 14px;
-    }
-
-    .top-bar {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      gap: 10px;
-      margin-bottom: 4px;
-    }
-
-    .top-bar-left {
-      display: flex;
-      flex-direction: column;
-      gap: 4px;
-    }
-
-    .top-title {
-      font-size: 1.1rem;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: var(--text-muted);
-    }
-
-    .top-sub {
-      font-size: 0.86rem;
-      color: var(--text-muted);
-    }
-
-    .top-sub code {
-      font-size: 0.8rem;
-      padding: 1px 5px;
-      border-radius: 6px;
-      background: rgba(15, 23, 42, 0.9);
-      border: 1px solid #1f2937;
-    }
-
-    .top-bar-right {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-
-    .badge-live {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 5px 10px;
-      border-radius: 999px;
-      font-size: 0.78rem;
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid rgba(22, 163, 74, 0.9);
-      color: #bbf7d0;
-    }
-
-    .badge-live-dot {
-      width: 7px;
-      height: 7px;
-      border-radius: 999px;
-      background: #22c55e;
-      box-shadow: 0 0 10px rgba(22, 163, 74, 0.9);
-    }
-
+    .sidebar-header { margin-bottom: 26px; }
+    .brand { font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+    .brand span { color: var(--accent); }
+    .brand-sub { margin-top: 3px; font-size: .76rem; color: var(--muted); letter-spacing: .12em; text-transform: uppercase; }
+    .nav-title { font-size: .72rem; color: var(--muted); text-transform: uppercase; letter-spacing: .12em; margin-bottom: 7px; }
+    .nav-list { list-style: none; padding: 0; margin: 0; }
+    .nav-item { margin-bottom: 4px; }
+    .nav-link { display: flex; gap: 9px; align-items: center; padding: 8px 10px; border-radius: 999px; color: #cbd5e1; font-size: .86rem; }
+    .nav-dot { width: 7px; height: 7px; border-radius: 50%; background: #475569; }
+    .nav-item-active .nav-link { background: var(--accent-soft); color: var(--accent); font-weight: 600; }
+    .nav-item-active .nav-dot { background: var(--accent); }
+    .sidebar-footer { margin-top: auto; font-size: .75rem; color: var(--muted); }
+    .main { flex: 1; padding: 24px; }
+    .top { display: flex; justify-content: space-between; gap: 18px; align-items: flex-start; margin-bottom: 18px; }
+    .title { font-size: 1.12rem; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); }
+    .subtitle { margin-top: 5px; max-width: 760px; font-size: .86rem; line-height: 1.45; color: var(--muted); }
     .btn {
-      border-radius: 999px;
-      padding: 6px 14px;
-      font-size: 0.82rem;
-      border: 1px solid transparent;
-      background: rgba(15, 23, 42, 0.9);
-      color: #cbd5e1;
-      cursor: pointer;
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      transition: background 0.15s ease, border-color 0.15s ease, transform 0.08s ease;
+      border-radius: 999px; padding: 7px 14px; border: 1px solid var(--border);
+      background: rgba(15,23,42,.95); color: #cbd5e1; cursor: pointer; font-size: .82rem;
     }
-
-    .btn-outline {
-      border-color: #1f2937;
-    }
-
-    .btn-outline:hover {
-      background: rgba(15, 23, 42, 0.96);
-    }
-
-    .btn-icon {
-      font-size: 0.95rem;
-    }
-
-    /* Flash */
-
-    .flash-area {
-      margin-top: 4px;
-      margin-bottom: 4px;
-    }
-
-    .flash {
-      margin-bottom: 6px;
-      padding: 7px 10px;
-      border-radius: 10px;
-      font-size: 0.82rem;
-      border: 1px solid transparent;
-    }
-
-    .flash.success {
-      background: rgba(34, 197, 94, 0.08);
-      border-color: rgba(34, 197, 94, 0.7);
-      color: #bbf7d0;
-    }
-
-    .flash.error {
-      background: rgba(248, 113, 113, 0.08);
-      border-color: rgba(248, 113, 113, 0.85);
-      color: #fecaca;
-    }
-
-    .flash.info {
-      background: rgba(59, 130, 246, 0.08);
-      border-color: rgba(59, 130, 246, 0.85);
-      color: #bfdbfe;
-    }
-
-    /* Cards */
-
-    .cards-row {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-      gap: 18px;
-      margin-top: 10px;
-    }
-
+    .btn-primary { background: var(--accent); color: #020617; border-color: var(--accent); font-weight: 700; }
+    .flash { margin-bottom: 10px; padding: 9px 11px; border-radius: 10px; font-size: .82rem; border: 1px solid var(--border); }
+    .flash.success { border-color: rgba(34,197,94,.7); color: #bbf7d0; background: rgba(34,197,94,.08); }
+    .flash.error { border-color: rgba(239,68,68,.7); color: #fecaca; background: rgba(239,68,68,.08); }
+    .flash.info { border-color: rgba(59,130,246,.7); color: #bfdbfe; background: rgba(59,130,246,.08); }
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 18px; }
     .card {
-      background:
-        radial-gradient(circle at top left, rgba(34, 230, 184, 0.18), transparent 65%),
-        var(--card-bg);
-      border-radius: 18px;
-      border: 1px solid rgba(15, 23, 42, 0.96);
-      box-shadow: 0 22px 50px rgba(0, 0, 0, 0.75);
-      padding: 16px 18px 14px;
-      position: relative;
+      border: 1px solid rgba(51,65,85,.85); border-radius: 18px; padding: 18px;
+      background: radial-gradient(circle at top left, rgba(34,230,184,.10), transparent 55%), var(--card-bg);
+      box-shadow: 0 20px 44px rgba(0,0,0,.48);
     }
-
-    .card-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 8px;
+    .card-head { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+    .wan-name { font-size: 1.08rem; font-weight: 700; }
+    .tech { margin-top: 3px; color: var(--muted); font-size: .75rem; }
+    .status {
+      padding: 5px 10px; border-radius: 999px; font-size: .76rem; font-weight: 700;
+      border: 1px solid rgba(148,163,184,.4);
     }
-
-    .card-title {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 0.98rem;
-      font-weight: 600;
+    .status.excellent,.status.good { color: #bbf7d0; border-color: rgba(34,197,94,.6); background: rgba(34,197,94,.1); }
+    .status.fair { color: #fef08a; border-color: rgba(234,179,8,.65); background: rgba(234,179,8,.09); }
+    .status.poor { color: #fed7aa; border-color: rgba(249,115,22,.65); background: rgba(249,115,22,.09); }
+    .status.critical,.status.down { color: #fecaca; border-color: rgba(239,68,68,.65); background: rgba(239,68,68,.09); }
+    label { display: block; font-size: .78rem; color: var(--muted); margin-bottom: 5px; }
+    select {
+      width: 100%; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--border);
+      color: var(--text); background: rgba(2,6,23,.8); font-size: .88rem; margin-bottom: 16px;
     }
-
-    .card-title-dot {
-      width: 9px;
-      height: 9px;
-      border-radius: 999px;
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgba(34, 230, 184, 0.16);
-    }
-
-    .card-title code {
-      font-size: 0.78rem;
-      padding: 1px 6px;
-      border-radius: 999px;
-      background: rgba(15, 23, 42, 0.95);
-      border: 1px solid #1f2937;
-      color: #cbd5e1;
-    }
-
-    .card-tag {
-      font-size: 0.78rem;
-      padding: 3px 9px;
-      border-radius: 999px;
-      border: 1px solid rgba(148, 163, 184, 0.7);
-      color: #e5e7eb;
-      background: rgba(15, 23, 42, 0.9);
-    }
-
-    .slider-block {
-      margin-top: 8px;
-      margin-bottom: 6px;
-    }
-
-    .slider-label-row {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-bottom: 2px;
-    }
-
-    .slider-label-value {
-      color: #e5e7eb;
-    }
-
-    input[type="range"] {
-      -webkit-appearance: none;
-      width: 100%;
-      height: 4px;
-      border-radius: 999px;
-      background: #020617;
-      outline: none;
-    }
-
-    input[type="range"]::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgba(34, 230, 184, 0.25);
-      cursor: pointer;
-      border: 1px solid #0f172a;
-    }
-
-    input[type="range"]::-moz-range-thumb {
-      width: 12px;
-      height: 12px;
-      border-radius: 50%;
-      background: var(--accent);
-      box-shadow: 0 0 0 4px rgba(34, 230, 184, 0.25);
-      cursor: pointer;
-      border: 1px solid #0f172a;
-    }
-
-    .profile-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 6px;
-      margin-top: 10px;
-      margin-bottom: 8px;
-    }
-
-    .profile-pill {
-      padding: 5px 10px;
-      border-radius: 999px;
-      border: 1px dashed #374151;
-      font-size: 0.78rem;
-      color: #cbd5e1;
-      cursor: pointer;
-      background: rgba(15, 23, 42, 0.94);
-      transition: background 0.12s ease, border-color 0.12s ease, transform 0.06s ease;
-    }
-
-    .profile-pill:hover {
-      background: rgba(15, 23, 42, 1);
-      border-style: solid;
-    }
-
-    .actions-row {
-      display: flex;
-      justify-content: flex-start;
-      align-items: center;
-      gap: 8px;
-      margin-bottom: 10px;
-    }
-
-    .btn-primary {
-      background: var(--accent);
-      color: #020617;
-      font-weight: 600;
-      border-color: rgba(34, 230, 184, 0.55);
-    }
-
-    .btn-primary:hover {
-      background: #3af0c4;
-      transform: translateY(-0.5px);
-    }
-
-    .btn-reset {
-      border-color: rgba(239, 68, 68, 0.9);
-      color: #fecaca;
-      background: var(--danger-soft);
-    }
-
-    .btn-reset:hover {
-      background: rgba(239, 68, 68, 0.22);
-    }
-
-    .profile-summary {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-
-    .profile-summary strong {
-      color: #e5e7eb;
-    }
-
-    .health-row {
-      font-size: 0.78rem;
-      color: var(--text-muted);
-      display: flex;
-      justify-content: space-between;
-      margin-bottom: 4px;
-      margin-top: 4px;
-    }
-
-    .health-bar {
-      width: 100%;
-      height: 5px;
-      border-radius: 999px;
-      background: #020617;
-      overflow: hidden;
-      border: 1px solid #0f172a;
-      margin-bottom: 6px;
-    }
-
-    .health-bar-inner {
-      height: 100%;
-      width: 100%;
-      background: linear-gradient(90deg, #22c55e, #22e6b8);
-    }
-
-    .tc-qdisc-title {
-      font-size: 0.76rem;
-      color: var(--text-muted);
-      margin-bottom: 2px;
-    }
-
-    .tc-qdisc-raw {
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      font-size: 0.72rem;
-      padding: 6px 8px;
-      border-radius: 10px;
-      background: rgba(15, 23, 42, 0.98);
-      border: 1px solid rgba(30, 64, 175, 0.55);
-      color: #9ca3af;
-      white-space: pre-wrap;
-      word-break: break-all;
-    }
-
-    .footer {
-      margin-top: auto;
-      font-size: 0.74rem;
-      color: var(--text-muted);
-      text-align: right;
-      padding-top: 8px;
-    }
-
+    .quality-row { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 5px; }
+    .quality-value { font-weight: 700; font-size: .92rem; }
+    input[type="range"] { width: 100%; accent-color: var(--accent); }
+    .quality-scale { display: flex; justify-content: space-between; color: #64748b; font-size: .68rem; margin-top: 2px; }
+    .metrics { display: grid; grid-template-columns: repeat(5, minmax(0,1fr)); gap: 8px; margin: 17px 0 14px; }
+    .metric { padding: 9px 8px; border-radius: 11px; border: 1px solid var(--border); background: rgba(2,6,23,.55); min-width: 0; }
+    .metric-label { font-size: .65rem; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+    .metric-value { margin-top: 4px; font-size: .88rem; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .actions { display: flex; gap: 8px; align-items: center; }
+    .hint { color: var(--muted); font-size: .72rem; line-height: 1.35; margin-top: 11px; }
+    details { margin-top: 12px; color: var(--muted); font-size: .72rem; }
+    pre { white-space: pre-wrap; word-break: break-all; background: rgba(2,6,23,.7); padding: 8px; border-radius: 8px; border: 1px solid var(--border); }
+    .empty { padding: 20px; border: 1px dashed #334155; border-radius: 14px; color: var(--muted); }
     @media (max-width: 900px) {
-      .layout {
-        flex-direction: column;
-      }
-      .sidebar {
-        width: 100%;
-        flex-direction: row;
-        align-items: center;
-        gap: 18px;
-      }
-      .sidebar-footer {
-        display: none;
-      }
-      .nav-section-title {
-        display: none;
-      }
-      .nav-list {
-        display: flex;
-        gap: 4px;
-      }
-      .nav-item {
-        margin-bottom: 0;
-      }
-      .main {
-        padding: 16px 14px;
-      }
+      .layout { flex-direction: column; }
+      .sidebar { width: 100%; }
+      .sidebar-footer { display: none; }
+      .nav-list { display: flex; gap: 4px; flex-wrap: wrap; }
+      .main { padding: 16px; }
+      .metrics { grid-template-columns: repeat(2, 1fr); }
     }
   </style>
 </head>
 <body>
-  <div class="layout">
-    <!-- Sidebar -->
-    <aside class="sidebar">
-      <div class="sidebar-header">
-        <div class="sidebar-logo-box">tk</div>
-        <div class="sidebar-title">
-          <div class="logo-wordmark">
-            <span class="logo-tech">tech</span><span class="logo-karma">karma</span>
-          </div>
-          <div class="sidebar-title-sub">network · wan emulator</div>
-        </div>
-      </div>
+<div class="layout">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="brand">NetEm <span>WAN Lab</span></div>
+      <div class="brand-sub">SD-WAN impairment emulator</div>
+    </div>
+    <div class="nav-title">Navigation</div>
+    <ul class="nav-list">
+      {% for item in nav_items %}
+      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
+        <a class="nav-link" href="{{ url_for(item.endpoint) }}"><span class="nav-dot"></span>{{ item.label }}</a>
+      </li>
+      {% endfor %}
+    </ul>
+    <div class="sidebar-footer">powered by Linux tc/netem</div>
+  </aside>
 
+  <main class="main">
+    <div class="top">
       <div>
-        <div class="nav-section-title">Navigation</div>
-        <ul class="nav-list">
-          {% for item in nav_items %}
-            <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
-              <a href="{{ url_for(item.endpoint) }}" class="nav-link">
-                <span class="nav-link-dot"></span>
-                <span>{{ item.label }}</span>
-              </a>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="sidebar-footer">
-        <div style="margin-bottom:6px;">Session</div>
-        <div class="pill">
-          <span class="pill-dot"></span>
-          <span>Running</span>
+        <div class="title">WAN profiles</div>
+        <div class="subtitle">
+          Select the access technology for each WAN, then use one quality control to move that link
+          from nominal conditions toward degradation or outage. The selected profile and quality are persisted.
         </div>
       </div>
-    </aside>
+      <a class="btn" href="{{ url_for('presets') }}">Edit presets</a>
+    </div>
 
-    <!-- Main -->
-    <main class="main">
-      <div class="top-bar">
-        <div class="top-bar-left">
-          <div class="top-title">network · wan emulator</div>
-          <div class="top-sub">
-            Shape your WAN links by adjusting <strong>delay</strong>, <strong>jitter</strong>,
-            <strong>loss</strong> and <strong>rate</strong> on each interface.
-            Typically <code>{{ nic_states[0].name if nic_states|length > 0 }}</code> = WAN1 (ISP1)
-            and <code>{{ nic_states[1].name if nic_states|length > 1 }}</code> = WAN2 (ISP2).
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    {% if nic_states %}
+    <div class="cards">
+      {% for nic in nic_states %}
+      <div class="card wan-card">
+        <div class="card-head">
+          <div>
+            <div class="wan-name">{{ nic.label }}</div>
+            <div class="tech">{{ nic.name }} ↔ {{ nic.outer }} · {{ nic.id }}</div>
           </div>
+          <div class="status {{ nic.quality_status|lower }}" data-role="status">{{ nic.quality_status }}</div>
         </div>
-        <div class="top-bar-right">
-          <div class="badge-live">
-            <span class="badge-live-dot"></span>
-            <span>
-              live · shaping
-              {% if nic_states %}
-                {{ nic_states | map(attribute='name') | join(' / ') }}
-              {% else %}
-                no interfaces
-              {% endif %}
-            </span>
-          </div>
-          <form method="get" action="{{ url_for('setup') }}">
-            <button class="btn btn-outline" type="submit">
-              <span class="btn-icon">⚙️</span>
-              Setup
-            </button>
-          </form>
-        </div>
-      </div>
 
-      <!-- Flash messages -->
-      <div class="flash-area">
-        {% with messages = get_flashed_messages(with_categories=true) %}
-          {% if messages %}
-            {% for category, message in messages %}
-              <div class="flash {{ category }}">{{ message }}</div>
+        <form method="post" action="{{ url_for('configure') }}">
+          <input type="hidden" name="link_id" value="{{ nic.id }}">
+
+          <label>Access profile</label>
+          <select name="preset_id" data-role="preset">
+            {% for preset_id, preset in presets.items() %}
+              <option value="{{ preset_id }}" {% if preset_id == nic.preset_id %}selected{% endif %}>
+                {{ preset.name }}
+              </option>
             {% endfor %}
-          {% endif %}
-        {% endwith %}
-      </div>
+          </select>
 
-      <!-- Cards per interface -->
-      <div class="cards-row">
-        {% for nic in nic_states %}
-          {% set q = nic.qdisc.parsed %}
-          {% set q_up = nic.outer_qdisc.parsed %}
-          <div class="card" data-ifname="{{ nic.name }}">
-            <div class="card-header">
-              <div class="card-title">
-                <span class="card-title-dot"></span>
-                <span>{{ nic.name }}</span>
-                <code>{{ nic.label or '' }}</code>
-              </div>
-              <div class="card-tag">
-                {% if q.kind %}
-                  qdisc: {{ q.kind }}
-                {% else %}
-                  kernel default qdisc
-                {% endif %}
-              </div>
+          <div class="quality-row">
+            <label style="margin:0;">Simulated quality</label>
+            <div class="quality-value"><span data-role="quality-value">{{ nic.quality }}</span>%</div>
+          </div>
+          <input type="range" name="quality" min="0" max="100" step="1"
+                 value="{{ nic.quality }}" data-role="quality">
+          <div class="quality-scale"><span>Down</span><span>Degraded</span><span>Nominal</span></div>
+
+          <div class="metrics">
+            <div class="metric">
+              <div class="metric-label">Latency</div>
+              <div class="metric-value" data-role="delay">{{ "%.1f"|format(nic.effective.delay_ms) }} ms</div>
             </div>
-
-            <form method="post" action="{{ url_for('configure') }}" class="netem-form">
-              <input type="hidden" name="itf" value="{{ nic.name }}" />
-              <input type="hidden" name="outer_itf" value="{{ nic.outer or '' }}" />
-
-              <!-- Delay -->
-              <div class="slider-block">
-                <div class="slider-label-row">
-                  <span>Delay</span>
-                  <span class="slider-label-value" data-label="delay">
-                    {% if q.delay_ms is not none %}
-                      {{ "%.1f"|format(q.delay_ms) }} ms
-                    {% else %}
-                      0 ms
-                    {% endif %}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0" max="2000" step="10"
-                  name="delay_ms"
-                  data-role="delay"
-                  value="{% if q.delay_ms is not none %}{{ q.delay_ms|int }}{% else %}0{% endif %}">
-              </div>
-
-              <!-- Jitter -->
-              <div class="slider-block">
-                <div class="slider-label-row">
-                  <span>Jitter</span>
-                  <span class="slider-label-value" data-label="jitter">
-                    {% if q.jitter_ms is not none %}
-                      {{ "%.1f"|format(q.jitter_ms) }} ms
-                    {% else %}
-                      0 ms
-                    {% endif %}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0" max="1000" step="10"
-                  name="jitter_ms"
-                  data-role="jitter"
-                  value="{% if q.jitter_ms is not none %}{{ q.jitter_ms|int }}{% else %}0{% endif %}">
-              </div>
-
-              <!-- Loss -->
-              <div class="slider-block">
-                <div class="slider-label-row">
-                  <span>Loss</span>
-                  <span class="slider-label-value" data-label="loss">
-                    {% if q.loss_pct is not none %}
-                      {{ "%.3f"|format(q.loss_pct) }} %
-                    {% else %}
-                      0 %
-                    {% endif %}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0" max="10" step="0.1"
-                  name="loss_pct"
-                  data-role="loss"
-                  value="{% if q.loss_pct is not none %}{{ q.loss_pct }}{% else %}0{% endif %}">
-              </div>
-
-              <!-- Download rate: inner-interface egress toward the test device -->
-              <div class="slider-block">
-                <div class="slider-label-row">
-                  <span>Download rate</span>
-                  <span class="slider-label-value" data-label="download">
-                    {% if q.rate_mbit is not none and q.rate_mbit > 0 %}
-                      {{ "%.1f"|format(q.rate_mbit) }} Mbit/s
-                    {% else %}
-                      unlimited
-                    {% endif %}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0" max="1000" step="10"
-                  name="download_mbit"
-                  data-role="download"
-                  value="{% if q.rate_mbit is not none and q.rate_mbit > 0 %}{{ q.rate_mbit|int }}{% else %}0{% endif %}">
-              </div>
-
-              <!-- Upload rate: outer-interface egress toward the WAN -->
-              <div class="slider-block">
-                <div class="slider-label-row">
-                  <span>Upload rate</span>
-                  <span class="slider-label-value" data-label="upload">
-                    {% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}
-                      {{ "%.1f"|format(q_up.rate_mbit) }} Mbit/s
-                    {% else %}
-                      unlimited
-                    {% endif %}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0" max="1000" step="10"
-                  name="upload_mbit"
-                  data-role="upload"
-                  value="{% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}{{ q_up.rate_mbit|int }}{% else %}0{% endif %}">
-              </div>
-
-              <!-- Profiles -->
-              <div class="profile-row">
-                <button type="button" class="profile-pill" data-profile="dia">DIA</button>
-                <button type="button" class="profile-pill" data-profile="dsl">DSL</button>
-                <button type="button" class="profile-pill" data-profile="broadband">Broadband</button>
-                <button type="button" class="profile-pill" data-profile="4g">4G</button>
-                <button type="button" class="profile-pill" data-profile="5g">5G</button>
-                <button type="button" class="profile-pill" data-profile="satellite">Satellite</button>
-                <button type="button" class="profile-pill" data-profile="degraded">Degraded</button>
-                <button type="button" class="profile-pill" data-profile="dead">Dead</button>
-              </div>
-
-              <!-- Actions -->
-              <div class="actions-row">
-                <button class="btn btn-primary" type="submit">
-                  <span class="btn-icon">▶</span>
-                  apply
-                </button>
-            </form>
-                <form method="post" action="{{ url_for('clear') }}">
-                  <input type="hidden" name="itf" value="{{ nic.name }}" />
-                  <input type="hidden" name="outer_itf" value="{{ nic.outer or '' }}" />
-                  <button class="btn btn-reset" type="submit">
-                    <span class="btn-icon">⨯</span>
-                    reset
-                  </button>
-                </form>
-              </div>
-
-            <div class="profile-summary">
-              <strong>Current profile</strong><br>
-              Delay:
-              <strong>
-                {% if q.delay_ms is not none %}{{ "%.1f"|format(q.delay_ms) }} ms{% else %}0 ms{% endif %}
-              </strong>
-              · Jitter:
-              <strong>
-                {% if q.jitter_ms is not none %}{{ "%.1f"|format(q.jitter_ms) }} ms{% else %}0 ms{% endif %}
-              </strong>
-              · Loss:
-              <strong>
-                {% if q.loss_pct is not none %}{{ "%.3f"|format(q.loss_pct) }} %{% else %}0 %{% endif %}
-              </strong>
-              · Download:
-              <strong>
-                {% if q.rate_mbit is not none and q.rate_mbit > 0 %}
-                  {{ "%.1f"|format(q.rate_mbit) }} Mbit/s
-                {% else %}
-                  unlimited
-                {% endif %}
-              </strong>
-              · Upload:
-              <strong>
-                {% if q_up.rate_mbit is not none and q_up.rate_mbit > 0 %}
-                  {{ "%.1f"|format(q_up.rate_mbit) }} Mbit/s
-                {% else %}
-                  unlimited
-                {% endif %}
-              </strong>
+            <div class="metric">
+              <div class="metric-label">Jitter</div>
+              <div class="metric-value" data-role="jitter">{{ "%.1f"|format(nic.effective.jitter_ms) }} ms</div>
             </div>
-
-            <div class="health-row">
-              <span>Link health</span>
-              <span>GOOD · 100%</span>
+            <div class="metric">
+              <div class="metric-label">Loss</div>
+              <div class="metric-value" data-role="loss">{{ "%.2f"|format(nic.effective.loss_pct) }}%</div>
             </div>
-            <div class="health-bar">
-              <div class="health-bar-inner"></div>
+            <div class="metric">
+              <div class="metric-label">Download</div>
+              <div class="metric-value" data-role="download">{{ "%.0f"|format(nic.effective.download_mbit) }} Mbps</div>
             </div>
-
-            <div class="tc-qdisc-title">TC qdisc</div>
-            <div class="tc-qdisc-raw">
-              {{ nic.qdisc.raw or "no qdisc configured on this interface" }}
+            <div class="metric">
+              <div class="metric-label">Upload</div>
+              <div class="metric-value" data-role="upload">{{ "%.0f"|format(nic.effective.upload_mbit) }} Mbps</div>
             </div>
           </div>
-        {% endfor %}
+
+          <div class="actions">
+            <button class="btn btn-primary" type="submit">Apply profile</button>
+          </div>
+          <div class="hint">
+            Quality is relative to the selected access technology. 100% means the preset's nominal characteristics;
+            lowering it increases latency, jitter and loss while reducing both bandwidth directions.
+          </div>
+        </form>
+
+        <details>
+          <summary>Current tc state</summary>
+          <div>Inner / download / impairment</div>
+          <pre>{{ nic.qdisc.raw or "no qdisc configured" }}</pre>
+          <div>Outer / upload</div>
+          <pre>{{ nic.outer_qdisc.raw or "no qdisc configured" }}</pre>
+        </details>
       </div>
+      {% endfor %}
+    </div>
+    {% else %}
+      <div class="empty">No WAN links are configured. Open Setup first.</div>
+    {% endif %}
+  </main>
+</div>
 
-      <div class="footer">
-        techkarma · wan lab · powered by tc/netem
-      </div>
-    </main>
-  </div>
+<script>
+const presets = {{ presets | tojson }};
 
-  <script>
-    // Sync slider labels
-    document.querySelectorAll(".card").forEach(card => {
-      const delay = card.querySelector('input[data-role="delay"]');
-      const jitter = card.querySelector('input[data-role="jitter"]');
-      const loss = card.querySelector('input[data-role="loss"]');
-      const download = card.querySelector('input[data-role="download"]');
-      const upload = card.querySelector('input[data-role="upload"]');
+function qualityStatus(q) {
+  if (q === 0) return "Down";
+  if (q >= 90) return "Excellent";
+  if (q >= 75) return "Good";
+  if (q >= 50) return "Fair";
+  if (q >= 25) return "Poor";
+  return "Critical";
+}
 
-      const delayLabel = card.querySelector('[data-label="delay"]');
-      const jitterLabel = card.querySelector('[data-label="jitter"]');
-      const lossLabel = card.querySelector('[data-label="loss"]');
-      const downloadLabel = card.querySelector('[data-label="download"]');
-      const uploadLabel = card.querySelector('[data-label="upload"]');
+function effective(preset, q) {
+  if (q === 0) {
+    return {
+      delay_ms: Math.max(Number(preset.delay_ms || 0), 1000),
+      jitter_ms: Math.max(Number(preset.jitter_ms || 0), 200),
+      loss_pct: 100,
+      download_mbit: 1,
+      upload_mbit: 1
+    };
+  }
+  const d = (100 - q) / 100;
+  const curve = d * d;
+  const factor = 0.05 + 0.95 * Math.pow(q / 100, 1.3);
+  return {
+    delay_ms: Number(preset.delay_ms || 0) * (1 + 4 * curve),
+    jitter_ms: Number(preset.jitter_ms || 0) * (1 + 6 * curve),
+    loss_pct: Math.min(100, Number(preset.loss_pct || 0) + 20 * Math.pow(d, 3)),
+    download_mbit: Math.max(1, Number(preset.download_mbit || 0) * factor),
+    upload_mbit: Math.max(1, Number(preset.upload_mbit || 0) * factor)
+  };
+}
 
-      if (delay) {
-        const updateDelay = () => { delayLabel.textContent = delay.value + " ms"; };
-        delay.addEventListener("input", updateDelay);
-        updateDelay();
-      }
-      if (jitter) {
-        const updateJitter = () => { jitterLabel.textContent = jitter.value + " ms"; };
-        jitter.addEventListener("input", updateJitter);
-        updateJitter();
-      }
-      if (loss) {
-        const updateLoss = () => { lossLabel.textContent = loss.value + " %"; };
-        loss.addEventListener("input", updateLoss);
-        updateLoss();
-      }
-      if (download) {
-        const updateDownload = () => {
-          downloadLabel.textContent = (parseInt(download.value, 10) > 0)
-            ? download.value + " Mbit/s"
-            : "unlimited";
-        };
-        download.addEventListener("input", updateDownload);
-        updateDownload();
-      }
-      if (upload) {
-        const updateUpload = () => {
-          uploadLabel.textContent = (parseInt(upload.value, 10) > 0)
-            ? upload.value + " Mbit/s"
-            : "unlimited";
-        };
-        upload.addEventListener("input", updateUpload);
-        updateUpload();
-      }
+document.querySelectorAll(".wan-card").forEach(card => {
+  const presetSelect = card.querySelector('[data-role="preset"]');
+  const quality = card.querySelector('[data-role="quality"]');
+  const qualityValue = card.querySelector('[data-role="quality-value"]');
+  const status = card.querySelector('[data-role="status"]');
 
-      // Profiles
-      const applyProfile = (profile) => {
-        if (!delay || !jitter || !loss || !download || !upload) return;
-        // Representative lab starting points, not carrier-specific guarantees.
-        if (profile === "dia") {
-          delay.value = 5; jitter.value = 1; loss.value = 0;
-          download.value = 1000; upload.value = 1000;
-        } else if (profile === "dsl") {
-          delay.value = 25; jitter.value = 8; loss.value = 0.1;
-          download.value = 100; upload.value = 20;
-        } else if (profile === "broadband") {
-          delay.value = 15; jitter.value = 5; loss.value = 0.1;
-          download.value = 300; upload.value = 50;
-        } else if (profile === "4g") {
-          delay.value = 45; jitter.value = 20; loss.value = 0.5;
-          download.value = 80; upload.value = 20;
-        } else if (profile === "5g") {
-          delay.value = 20; jitter.value = 8; loss.value = 0.2;
-          download.value = 300; upload.value = 50;
-        } else if (profile === "satellite") {
-          delay.value = 300; jitter.value = 30; loss.value = 0.5;
-          download.value = 100; upload.value = 20;
-        } else if (profile === "degraded") {
-          delay.value = 100; jitter.value = 40; loss.value = 2;
-          download.value = 20; upload.value = 5;
-        } else if (profile === "dead") {
-          delay.value = 1000; jitter.value = 200; loss.value = 100;
-          download.value = 1; upload.value = 1;
-        }
-        delay.dispatchEvent(new Event("input"));
-        jitter.dispatchEvent(new Event("input"));
-        loss.dispatchEvent(new Event("input"));
-        download.dispatchEvent(new Event("input"));
-        upload.dispatchEvent(new Event("input"));
-      };
+  const redraw = () => {
+    const q = Number(quality.value);
+    const p = presets[presetSelect.value];
+    if (!p) return;
+    const v = effective(p, q);
+    qualityValue.textContent = q;
+    const statusText = qualityStatus(q);
+    status.textContent = statusText;
+    status.className = "status " + statusText.toLowerCase();
+    card.querySelector('[data-role="delay"]').textContent = v.delay_ms.toFixed(1) + " ms";
+    card.querySelector('[data-role="jitter"]').textContent = v.jitter_ms.toFixed(1) + " ms";
+    card.querySelector('[data-role="loss"]').textContent = v.loss_pct.toFixed(2) + "%";
+    card.querySelector('[data-role="download"]').textContent = Math.round(v.download_mbit) + " Mbps";
+    card.querySelector('[data-role="upload"]').textContent = Math.round(v.upload_mbit) + " Mbps";
+  };
 
-      card.querySelectorAll(".profile-pill").forEach(btn => {
-        btn.addEventListener("click", () => {
-          const profile = btn.getAttribute("data-profile");
-          applyProfile(profile);
-        });
-      });
-    });
-  </script>
+  quality.addEventListener("input", redraw);
+  presetSelect.addEventListener("change", redraw);
+  redraw();
+});
+</script>
 </body>
 </html>
