@@ -797,7 +797,11 @@ def reset_presets():
     cfg = load_config()
     cfg["presets"] = json.loads(json.dumps(DEFAULT_PRESETS))
     save_config(cfg)
-    flash("Preset defaults restored.", "info")
+
+    for link in cfg.get("wan_links", []):
+        apply_selected_profile(link, cfg["presets"])
+
+    flash("Preset defaults restored and active WAN profiles refreshed.", "info")
     return redirect(url_for("presets"))
 
 
