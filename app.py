@@ -528,22 +528,36 @@ def configure():
     delay_ms = parse_float("delay_ms", 0.0)
     jitter_ms = parse_float("jitter_ms", 0.0)
     loss_pct = parse_float("loss_pct", 0.0)
-    rate_mbit = parse_float("rate_mbit", 0.0)
+    download_mbit = parse_float("download_mbit", parse_float("rate_mbit", 0.0))
+    upload_mbit = parse_float("upload_mbit", download_mbit)
 
-    ok, msg = apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit)
-    if ok:
+    ok_down, msg_down = apply_netem(
+        ifname, delay_ms, jitter_ms, loss_pct, download_mbit
+    )
+
+    ok_up, msg_up = True, "not configured"
+    if outer_ifname:
+        ok_up, msg_up = apply_netem(outer_ifname, 0.0, 0.0, 0.0, upload_mbit)
+
+    if ok_down and ok_up:
         cfg = load_config()
         shaping = cfg.setdefault("shaping_profiles", {})
         shaping[ifname] = {
             "delay_ms": delay_ms,
             "jitter_ms": jitter_ms,
             "loss_pct": loss_pct,
-            "rate_mbit": rate_mbit,
+            "download_mbit": download_mbit,
+            "upload_mbit": upload_mbit,
         }
         save_config(cfg)
-        flash(f"Applied netem on {ifname}: {msg}", "success")
+        flash("Applied WAN profile.", "success")
     else:
-        flash(f"Failed to apply netem on {ifname}: {msg}", "error")
+        details = []
+        if not ok_down:
+            details.append(f"download/impairment: {msg_down}")
+        if not ok_up:
+            details.append(f"upload: {msg_up}")
+        flash("Failed to apply WAN profile: " + "; ".join(details), "error")
 
     return redirect(url_for("index"))
 
