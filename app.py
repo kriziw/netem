@@ -33,6 +33,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 VERSION_PATH = BASE_DIR / "version.txt"
 RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
+SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
 
 TC = "/usr/sbin/tc"
@@ -44,6 +45,13 @@ RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
 EVENT_LOG = []
+LAB_SESSIONS = []
+ACTIVE_SESSION = {
+    "active": False,
+    "id": None,
+    "name": None,
+    "started_at": None,
+}
 SCENARIO_STOP = threading.Event()
 SCENARIO_STATE = {
     "active": False,
@@ -1080,6 +1088,10 @@ def load_event_history():
 
 
 def log_event(kind: str, message: str, **details):
+    active_session_id = ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None
+    if active_session_id and "session_id" not in details:
+        details["session_id"] = active_session_id
+
     event = {
         "timestamp": time.time(),
         "kind": kind,
@@ -1099,6 +1111,51 @@ def log_event(kind: str, message: str, **details):
 
 
 load_event_history()
+
+
+def load_session_history():
+    if not SESSIONS_PATH.exists():
+        return
+    try:
+        raw = json.loads(SESSIONS_PATH.read_text())
+        if isinstance(raw, list):
+            LAB_SESSIONS.extend(raw[-100:])
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def save_session_history():
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = SESSIONS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(LAB_SESSIONS[-100:], indent=2))
+        tmp.replace(SESSIONS_PATH)
+    except OSError:
+        pass
+
+
+def session_snapshot():
+    with RUNTIME_LOCK:
+        return dict(ACTIVE_SESSION)
+
+
+def session_event_count(session_id: str):
+    return sum(
+        1 for event in EVENT_LOG
+        if event.get("details", {}).get("session_id") == session_id
+    )
+
+
+def session_rows():
+    rows = []
+    for item in reversed(LAB_SESSIONS[-100:]):
+        row = dict(item)
+        row["event_count"] = session_event_count(row.get("id"))
+        rows.append(row)
+    return rows
+
+
+load_session_history()
 
 
 def get_link(cfg: dict, link_id: str):
@@ -1465,6 +1522,8 @@ def redirect_after(default_endpoint):
         "presets",
         "updates",
         "documentation",
+        "tests",
+        "sessions",
     }
     endpoint = requested if requested in allowed else default_endpoint
     return redirect(url_for(endpoint))
@@ -1473,11 +1532,12 @@ def redirect_after(default_endpoint):
 DOC_HELP_BY_ENDPOINT = {
     "overview": "overview",
     "index": "overview",
-    "wan_links": "wan-links",
-    "scenarios": "scenarios",
-    "lab_tools": "scenarios",
-    "traffic_security": "traffic-security",
+    "tests": "tests",
+    "scenarios": "tests",
+    "lab_tools": "tests",
+    "traffic_security": "tests",
     "analytics": "analytics-sla",
+    "sessions": "sessions",
     "integrations": "integrations-api",
     "settings": "topology-profiles",
     "setup": "topology-profiles",
@@ -1499,39 +1559,28 @@ def inject_nav():
     return {
         "nav_groups": [
             {
-                "label": "Operate",
+                "label": "Lab",
                 "items": [
-                    {"id": "overview", "label": "Overview", "endpoint": "overview", "icon": "overview"},
-                    {"id": "wan", "label": "WAN Links", "endpoint": "wan_links", "icon": "wan"},
-                    {"id": "scenarios", "label": "Scenarios", "endpoint": "scenarios", "icon": "scenario"},
-                    {"id": "traffic", "label": "Traffic & Security", "endpoint": "traffic_security", "icon": "shield"},
-                ],
-            },
-            {
-                "label": "Observe",
-                "items": [
+                    {"id": "overview", "label": "Command Center", "endpoint": "overview", "icon": "overview"},
+                    {"id": "tests", "label": "Tests", "endpoint": "tests", "icon": "scenario"},
                     {"id": "analytics", "label": "Analytics", "endpoint": "analytics", "icon": "analytics"},
-                    {"id": "integrations", "label": "Integrations", "endpoint": "integrations", "icon": "plug"},
+                    {"id": "sessions", "label": "Sessions", "endpoint": "sessions", "icon": "sessions"},
                 ],
             },
             {
-                "label": "Configure",
+                "label": "System",
                 "items": [
                     {"id": "settings", "label": "Settings", "endpoint": "settings", "icon": "settings"},
-                ],
-            },
-            {
-                "label": "Reference",
-                "items": [
-                    {"id": "docs", "label": "Documentation", "endpoint": "documentation", "icon": "docs"},
                 ],
             },
         ],
         "config": cfg,
         "app_version": get_app_version(),
         "help_doc_slug": DOC_HELP_BY_ENDPOINT.get(request.endpoint),
+        "global_links": build_link_states(cfg) if cfg.get("wan_links") else [],
         "global_runtime": {
             "scenario": scenario_snapshot(),
+            "session": session_snapshot(),
             "active_fault_count": len(active_fault_labels),
             "active_fault_labels": active_fault_labels,
             "capture": capture_snapshot(),
@@ -1665,6 +1714,8 @@ def overview():
         events=list(reversed(EVENT_LOG[-12:])),
         scenario_state=scenario_snapshot(),
         capture_state=capture_snapshot(),
+        session_state=session_snapshot(),
+        presets=get_presets(cfg),
     )
 
 
@@ -1689,40 +1740,117 @@ def wan_links():
 
 @app.route("/lab")
 def lab_tools():
-    return redirect(url_for("scenarios"))
+    return redirect(url_for("tests"))
 
 
-@app.route("/scenarios")
-def scenarios():
+@app.route("/tests")
+def tests():
     cfg = load_config()
+    scenario_id = request.args.get("scenario")
     return render_template(
-        "scenarios.html",
-        page="scenarios",
+        "tests.html",
+        page="tests",
         links=build_link_states(cfg),
         scenarios=get_scenarios(cfg),
         custom_scenarios=cfg.get("custom_scenarios", []),
         scenario_state=scenario_snapshot(),
+        capture_state=capture_snapshot(),
+        tcpdump_available=bool(shutil.which("tcpdump")),
+        selected_scenario=scenario_id,
         events=list(reversed([
             event for event in EVENT_LOG
-            if event.get("kind") in ("scenario", "scenario-config", "fault", "mtu")
-        ][-30:])),
+            if event.get("kind") in (
+                "scenario", "scenario-config", "fault", "mtu",
+                "capture", "security-test"
+            )
+        ][-40:])),
     )
+
+
+@app.route("/sessions")
+def sessions():
+    return render_template(
+        "sessions.html",
+        page="sessions",
+        active_session=session_snapshot(),
+        sessions=session_rows(),
+    )
+
+
+@app.route("/sessions/start", methods=["POST"])
+def session_start():
+    name = (request.form.get("name") or "Lab session").strip()[:100]
+    with RUNTIME_LOCK:
+        if ACTIVE_SESSION["active"]:
+            flash("A lab session is already active.", "error")
+            return redirect_after("sessions")
+
+        session_id = f"session-{time.time_ns()}"
+        ACTIVE_SESSION.update(
+            {
+                "active": True,
+                "id": session_id,
+                "name": name or "Lab session",
+                "started_at": time.time(),
+            }
+        )
+        LAB_SESSIONS.append(
+            {
+                "id": session_id,
+                "name": ACTIVE_SESSION["name"],
+                "started_at": ACTIVE_SESSION["started_at"],
+                "ended_at": None,
+                "status": "active",
+            }
+        )
+        del LAB_SESSIONS[:-100]
+        save_session_history()
+
+    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]}')
+    flash(f'Lab session "{ACTIVE_SESSION["name"]}" started.', "success")
+    return redirect_after("sessions")
+
+
+@app.route("/sessions/stop", methods=["POST"])
+def session_stop():
+    with RUNTIME_LOCK:
+        if not ACTIVE_SESSION["active"]:
+            flash("No lab session is active.", "info")
+            return redirect_after("sessions")
+        session_id = ACTIVE_SESSION["id"]
+        session_name = ACTIVE_SESSION["name"]
+
+    log_event("session", f"Lab session completed: {session_name}")
+
+    with RUNTIME_LOCK:
+        ended_at = time.time()
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["ended_at"] = ended_at
+                item["status"] = "completed"
+                break
+        ACTIVE_SESSION.update(
+            {
+                "active": False,
+                "id": None,
+                "name": None,
+                "started_at": None,
+            }
+        )
+        save_session_history()
+
+    flash(f'Lab session "{session_name}" completed.', "success")
+    return redirect_after("sessions")
+
+
+@app.route("/scenarios")
+def scenarios():
+    return redirect(url_for("tests"))
 
 
 @app.route("/traffic-security")
 def traffic_security():
-    cfg = load_config()
-    return render_template(
-        "traffic_security.html",
-        page="traffic",
-        links=build_link_states(cfg),
-        capture_state=capture_snapshot(),
-        tcpdump_available=bool(shutil.which("tcpdump")),
-        events=list(reversed([
-            event for event in EVENT_LOG
-            if event.get("kind") in ("capture", "security-test")
-        ][-25:])),
-    )
+    return redirect(url_for("tests"))
 
 
 @app.route("/analytics")
@@ -1785,6 +1913,80 @@ def documentation_page(slug):
         previous_doc=previous_doc,
         next_doc=next_doc,
     )
+
+
+@app.route("/wan/quick", methods=["POST"])
+def quick_wan_action():
+    cfg = load_config()
+    presets = get_presets(cfg)
+    link_id = request.form.get("link_id") or ""
+    action = request.form.get("action") or ""
+    link = get_link(cfg, link_id)
+
+    if not link:
+        flash("Unknown WAN link.", "error")
+        return redirect_after("overview")
+
+    if scenario_snapshot().get("active"):
+        flash("Stop the active scenario before changing the WAN manually.", "error")
+        return redirect_after("overview")
+
+    if action == "quality":
+        try:
+            quality = max(0, min(100, int(request.form.get("quality", "100"))))
+        except ValueError:
+            quality = 100
+        link["quality"] = quality
+        link["mode"] = "quality"
+        link.pop("custom_profile", None)
+        ok, msg, _effective = apply_selected_profile(link, presets)
+        if ok:
+            save_config(cfg)
+            log_event(
+                "quality",
+                f'{link.get("name", link_id)} quality set to {quality}%',
+                link_id=link_id,
+                quality=quality,
+            )
+            flash(
+                f'{link.get("name", "WAN")} set to {quality}% ({quality_status(quality)}).',
+                "success",
+            )
+        else:
+            flash("Failed to apply WAN quality: " + msg, "error")
+
+    elif action in (
+        "normal", "blackhole", "downstream_blackhole", "upstream_blackhole"
+    ):
+        ok, msg = apply_runtime_fault(link, action, presets)
+        if ok:
+            flash(
+                "WAN restored." if action == "normal"
+                else f'{link.get("name", "WAN")}: {action.replace("_", " ")} applied.',
+                "success",
+            )
+        else:
+            flash("Failed to apply runtime fault: " + msg, "error")
+
+    elif action == "mtu":
+        try:
+            mtu = int(request.form.get("mtu", "0"))
+        except ValueError:
+            mtu = 0
+        ok, msg = apply_mtu_limit(link, mtu)
+        if ok:
+            flash(
+                "Path MTU restored." if mtu == 0
+                else f"Path MTU limited to {mtu} bytes.",
+                "success",
+            )
+        else:
+            flash("Failed to change path MTU: " + msg, "error")
+
+    else:
+        flash("Unknown quick action.", "error")
+
+    return redirect_after("overview")
 
 
 @app.route("/lab/fault", methods=["POST"])
@@ -2129,6 +2331,7 @@ def api_state():
             "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
+            "session": session_snapshot(),
             "capture": capture_snapshot(),
             "sla_profile": get_sla_profile(cfg),
             "events": EVENT_LOG[-20:],
