@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import copy
+import csv
+import io
 import json
 import math
 import os
@@ -1452,29 +1454,42 @@ def index():
 @app.route("/lab")
 def lab_tools():
     cfg = load_config()
+    presets = get_presets(cfg)
+    sla_profile = get_sla_profile(cfg)
     links = cfg.get("wan_links", [])
     telemetry = []
     for link in links:
+        link_id = link.get("id") or link.get("bridge")
+        effective = get_effective_profile(link, presets)
         telemetry.append(
             {
-                "id": link.get("id") or link.get("bridge"),
+                "id": link_id,
                 "name": link.get("name", "WAN"),
                 "inner": link.get("inner"),
                 "outer": link.get("outer"),
+                "bridge": link.get("bridge"),
                 "quality": int(link.get("quality", 100)),
-                "fault": ACTIVE_FAULTS.get(
-                    link.get("id") or link.get("bridge"),
-                    "normal",
-                ),
+                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+                "mtu": {
+                    "inner": get_interface_mtu(link.get("inner")),
+                    "outer": get_interface_mtu(link.get("outer")),
+                    "bridge": get_interface_mtu(link.get("bridge")),
+                },
+                "effective": effective,
+                "sla": evaluate_sla(effective, sla_profile),
             }
         )
     return render_template(
         "lab.html",
         page="lab",
         links=telemetry,
-        scenarios=DEFAULT_SCENARIOS,
+        scenarios=get_scenarios(cfg),
+        custom_scenarios=cfg.get("custom_scenarios", []),
         scenario_state=scenario_snapshot(),
-        events=list(reversed(EVENT_LOG[-30:])),
+        sla_profile=sla_profile,
+        capture_state=capture_snapshot(),
+        tcpdump_available=bool(shutil.which("tcpdump")),
+        events=list(reversed(EVENT_LOG[-60:])),
     )
 
 
@@ -1503,11 +1518,11 @@ def lab_fault():
 def lab_scenario_start():
     link_id = request.form.get("link_id") or ""
     scenario_id = request.form.get("scenario_id") or ""
+    cfg = load_config()
     scenario = next(
-        (item for item in DEFAULT_SCENARIOS if item["id"] == scenario_id),
+        (item for item in get_scenarios(cfg) if item["id"] == scenario_id),
         None,
     )
-    cfg = load_config()
 
     if not get_link(cfg, link_id):
         flash("Unknown WAN link.", "error")
@@ -1548,6 +1563,245 @@ def lab_scenario_stop():
         SCENARIO_STOP.set()
         flash("Scenario stop requested. The configured WAN profile will be restored.", "info")
     return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/scenario/save", methods=["POST"])
+def lab_scenario_save():
+    cfg = load_config()
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    raw_steps = (request.form.get("steps_json") or "").strip()
+
+    if not name:
+        flash("Scenario name is required.", "error")
+        return redirect(url_for("lab_tools"))
+
+    try:
+        parsed = json.loads(raw_steps)
+        steps = validate_scenario_steps(parsed)
+    except (json.JSONDecodeError, ValueError) as exc:
+        flash(f"Scenario definition is invalid: {exc}", "error")
+        return redirect(url_for("lab_tools"))
+
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "scenario"
+    scenario_id = f"custom_{slug}"
+    custom = [
+        item for item in cfg.get("custom_scenarios", [])
+        if item.get("id") != scenario_id
+    ]
+    custom.append(
+        {
+            "id": scenario_id,
+            "name": name[:80],
+            "description": description[:240],
+            "steps": steps,
+        }
+    )
+    cfg["custom_scenarios"] = custom[-20:]
+    save_config(cfg)
+    log_event("scenario-config", f'Saved custom scenario "{name[:80]}"')
+    flash(f'Scenario "{name[:80]}" saved.', "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/scenario/delete", methods=["POST"])
+def lab_scenario_delete():
+    cfg = load_config()
+    scenario_id = request.form.get("scenario_id") or ""
+    before = len(cfg.get("custom_scenarios", []))
+    cfg["custom_scenarios"] = [
+        item for item in cfg.get("custom_scenarios", [])
+        if item.get("id") != scenario_id
+    ]
+    if len(cfg["custom_scenarios"]) != before:
+        save_config(cfg)
+        log_event("scenario-config", f"Deleted custom scenario {scenario_id}")
+        flash("Custom scenario deleted.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/mtu", methods=["POST"])
+def lab_mtu():
+    cfg = load_config()
+    link_id = request.form.get("link_id") or ""
+    link = get_link(cfg, link_id)
+    try:
+        mtu = int(request.form.get("mtu", "0"))
+    except ValueError:
+        mtu = 0
+
+    if not link:
+        flash("Unknown WAN link.", "error")
+    elif scenario_snapshot().get("active"):
+        flash("Stop the active scenario before changing MTU.", "error")
+    else:
+        ok, msg = apply_mtu_limit(link, mtu)
+        if ok:
+            flash(
+                "Path MTU restored." if mtu == 0 else f"Path MTU limited to {mtu} bytes.",
+                "success",
+            )
+        else:
+            flash("Failed to change path MTU: " + msg, "error")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/sla", methods=["POST"])
+def lab_sla():
+    cfg = load_config()
+    try:
+        profile = {
+            "name": (request.form.get("name") or "Generic business SLA").strip()[:80],
+            "latency_ms": max(0.0, float(request.form.get("latency_ms", "100"))),
+            "jitter_ms": max(0.0, float(request.form.get("jitter_ms", "30"))),
+            "loss_pct": min(
+                100.0,
+                max(0.0, float(request.form.get("loss_pct", "2"))),
+            ),
+        }
+    except ValueError:
+        flash("SLA thresholds must be numeric.", "error")
+        return redirect(url_for("lab_tools"))
+
+    cfg["sla_profile"] = profile
+    save_config(cfg)
+    log_event("sla-config", f'SLA profile updated: {profile["name"]}')
+    flash("Generic SLA thresholds saved.", "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/history.json")
+def lab_history_json():
+    return jsonify({"events": EVENT_LOG[-500:]})
+
+
+@app.route("/lab/history.csv")
+def lab_history_csv():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["timestamp", "kind", "message", "details"])
+    for event in EVENT_LOG[-500:]:
+        writer.writerow(
+            [
+                event.get("timestamp"),
+                event.get("kind"),
+                event.get("message"),
+                json.dumps(event.get("details", {}), separators=(",", ":")),
+            ]
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="netem-events.csv"'},
+    )
+
+
+@app.route("/lab/history/clear", methods=["POST"])
+def lab_history_clear():
+    EVENT_LOG.clear()
+    try:
+        if EVENT_LOG_PATH.exists():
+            EVENT_LOG_PATH.unlink()
+    except OSError:
+        pass
+    flash("Runtime event history cleared.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/start", methods=["POST"])
+def lab_capture_start():
+    global CAPTURE_PROCESS
+
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        flash("tcpdump is not installed on the NetEm VM.", "error")
+        return redirect(url_for("lab_tools"))
+
+    cfg = load_config()
+    link_id = request.form.get("link_id") or ""
+    side = request.form.get("side") or "inner"
+    link = get_link(cfg, link_id)
+    if not link or side not in ("inner", "outer"):
+        flash("Invalid capture interface.", "error")
+        return redirect(url_for("lab_tools"))
+
+    ifname = link.get(side)
+    if not ifname:
+        flash("Selected WAN side has no interface.", "error")
+        return redirect(url_for("lab_tools"))
+
+    try:
+        duration = max(5, min(120, int(request.form.get("duration", "30"))))
+    except ValueError:
+        duration = 30
+
+    with RUNTIME_LOCK:
+        if CAPTURE_STATE["active"]:
+            flash("A packet capture is already running.", "error")
+            return redirect(url_for("lab_tools"))
+
+        CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{int(time.time())}-{link_id}-{side}.pcap"
+        path = CAPTURE_DIR / filename
+        try:
+            CAPTURE_PROCESS = subprocess.Popen(
+                [
+                    tcpdump,
+                    "-i", ifname,
+                    "-nn",
+                    "-s", "256",
+                    "-c", "20000",
+                    "-w", str(path),
+                ],
+                cwd=BASE_DIR,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            flash(f"Unable to start tcpdump: {exc}", "error")
+            return redirect(url_for("lab_tools"))
+
+        CAPTURE_STATE.update(
+            {
+                "active": True,
+                "link_id": link_id,
+                "interface": ifname,
+                "started_at": time.time(),
+                "duration": duration,
+                "path": str(path),
+                "error": None,
+            }
+        )
+
+    threading.Thread(
+        target=finish_capture,
+        args=(CAPTURE_PROCESS, duration),
+        daemon=True,
+    ).start()
+    log_event("capture", f"Packet capture started on {ifname}", duration=duration)
+    flash(f"Packet capture started on {ifname} for up to {duration} seconds.", "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/stop", methods=["POST"])
+def lab_capture_stop():
+    global CAPTURE_PROCESS
+    with RUNTIME_LOCK:
+        process = CAPTURE_PROCESS
+    if process and process.poll() is None:
+        process.terminate()
+        flash("Packet capture stop requested.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/download")
+def lab_capture_download():
+    state = capture_snapshot()
+    path = state.get("path")
+    if not path or not Path(path).exists():
+        flash("No packet capture is available.", "error")
+        return redirect(url_for("lab_tools"))
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
 
 
 @app.route("/api/v1/state")
