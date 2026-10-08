@@ -40,12 +40,20 @@ jobs:
 
           endpoints = {rule.endpoint for rule in app.url_map.iter_rules()}
           required = {
+              "overview",
               "index",
+              "wan_links",
+              "scenarios",
+              "traffic_security",
+              "analytics",
+              "integrations",
+              "settings",
               "lab_tools",
               "updates",
               "setup",
               "api_state",
               "api_telemetry",
+              "api_events",
           }
           missing = required - endpoints
           if missing:
