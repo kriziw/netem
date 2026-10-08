@@ -2,7 +2,7 @@
 
 A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failover labs.
 
-> **Lab use only.** This fork is developed and maintained by **Kristofer Wohlgang** for network architecture and SD-WAN lab use.
+> **Lab use only.** This fork is maintained and extended by **Kristofer Wohlgang** for network architecture and SD-WAN lab use.
 
 This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
 
@@ -36,6 +36,7 @@ This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://githu
 - **Asymmetric bandwidth simulation**
   - Independent nominal download and upload capacity per preset.
   - Each WAN can override its nominal download/upload line rate without changing the selected access technology.
+  - A **Reset to profile defaults** control clears both per-WAN bandwidth overrides in one action.
   - Bandwidth overrides remain part of the normal profile state; they do **not** put the WAN into Custom mode.
   - Quality degradation is calculated from the selected WAN line rate, while the profile continues to define latency, jitter, loss and degradation behaviour.
   - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
@@ -393,4 +394,4 @@ If you are looking for the original project or its appliance offering, please re
 
 The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
-The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI also identifies the project as lab-use software developed by Kristofer Wohlgang and credits Techkarma NetEm as its foundation.
+The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI identifies this as a lab-use fork maintained and extended by Kristofer Wohlgang, while crediting Techkarma NetEm as the project foundation.
