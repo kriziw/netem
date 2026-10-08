@@ -1,211 +1,113 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>NetEm · Updates</title>
-  <style>
-    :root {
-      --bg:#020617; --card:rgba(15,23,42,.96); --border:#1f2937;
-      --accent:#22e6b8; --accent-soft:rgba(34,230,184,.12);
-      --text:#e5e7eb; --muted:#9ca3af; --danger:#ef4444;
-    }
-    * { box-sizing:border-box; }
-    body {
-      margin:0; font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-      background:
-        radial-gradient(circle at top left,rgba(34,230,184,.16),transparent 60%),
-        radial-gradient(circle at bottom right,rgba(37,99,235,.15),transparent 60%),
-        var(--bg);
-      color:var(--text);
-    }
-    a { color:inherit; text-decoration:none; }
-    .layout { display:flex; min-height:100vh; }
-    .sidebar {
-      width:250px; padding:22px 20px; border-right:1px solid var(--border);
-      background:#020617; display:flex; flex-direction:column;
-    }
-    .sidebar-header { margin-bottom:26px; }
-    .brand { font-weight:700; letter-spacing:.08em; text-transform:uppercase; }
-    .brand span { color:var(--accent); }
-    .brand-sub { margin-top:3px; font-size:.76rem; color:var(--muted); letter-spacing:.12em; text-transform:uppercase; }
-    .nav-title { font-size:.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:.12em; margin-bottom:7px; }
-    .nav-list { list-style:none; padding:0; margin:0; }
-    .nav-item { margin-bottom:4px; }
-    .nav-link { display:flex; gap:9px; align-items:center; padding:8px 10px; border-radius:999px; color:#cbd5e1; font-size:.86rem; }
-    .nav-dot { width:7px; height:7px; border-radius:50%; background:#475569; }
-    .nav-item-active .nav-link { background:var(--accent-soft); color:var(--accent); font-weight:600; }
-    .nav-item-active .nav-dot { background:var(--accent); }
-    .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
-    .lab-badge {
-      display:inline-block; margin-bottom:7px; padding:3px 7px; border-radius:999px;
-      border:1px solid rgba(234,179,8,.45); background:rgba(234,179,8,.08);
-      color:#fde68a; font-size:.64rem; font-weight:700; letter-spacing:.10em;
-    }
-    .project-credit { margin-top:3px; line-height:1.3; font-size:.68rem; color:#64748b; }
-    .project-credit strong { color:#94a3b8; font-weight:600; }
-    .project-credit a { color:#94a3b8; text-decoration:underline; text-decoration-color:#475569; }
-    .main { flex:1; padding:24px; }
-    .title { font-size:1.12rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); }
-    .subtitle { margin-top:5px; max-width:780px; font-size:.86rem; line-height:1.45; color:var(--muted); }
-    .card {
-      max-width:760px; margin-top:18px; padding:18px; border-radius:16px;
-      border:1px solid #334155; background:var(--card);
-    }
-    .rows { display:grid; grid-template-columns:160px 1fr; gap:9px 14px; font-size:.84rem; }
-    .key { color:var(--muted); }
-    .mono { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; word-break:break-all; }
-    .state { margin-top:16px; padding:10px 12px; border-radius:10px; border:1px solid var(--border); color:#cbd5e1; }
-    .state.good { border-color:rgba(34,197,94,.65); color:#bbf7d0; background:rgba(34,197,94,.08); }
-    .state.warn { border-color:rgba(234,179,8,.65); color:#fef08a; background:rgba(234,179,8,.08); }
-    .state.bad { border-color:rgba(239,68,68,.65); color:#fecaca; background:rgba(239,68,68,.08); }
-    .actions { display:flex; gap:9px; flex-wrap:wrap; margin-top:16px; }
-    .btn {
-      border-radius:999px; padding:8px 15px; border:1px solid var(--border);
-      background:rgba(15,23,42,.95); color:#cbd5e1; cursor:pointer; font-size:.82rem;
-    }
-    .btn-primary { background:var(--accent); color:#020617; border-color:var(--accent); font-weight:700; }
-    .btn:disabled { opacity:.45; cursor:not-allowed; }
-    .flash { max-width:760px; margin-top:10px; padding:9px 11px; border-radius:10px; font-size:.82rem; border:1px solid var(--border); }
-    .flash.success { border-color:rgba(34,197,94,.7); color:#bbf7d0; background:rgba(34,197,94,.08); }
-    .flash.error { border-color:rgba(239,68,68,.7); color:#fecaca; background:rgba(239,68,68,.08); }
-    .flash.info { border-color:rgba(59,130,246,.7); color:#bfdbfe; background:rgba(59,130,246,.08); }
-    .note { max-width:760px; margin-top:14px; color:var(--muted); font-size:.76rem; line-height:1.45; }
-    @media (max-width:900px) {
-      .layout { flex-direction:column; }
-      .sidebar { width:100%; }
-      .sidebar-footer { display:none; }
-      .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
-      .main { padding:16px; }
-      .rows { grid-template-columns:1fr; }
-    }
-    .lab-watermark {
-      position:fixed; right:14px; bottom:10px; z-index:20;
-      padding:4px 8px; border-radius:999px;
-      border:1px solid rgba(71,85,105,.45);
-      background:rgba(2,6,23,.74); backdrop-filter:blur(6px);
-      color:#64748b; font-size:.60rem; letter-spacing:.04em;
-      pointer-events:none; user-select:none;
-    }
-  </style>
-</head>
-<body>
-<div class="layout">
-  <aside class="sidebar">
-    <div class="sidebar-header">
-      <div class="brand">NetEm <span>WAN Lab</span></div>
-      <div class="brand-sub">SD-WAN impairment emulator</div>
+{% extends "base.html" %}
+{% block title %}Application Updates · NetEm WAN Lab{% endblock %}
+{% block crumb %}Settings / Updates{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Settings</div>
+    <h1>Application &amp; updates</h1>
+    <p class="page-description">NetEm follows <span class="mono">origin/main</span> as the stable appliance channel. Release Please manages semantic versions, changelog entries, tags and GitHub releases.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('settings') }}">Back to settings</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:14px">
+  <div class="stat">
+    <div class="stat-label">Installed version</div>
+    <div class="stat-value good">v{{ update_status.installed_version or app_version }}</div>
+    <div class="stat-sub">{{ update_status.commit or "unknown commit" }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Stable version</div>
+    <div class="stat-value {% if update_status.remote_version and update_status.remote_version != update_status.installed_version %}warn{% else %}good{% endif %}">{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}—{% endif %}</div>
+    <div class="stat-sub">origin/{{ update_status.target_branch or "main" }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Available commits</div>
+    <div class="stat-value {% if update_status.behind %}warn{% else %}good{% endif %}">{{ update_status.behind or 0 }}</div>
+    <div class="stat-sub">stable commits ahead of installation</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Working tree</div>
+    <div class="stat-value {{ 'bad' if update_status.dirty else 'good' }}" style="font-size:16px">{{ "Modified" if update_status.dirty else "Clean" }}</div>
+    <div class="stat-sub">tracked local application files</div>
+  </div>
+</div>
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Stable update channel</div><div class="card-sub">Status of this appliance checkout</div></div>
+      {% if update_status.ok %}
+        {% if update_status.ahead and update_status.behind %}<span class="status bad">Diverged</span>
+        {% elif update_status.dirty %}<span class="status warn">Local changes</span>
+        {% elif update_status.behind %}<span class="status warn">Update available</span>
+        {% else %}<span class="status good">Up to date</span>{% endif %}
+      {% else %}<span class="status bad">Unavailable</span>{% endif %}
     </div>
-    <div class="nav-title">Navigation</div>
-    <ul class="nav-list">
-      {% for item in nav_items %}
-      <li class="nav-item {% if page == item.id %}nav-item-active{% endif %}">
-        <a class="nav-link" href="{{ url_for(item.endpoint) }}"><span class="nav-dot"></span>{{ item.label }}</a>
-      </li>
-      {% endfor %}
-    </ul>
-    <div class="sidebar-footer">
-      <div class="lab-badge">LAB USE ONLY</div>
-      <div class="project-credit">Fork maintained &amp; extended by <strong>Kristofer Wohlgang</strong></div>
-      <div class="project-credit">Foundation: <a href="https://github.com/techkarma-no/techkarma-netem" target="_blank" rel="noopener">Techkarma NetEm</a></div>
-      <div class="project-credit">Version <strong>v{{ app_version }}</strong> · Powered by Linux tc/netem</div>
-    </div>
-  </aside>
-
-  <main class="main">
-    <div class="title">Application updates</div>
-    <div class="subtitle">
-      Check the configured GitHub remote against the stable <span class="mono">main</span> branch.
-      The local checkout may have a different branch name; updates always follow <span class="mono">origin/main</span>.
-      Updates are fast-forward only and are refused if tracked application files have local changes.
-    </div>
-
-    {% with messages = get_flashed_messages(with_categories=true) %}
-      {% for category, message in messages %}
-        <div class="flash {{ category }}">{{ message }}</div>
-      {% endfor %}
-    {% endwith %}
-
-    <div class="card">
-      <div class="rows">
-        <div class="key">Local branch</div>
-        <div class="mono">{{ update_status.branch or "unknown" }}</div>
-
-        <div class="key">Update channel</div>
-        <div class="mono">origin/{{ update_status.target_branch or "main" }}</div>
-
-        <div class="key">Installed version</div>
-        <div><strong>v{{ update_status.installed_version or app_version }}</strong></div>
-
-        <div class="key">Stable version</div>
-        <div><strong>{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}unknown{% endif %}</strong></div>
-
-        <div class="key">Installed commit</div>
-        <div><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
-
-        <div class="key">Remote</div>
-        <div class="mono">{{ update_status.remote_url or "unknown" }}</div>
-
-        <div class="key">Remote commits available</div>
-        <div>{{ update_status.behind }}</div>
-
-        <div class="key">Local-only commits</div>
-        <div>{{ update_status.ahead }}</div>
-
-        <div class="key">Tracked local changes</div>
-        <div>{{ "Yes" if update_status.dirty else "No" }}</div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Local branch</div><div class="v mono">{{ update_status.branch or "unknown" }}</div>
+        <div class="k">Update channel</div><div class="v mono">origin/{{ update_status.target_branch or "main" }}</div>
+        <div class="k">Remote</div><div class="v mono">{{ update_status.remote_url or "unknown" }}</div>
+        <div class="k">Installed commit</div><div class="v"><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
+        <div class="k">Local-only commits</div><div class="v">{{ update_status.ahead or 0 }}</div>
       </div>
 
-      {% if not update_status.ok %}
-        <div class="state bad">{{ update_status.error or "Unable to determine update status." }}</div>
-      {% elif update_status.dirty %}
-        <div class="state bad">Update blocked until tracked local changes are resolved.</div>
-      {% elif update_status.ahead > 0 and update_status.behind > 0 %}
-        <div class="state bad">The local checkout and stable main branch have diverged. Resolve this from Git before using in-app updates.</div>
-      {% elif update_status.behind > 0 %}
-        <div class="state warn">{{ update_status.behind }} stable main commit(s) available.</div>
-      {% else %}
-        <div class="state good">Application is up to date with origin/{{ update_status.target_branch or "main" }}.</div>
+      {% if update_status.error %}
+        <div class="flash error" style="margin-top:14px">{{ update_status.error }}</div>
       {% endif %}
 
-      <div class="actions">
-        <form method="post">
+      <div class="actions" style="margin-top:15px">
+        <form method="post" action="{{ url_for('updates') }}">
           <input type="hidden" name="action" value="check">
-          <button class="btn" type="submit">Check for updates</button>
+          <button class="btn" type="submit">Check stable channel</button>
         </form>
-        <form method="post" onsubmit="return confirm('Install the available update and restart NetEm?');">
+        <form method="post" action="{{ url_for('updates') }}" onsubmit="return confirm('Install the available stable update and restart NetEm?');">
           <input type="hidden" name="action" value="update">
           <button class="btn btn-primary" type="submit"
-                  {% if not update_status.ok or update_status.dirty or (update_status.ahead > 0 and update_status.behind > 0) %}disabled{% endif %}>
+            {% if not update_status.ok or update_status.dirty or update_status.behind == 0 or (update_status.ahead > 0 and update_status.behind > 0) %}disabled{% endif %}>
             Install update
           </button>
         </form>
       </div>
     </div>
+  </section>
 
-    <div class="note">
-      NetEm always checks <span class="mono">origin/{{ update_status.target_branch or "main" }}</span> as the stable release channel and fast-forwards the local checkout to it when possible.
-      Version numbers come from <span class="mono">version.txt</span>, which is managed by Release Please together with the changelog and GitHub release tags.
-      After a successful update the process exits intentionally so the systemd service can restart it.
-      The service therefore needs <span class="mono">Restart=on-failure</span> or <span class="mono">Restart=always</span>.
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Release management</div><div class="card-sub">Automated semantic version lifecycle</div></div>
+      <span class="status info">Release Please</span>
     </div>
-  </main>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Version source</div><div class="v mono">version.txt</div>
+        <div class="k">Release branch</div><div class="v mono">main</div>
+        <div class="k">Changelog</div><div class="v mono">CHANGELOG.md</div>
+        <div class="k">Convention</div><div class="v"><code>feat:</code> minor · <code>fix:</code> patch · breaking change major</div>
+      </div>
+      <div class="field-help" style="margin-top:12px">The in-app updater installs stable mainline commits; Release Please is responsible for the user-facing release version/tag lifecycle.</div>
+    </div>
+  </section>
 </div>
 
+<section class="card" style="margin-top:14px">
+  <div class="card-head">
+    <div><div class="card-title">Update safety</div><div class="card-sub">Fast-forward only by design</div></div>
+  </div>
+  <div class="card-pad">
+    <div class="grid grid-3">
+      <div class="metric-box"><div class="metric-label">Dirty working tree</div><div class="metric-value">Blocked</div><div class="field-help">Tracked manual changes must be resolved first.</div></div>
+      <div class="metric-box"><div class="metric-label">Diverged history</div><div class="metric-value">Blocked</div><div class="field-help">No automatic merge/rebase is attempted.</div></div>
+      <div class="metric-box"><div class="metric-label">Successful update</div><div class="metric-value">Restart</div><div class="field-help">Process exits intentionally; systemd restarts it via Restart=on-failure.</div></div>
+    </div>
+  </div>
+</section>
+
 {% if restarting %}
-<script>
-setTimeout(() => {
-  const timer = setInterval(async () => {
-    try {
-      const response = await fetch("{{ url_for('updates') }}", {cache: "no-store"});
-      if (response.ok) {
-        clearInterval(timer);
-        window.location.reload();
-      }
-    } catch (_) {}
-  }, 1500);
-}, 1800);
-</script>
+<script>setTimeout(() => window.location.href="{{ url_for('updates') }}", 3500);</script>
 {% endif %}
-<div class="lab-watermark">LAB USE ONLY · fork maintained & extended by Kristofer Wohlgang · foundation: Techkarma NetEm</div>
-</body>
-</html>
+{% endblock %}
