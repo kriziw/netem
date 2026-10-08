@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.4.0](https://github.com/kriziw/netem/compare/v0.3.0...v0.4.0) (2026-10-08)
+
+
+### Features
+
+* add chart axis labels ([d4bd482](https://github.com/kriziw/netem/commit/d4bd48241973c94f7b36457a59f22b806ec12066))
+
+
+### Bug Fixes
+
+* add scale to overview throughput ([160a50e](https://github.com/kriziw/netem/commit/160a50ed926157325676d45f4bfe73e5429fd235))
+* correct directional live telemetry ([61260d9](https://github.com/kriziw/netem/commit/61260d9d80ae4247e2a355ab7171dbb16fb46748))
+* correct live WAN telemetry and add chart axes ([6b094d1](https://github.com/kriziw/netem/commit/6b094d16904bd62345e38315fd6f8371e4a274cf))
+* make analytics charts measurable ([932e02e](https://github.com/kriziw/netem/commit/932e02e96ec206ddc95cc31153ecc51c4a459302))
+* share chart scales across live series ([c255f36](https://github.com/kriziw/netem/commit/c255f36906fcd7b98d1c51a2d1f2ca070d15dcb9))
+
 ## [0.3.0](https://github.com/kriziw/netem/compare/v0.2.0...v0.3.0) (2026-10-08)
 
 
