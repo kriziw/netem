@@ -1,0 +1,49 @@
+
+<h2 id="purpose">What NetEm WAN Lab is for</h2>
+<p>NetEm WAN Lab is a transparent WAN impairment appliance for resilience, failover and SD-WAN testing. It sits inline between a firewall/router and one or more upstream networks, then applies controlled network conditions with Linux <code>tc/netem</code>. The appliance is vendor-neutral: it changes the path itself and lets the device under test react using its own SLA probes, routing logic and failover policy.</p>
+<div class="docs-note"><strong>Core idea:</strong> configure the topology once, define what each WAN represents, then operate the lab from Overview, WAN Links and Scenarios while Analytics shows the effect.</div>
+
+<h2 id="first-use">Recommended first-use sequence</h2>
+<ol>
+  <li>Open <strong>Settings → Topology &amp; interfaces</strong> and map the inner/outer interface pair for each WAN.</li>
+  <li>Leave <strong>Restore WAN bridges on startup</strong> enabled unless you intentionally want an ephemeral topology.</li>
+  <li>Leave <strong>Restore selected WAN profiles and quality</strong> enabled for an appliance-like deployment.</li>
+  <li>Open <strong>Settings → Access profiles</strong> and verify that the DIA/DSL/Broadband/4G/5G/Satellite baselines are suitable for the lab.</li>
+  <li>Open <strong>WAN Links</strong>, choose the access profile and nominal line rate for each WAN, then apply the configuration.</li>
+  <li>Open <strong>Overview</strong> and confirm both paths are visible, expected SLA state is sensible and live traffic counters move when traffic crosses the firewall.</li>
+  <li>Run a low-risk test such as <strong>Progressive brownout</strong> from Scenarios.</li>
+  <li>Observe how the SD-WAN/firewall reacts, then use <strong>Analytics</strong> to compare traffic with the condition NetEm injected.</li>
+</ol>
+
+<h2 id="safe-first-test">A safe first test</h2>
+<p>Use the Progressive brownout scenario against the backup WAN first. It gradually moves through quality levels rather than immediately dropping traffic. This helps confirm that the topology, impairment engine, live state and scenario restoration all behave as expected.</p>
+<div class="docs-flow">Scenarios
+  → Progressive brownout
+  → select target WAN
+  → Run
+  → watch Overview / Analytics
+  → wait for automatic restore</div>
+
+<h2 id="operational-pages">What each main page is for</h2>
+<div class="docs-table"><table>
+<thead><tr><th>Page</th><th>Use it for</th><th>Typical action</th></tr></thead>
+<tbody>
+<tr><td>Overview</td><td>Live operational status</td><td>Watch path health and throughput during a test</td></tr>
+<tr><td>WAN Links</td><td>Manual WAN configuration and faults</td><td>Change quality, bandwidth, packet behavior, MTU or blackhole state</td></tr>
+<tr><td>Scenarios</td><td>Repeatable test orchestration</td><td>Run built-in or custom failure sequences</td></tr>
+<tr><td>Traffic &amp; Security</td><td>Safe security events and diagnostics</td><td>EICAR, benign beacon, bounded PCAP capture</td></tr>
+<tr><td>Analytics</td><td>Live measured and injected data</td><td>Read throughput/PPS and impairment charts, evaluate SLA</td></tr>
+<tr><td>Integrations</td><td>External consumers</td><td>Use REST/Prometheus and future vendor adapters</td></tr>
+<tr><td>Settings</td><td>Appliance-level configuration</td><td>Topology, access profiles and updates</td></tr>
+</tbody></table></div>
+
+<h2 id="runtime-vs-persistent">Persistent configuration vs runtime actions</h2>
+<p>NetEm deliberately distinguishes between saved WAN configuration and transient test actions. Access profile, nominal bandwidth, quality mode and custom impairment values are persisted in <code>config.json</code>. Runtime blackholes and temporary MTU constraints are test conditions and are not intended to replace the saved profile.</p>
+<p>Scenarios temporarily change runtime state while running. When a scenario finishes or is stopped, the configured WAN profile is restored. This lets you repeatedly run a test without manually rebuilding the baseline afterward.</p>
+
+<h2 id="what-live-means">What “Live” means</h2>
+<p>Throughput and packet-rate values are calculated from Linux interface counters. Latency, jitter, loss and quality shown by NetEm are the values being <em>injected</em> by the impairment engine, not active measurements of a remote target. The generic SLA evaluator therefore represents the state NetEm expects from the injected conditions. Future vendor adapters can add the appliance's observed SLA values beside that expected state.</p>
+
+<h2 id="restore">How to return the lab to normal</h2>
+<p>For a manual WAN fault, use <strong>WAN Links → Restore</strong>. For a running scenario, use <strong>Stop &amp; restore WAN</strong>. For a temporary MTU test, choose <strong>Restore original</strong>. If you have manually changed the saved quality/profile, move the quality slider back to the desired level and apply the WAN configuration.</p>
+<div class="docs-tip"><strong>Recommended operating habit:</strong> always establish a known 100% baseline before starting a scenario. This makes failover timing and SLA behavior easier to interpret.</div>
