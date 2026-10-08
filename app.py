@@ -1,7 +1,10 @@
 #!/usr/bin/env python3
 import json
+import os
 import re
 import subprocess
+import threading
+import time
 from pathlib import Path
 
 from flask import (
@@ -21,6 +24,7 @@ CONFIG_PATH = BASE_DIR / "config.json"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
+GIT = "/usr/bin/git"
 
 
 # ---------- Helper: shell ----------
@@ -60,6 +64,7 @@ def save_config(cfg: dict):
 DEFAULT_PRESETS = {
     "dia": {
         "name": "DIA",
+        "quality_model": "dia",
         "delay_ms": 5.0,
         "jitter_ms": 1.0,
         "loss_pct": 0.0,
@@ -68,6 +73,7 @@ DEFAULT_PRESETS = {
     },
     "dsl": {
         "name": "DSL",
+        "quality_model": "dsl",
         "delay_ms": 25.0,
         "jitter_ms": 8.0,
         "loss_pct": 0.1,
@@ -76,6 +82,7 @@ DEFAULT_PRESETS = {
     },
     "broadband": {
         "name": "Broadband",
+        "quality_model": "broadband",
         "delay_ms": 15.0,
         "jitter_ms": 5.0,
         "loss_pct": 0.1,
@@ -84,6 +91,7 @@ DEFAULT_PRESETS = {
     },
     "4g": {
         "name": "4G",
+        "quality_model": "mobile",
         "delay_ms": 45.0,
         "jitter_ms": 20.0,
         "loss_pct": 0.5,
@@ -92,6 +100,7 @@ DEFAULT_PRESETS = {
     },
     "5g": {
         "name": "5G",
+        "quality_model": "mobile",
         "delay_ms": 20.0,
         "jitter_ms": 8.0,
         "loss_pct": 0.2,
@@ -100,6 +109,7 @@ DEFAULT_PRESETS = {
     },
     "satellite": {
         "name": "Satellite",
+        "quality_model": "satellite",
         "delay_ms": 300.0,
         "jitter_ms": 30.0,
         "loss_pct": 0.5,
@@ -109,16 +119,34 @@ DEFAULT_PRESETS = {
 }
 
 
-def get_presets(cfg: dict):
-    """Return editable presets, seeding the defaults when none are stored yet."""
-    stored = cfg.get("presets")
-    if stored:
-        return stored
+QUALITY_MODELS = {
+    "dia": "DIA / highly stable",
+    "dsl": "DSL / copper access",
+    "broadband": "Broadband / shared fixed access",
+    "mobile": "Mobile / 4G-5G",
+    "satellite": "Satellite",
+}
 
-    presets = json.loads(json.dumps(DEFAULT_PRESETS))
-    cfg["presets"] = presets
-    save_config(cfg)
-    return presets
+
+def get_presets(cfg: dict):
+    """Return editable presets and migrate older stored presets in place."""
+    stored = cfg.get("presets")
+    if not stored:
+        presets = json.loads(json.dumps(DEFAULT_PRESETS))
+        cfg["presets"] = presets
+        save_config(cfg)
+        return presets
+
+    changed = False
+    for preset_id, preset in stored.items():
+        default = DEFAULT_PRESETS.get(preset_id, {})
+        if "quality_model" not in preset:
+            preset["quality_model"] = default.get("quality_model", "broadband")
+            changed = True
+
+    if changed:
+        save_config(cfg)
+    return stored
 
 
 def quality_status(quality: int):
@@ -136,14 +164,84 @@ def quality_status(quality: int):
     return "Critical"
 
 
+def _curve_value(quality: int, points):
+    """
+    Smoothly interpolate a value across quality breakpoints.
+
+    Breakpoints are intentionally different per metric and access technology,
+    so degradation is staged rather than one linear reduction of everything.
+    """
+    q = max(0, min(100, int(quality)))
+    points = sorted(points, key=lambda item: item[0], reverse=True)
+
+    if q >= points[0][0]:
+        return float(points[0][1])
+    if q <= points[-1][0]:
+        return float(points[-1][1])
+
+    for (q_high, v_high), (q_low, v_low) in zip(points, points[1:]):
+        if q_high >= q >= q_low:
+            span = q_high - q_low
+            t = 0.0 if span == 0 else (q_high - q) / span
+            # Smoothstep avoids artificial sharp corners while remaining
+            # deliberately non-linear between the real-world-inspired stages.
+            t = t * t * (3.0 - 2.0 * t)
+            return float(v_high) + (float(v_low) - float(v_high)) * t
+
+    return float(points[-1][1])
+
+
+QUALITY_CURVES = {
+    # DIA tends to stay remarkably stable until the service is genuinely
+    # stressed/failing. Jitter changes before meaningful packet loss.
+    "dia": {
+        "delay_factor": [(100, 1.00), (80, 1.00), (60, 1.15), (35, 1.8), (10, 4.5)],
+        "jitter_factor": [(100, 1.00), (90, 1.05), (70, 1.8), (40, 5.0), (10, 14.0)],
+        "loss_add": [(100, 0.0), (65, 0.0), (45, 0.15), (25, 2.0), (10, 12.0)],
+        "rate_factor": [(100, 1.00), (70, 1.00), (50, 0.95), (30, 0.65), (10, 0.20)],
+    },
+    # DSL line rate is often stable for a while; errors/jitter become visible
+    # before severe line degradation forces a large throughput reduction.
+    "dsl": {
+        "delay_factor": [(100, 1.00), (90, 1.00), (70, 1.15), (45, 1.8), (10, 4.5)],
+        "jitter_factor": [(100, 1.00), (90, 1.15), (70, 2.2), (45, 5.0), (10, 12.0)],
+        "loss_add": [(100, 0.0), (85, 0.0), (65, 0.15), (40, 1.5), (10, 10.0)],
+        "rate_factor": [(100, 1.00), (80, 1.00), (60, 0.90), (35, 0.55), (10, 0.18)],
+    },
+    # Shared fixed broadband usually shows queueing/jitter before outright
+    # packet loss. Throughput starts to fall once congestion is material.
+    "broadband": {
+        "delay_factor": [(100, 1.00), (90, 1.00), (75, 1.20), (50, 1.8), (10, 5.0)],
+        "jitter_factor": [(100, 1.00), (95, 1.05), (80, 1.8), (55, 4.5), (10, 14.0)],
+        "loss_add": [(100, 0.0), (75, 0.0), (55, 0.10), (35, 1.5), (10, 12.0)],
+        "rate_factor": [(100, 1.00), (90, 1.00), (75, 0.95), (50, 0.70), (10, 0.18)],
+    },
+    # Cellular capacity and jitter often move first as RF/congestion worsens;
+    # sustained loss becomes prominent later.
+    "mobile": {
+        "delay_factor": [(100, 1.00), (92, 1.05), (75, 1.25), (50, 1.9), (10, 4.5)],
+        "jitter_factor": [(100, 1.00), (95, 1.10), (80, 1.8), (55, 4.0), (10, 10.0)],
+        "loss_add": [(100, 0.0), (80, 0.0), (60, 0.20), (40, 2.0), (10, 15.0)],
+        "rate_factor": [(100, 1.00), (92, 0.95), (75, 0.72), (50, 0.40), (10, 0.10)],
+    },
+    # Satellite links are latency-heavy by nature. Degradation is represented
+    # first by variability/jitter, then capacity, then sharp loss at poor quality.
+    "satellite": {
+        "delay_factor": [(100, 1.00), (90, 1.02), (70, 1.08), (45, 1.20), (10, 1.55)],
+        "jitter_factor": [(100, 1.00), (95, 1.15), (80, 1.8), (55, 3.5), (10, 9.0)],
+        "loss_add": [(100, 0.0), (75, 0.0), (55, 0.25), (35, 3.0), (10, 20.0)],
+        "rate_factor": [(100, 1.00), (90, 0.98), (70, 0.85), (45, 0.55), (10, 0.18)],
+    },
+}
+
+
 def calculate_profile(preset: dict, quality: int):
     """
     Convert a technology preset + relative quality into effective shaping values.
 
-    100% means the preset's nominal values. Lower quality progressively raises
-    latency/jitter/loss and reduces both bandwidth directions. Quality is
-    relative to the selected access type, not an absolute comparison between
-    technologies.
+    The degradation curves are access-type specific and staged: different
+    metrics begin deteriorating at different quality levels. This intentionally
+    avoids reducing every metric together in a linear fashion.
     """
     q = max(0, min(100, int(quality)))
     if q == 0:
@@ -151,34 +249,32 @@ def calculate_profile(preset: dict, quality: int):
             "delay_ms": max(float(preset.get("delay_ms", 0.0)), 1000.0),
             "jitter_ms": max(float(preset.get("jitter_ms", 0.0)), 200.0),
             "loss_pct": 100.0,
-            "download_mbit": 1.0,
-            "upload_mbit": 1.0,
+            "download_mbit": 1,
+            "upload_mbit": 1,
         }
 
-    degradation = (100.0 - q) / 100.0
-    curve = degradation * degradation
+    model = preset.get("quality_model", "broadband")
+    curves = QUALITY_CURVES.get(model, QUALITY_CURVES["broadband"])
 
-    delay = float(preset.get("delay_ms", 0.0)) * (1.0 + 4.0 * curve)
-    jitter = float(preset.get("jitter_ms", 0.0)) * (1.0 + 6.0 * curve)
-    loss = min(
-        100.0,
-        float(preset.get("loss_pct", 0.0)) + 20.0 * (degradation ** 3),
-    )
+    delay_factor = _curve_value(q, curves["delay_factor"])
+    jitter_factor = _curve_value(q, curves["jitter_factor"])
+    loss_add = _curve_value(q, curves["loss_add"])
+    rate_factor = _curve_value(q, curves["rate_factor"])
 
-    # Keep useful granularity at medium quality but collapse throughput as the
-    # link approaches critical condition.
-    rate_factor = 0.05 + 0.95 * ((q / 100.0) ** 1.3)
+    delay = float(preset.get("delay_ms", 0.0)) * delay_factor
+    jitter = float(preset.get("jitter_ms", 0.0)) * jitter_factor
+    loss = min(100.0, float(preset.get("loss_pct", 0.0)) + loss_add)
+
+    # tc/tbf compatibility: bandwidth is always an integer Mbit/s.
+    download = int(round(max(1.0, float(preset.get("download_mbit", 0.0)) * rate_factor)))
+    upload = int(round(max(1.0, float(preset.get("upload_mbit", 0.0)) * rate_factor)))
 
     return {
-        "delay_ms": round(delay, 3),
-        "jitter_ms": round(jitter, 3),
+        "delay_ms": round(delay, 1),
+        "jitter_ms": round(jitter, 1),
         "loss_pct": round(loss, 3),
-        "download_mbit": round(
-            max(1.0, float(preset.get("download_mbit", 0.0)) * rate_factor), 3
-        ),
-        "upload_mbit": round(
-            max(1.0, float(preset.get("upload_mbit", 0.0)) * rate_factor), 3
-        ),
+        "download_mbit": download,
+        "upload_mbit": upload,
     }
 
 
