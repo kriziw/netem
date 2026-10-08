@@ -36,6 +36,14 @@
     .nav-item-active .nav-link { background:var(--accent-soft); color:var(--accent); font-weight:600; }
     .nav-item-active .nav-dot { background:var(--accent); }
     .sidebar-footer { margin-top:auto; font-size:.75rem; color:var(--muted); }
+    .lab-badge {
+      display:inline-block; margin-bottom:7px; padding:3px 7px; border-radius:999px;
+      border:1px solid rgba(234,179,8,.45); background:rgba(234,179,8,.08);
+      color:#fde68a; font-size:.64rem; font-weight:700; letter-spacing:.10em;
+    }
+    .project-credit { margin-top:3px; line-height:1.3; font-size:.68rem; color:#64748b; }
+    .project-credit strong { color:#94a3b8; font-weight:600; }
+    .project-credit a { color:#94a3b8; text-decoration:underline; text-decoration-color:#475569; }
     .main { flex:1; padding:24px; }
     .top { display:flex; justify-content:space-between; gap:16px; align-items:flex-start; margin-bottom:18px; }
     .title { font-size:1.12rem; text-transform:uppercase; letter-spacing:.12em; color:var(--muted); }
@@ -68,6 +76,14 @@
       .nav-list { display:flex; gap:4px; flex-wrap:wrap; }
       .main { padding:16px; }
     }
+    .lab-watermark {
+      position:fixed; right:14px; bottom:10px; z-index:20;
+      padding:4px 8px; border-radius:999px;
+      border:1px solid rgba(71,85,105,.45);
+      background:rgba(2,6,23,.74); backdrop-filter:blur(6px);
+      color:#64748b; font-size:.60rem; letter-spacing:.04em;
+      pointer-events:none; user-select:none;
+    }
   </style>
 </head>
 <body>
@@ -85,7 +101,12 @@
       </li>
       {% endfor %}
     </ul>
-    <div class="sidebar-footer">powered by Linux tc/netem</div>
+    <div class="sidebar-footer">
+      <div class="lab-badge">LAB USE ONLY</div>
+      <div class="project-credit">Developed by <strong>Kristofer Wohlgang</strong></div>
+      <div class="project-credit">Foundation: <a href="https://github.com/techkarma-no/techkarma-netem" target="_blank" rel="noopener">Techkarma NetEm</a></div>
+      <div class="project-credit">Powered by Linux tc/netem</div>
+    </div>
   </aside>
 
   <main class="main">
@@ -173,5 +194,6 @@
     </div>
   </main>
 </div>
+<div class="lab-watermark">LAB USE ONLY · Kristofer Wohlgang · foundation: Techkarma NetEm</div>
 </body>
 </html>

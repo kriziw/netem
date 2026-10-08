@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import json
+import math
 import os
 import re
 import subprocess
@@ -253,10 +254,11 @@ def quality_status(quality: int):
 
 def _curve_value(quality: int, points):
     """
-    Smoothly interpolate a value across quality breakpoints.
+    Interpolate staged degradation anchors with exponential easing.
 
-    Breakpoints are intentionally different per metric and access technology,
-    so degradation is staged rather than one linear reduction of everything.
+    Different metrics begin degrading at different quality levels. Between
+    anchors, deterioration accelerates toward the worse state instead of
+    changing linearly.
     """
     q = max(0, min(100, int(quality)))
     points = sorted(points, key=lambda item: item[0], reverse=True)
@@ -270,54 +272,140 @@ def _curve_value(quality: int, points):
         if q_high >= q >= q_low:
             span = q_high - q_low
             t = 0.0 if span == 0 else (q_high - q) / span
-            # Smoothstep avoids artificial sharp corners while remaining
-            # deliberately non-linear between the real-world-inspired stages.
-            t = t * t * (3.0 - 2.0 * t)
-            return float(v_high) + (float(v_low) - float(v_high)) * t
+
+            # Exponential easing reaches the degraded side faster than a
+            # straight line while still honoring the configured anchors.
+            k = 2.2
+            eased = (1.0 - math.exp(-k * t)) / (1.0 - math.exp(-k))
+            return float(v_high) + (float(v_low) - float(v_high)) * eased
 
     return float(points[-1][1])
 
 
 QUALITY_CURVES = {
-    # DIA tends to stay remarkably stable until the service is genuinely
-    # stressed/failing. Jitter changes before meaningful packet loss.
+    # DIA is clean while healthy, but a 40% link is intentionally very poor:
+    # congestion/failure simulation should be obvious, not "800 Mbit/s but bad".
     "dia": {
-        "delay_factor": [(100, 1.00), (80, 1.00), (60, 1.15), (35, 1.8), (10, 4.5)],
-        "jitter_factor": [(100, 1.00), (90, 1.05), (70, 1.8), (40, 5.0), (10, 14.0)],
-        "loss_add": [(100, 0.0), (65, 0.0), (45, 0.15), (25, 2.0), (10, 12.0)],
-        "rate_factor": [(100, 1.00), (70, 1.00), (50, 0.95), (30, 0.65), (10, 0.20)],
+        "delay_factor": [
+            (100, 1.0), (90, 1.0), (75, 1.2), (60, 2.5),
+            (50, 4.5), (40, 8.0), (25, 20.0), (10, 60.0),
+        ],
+        "jitter_factor": [
+            (100, 1.0), (90, 1.2), (75, 2.0), (60, 5.0),
+            (50, 9.0), (40, 18.0), (25, 45.0), (10, 120.0),
+        ],
+        "loss_add": [
+            (100, 0.0), (75, 0.0), (60, 0.25), (50, 0.8),
+            (40, 3.0), (25, 12.0), (10, 35.0),
+        ],
+        "download_factor": [
+            (100, 1.0), (90, 1.0), (75, 0.98), (60, 0.85),
+            (50, 0.60), (40, 0.35), (25, 0.12), (10, 0.03),
+        ],
+        "upload_factor": [
+            (100, 1.0), (90, 1.0), (75, 0.98), (60, 0.85),
+            (50, 0.60), (40, 0.35), (25, 0.12), (10, 0.03),
+        ],
     },
-    # DSL line rate is often stable for a while; errors/jitter become visible
-    # before severe line degradation forces a large throughput reduction.
+
+    # DSL usually shows errors/jitter before a full line-rate collapse.
+    # Upstream degrades more aggressively because it is typically scarcer.
     "dsl": {
-        "delay_factor": [(100, 1.00), (90, 1.00), (70, 1.15), (45, 1.8), (10, 4.5)],
-        "jitter_factor": [(100, 1.00), (90, 1.15), (70, 2.2), (45, 5.0), (10, 12.0)],
-        "loss_add": [(100, 0.0), (85, 0.0), (65, 0.15), (40, 1.5), (10, 10.0)],
-        "rate_factor": [(100, 1.00), (80, 1.00), (60, 0.90), (35, 0.55), (10, 0.18)],
+        "delay_factor": [
+            (100, 1.0), (90, 1.0), (75, 1.15), (60, 1.6),
+            (50, 2.5), (40, 4.0), (25, 10.0), (10, 30.0),
+        ],
+        "jitter_factor": [
+            (100, 1.0), (90, 1.2), (75, 2.0), (60, 3.5),
+            (50, 6.0), (40, 10.0), (25, 25.0), (10, 70.0),
+        ],
+        "loss_add": [
+            (100, 0.0), (85, 0.0), (65, 0.15), (50, 1.0),
+            (40, 3.0), (25, 12.0), (10, 35.0),
+        ],
+        "download_factor": [
+            (100, 1.0), (90, 1.0), (75, 0.95), (60, 0.80),
+            (50, 0.60), (40, 0.40), (25, 0.15), (10, 0.03),
+        ],
+        "upload_factor": [
+            (100, 1.0), (90, 0.98), (75, 0.85), (60, 0.65),
+            (50, 0.40), (40, 0.22), (25, 0.08), (10, 0.02),
+        ],
     },
-    # Shared fixed broadband usually shows queueing/jitter before outright
-    # packet loss. Throughput starts to fall once congestion is material.
+
+    # Shared fixed broadband tends to show queueing/jitter first. Once the
+    # connection is genuinely poor, available downstream capacity falls fast.
     "broadband": {
-        "delay_factor": [(100, 1.00), (90, 1.00), (75, 1.20), (50, 1.8), (10, 5.0)],
-        "jitter_factor": [(100, 1.00), (95, 1.05), (80, 1.8), (55, 4.5), (10, 14.0)],
-        "loss_add": [(100, 0.0), (75, 0.0), (55, 0.10), (35, 1.5), (10, 12.0)],
-        "rate_factor": [(100, 1.00), (90, 1.00), (75, 0.95), (50, 0.70), (10, 0.18)],
+        "delay_factor": [
+            (100, 1.0), (90, 1.0), (75, 1.3), (60, 2.0),
+            (50, 3.5), (40, 6.0), (25, 15.0), (10, 40.0),
+        ],
+        "jitter_factor": [
+            (100, 1.0), (95, 1.1), (80, 2.0), (60, 4.0),
+            (50, 7.0), (40, 12.0), (25, 30.0), (10, 80.0),
+        ],
+        "loss_add": [
+            (100, 0.0), (75, 0.0), (60, 0.4), (50, 1.5),
+            (40, 4.0), (25, 15.0), (10, 40.0),
+        ],
+        "download_factor": [
+            (100, 1.0), (90, 1.0), (75, 0.90), (60, 0.72),
+            (50, 0.50), (40, 0.28), (25, 0.10), (10, 0.03),
+        ],
+        "upload_factor": [
+            (100, 1.0), (90, 1.0), (75, 0.95), (60, 0.85),
+            (50, 0.70), (40, 0.45), (25, 0.20), (10, 0.06),
+        ],
     },
-    # Cellular capacity and jitter often move first as RF/congestion worsens;
-    # sustained loss becomes prominent later.
+
+    # Cellular performance is volatile. Capacity and jitter are affected early
+    # by RF/congestion; packet loss becomes material as quality gets poor.
     "mobile": {
-        "delay_factor": [(100, 1.00), (92, 1.05), (75, 1.25), (50, 1.9), (10, 4.5)],
-        "jitter_factor": [(100, 1.00), (95, 1.10), (80, 1.8), (55, 4.0), (10, 10.0)],
-        "loss_add": [(100, 0.0), (80, 0.0), (60, 0.20), (40, 2.0), (10, 15.0)],
-        "rate_factor": [(100, 1.00), (92, 0.95), (75, 0.72), (50, 0.40), (10, 0.10)],
+        "delay_factor": [
+            (100, 1.0), (95, 1.05), (85, 1.2), (70, 1.7),
+            (55, 2.8), (40, 5.0), (25, 12.0), (10, 30.0),
+        ],
+        "jitter_factor": [
+            (100, 1.0), (95, 1.2), (85, 1.8), (70, 3.2),
+            (55, 6.0), (40, 12.0), (25, 28.0), (10, 70.0),
+        ],
+        "loss_add": [
+            (100, 0.0), (85, 0.0), (70, 0.2), (55, 0.8),
+            (40, 4.0), (25, 15.0), (10, 40.0),
+        ],
+        "download_factor": [
+            (100, 1.0), (95, 0.95), (85, 0.80), (70, 0.60),
+            (55, 0.38), (40, 0.20), (25, 0.08), (10, 0.02),
+        ],
+        "upload_factor": [
+            (100, 1.0), (95, 0.92), (85, 0.72), (70, 0.50),
+            (55, 0.30), (40, 0.15), (25, 0.06), (10, 0.02),
+        ],
     },
-    # Satellite links are latency-heavy by nature. Degradation is represented
-    # first by variability/jitter, then capacity, then sharp loss at poor quality.
+
+    # Satellite starts with high baseline latency. Degradation is represented
+    # more by jitter/loss/capacity collapse than by multiplying latency wildly.
     "satellite": {
-        "delay_factor": [(100, 1.00), (90, 1.02), (70, 1.08), (45, 1.20), (10, 1.55)],
-        "jitter_factor": [(100, 1.00), (95, 1.15), (80, 1.8), (55, 3.5), (10, 9.0)],
-        "loss_add": [(100, 0.0), (75, 0.0), (55, 0.25), (35, 3.0), (10, 20.0)],
-        "rate_factor": [(100, 1.00), (90, 0.98), (70, 0.85), (45, 0.55), (10, 0.18)],
+        "delay_factor": [
+            (100, 1.0), (90, 1.02), (75, 1.05), (60, 1.12),
+            (50, 1.20), (40, 1.35), (25, 1.70), (10, 2.40),
+        ],
+        "jitter_factor": [
+            (100, 1.0), (95, 1.2), (80, 1.8), (65, 3.0),
+            (50, 5.5), (40, 9.0), (25, 22.0), (10, 55.0),
+        ],
+        "loss_add": [
+            (100, 0.0), (80, 0.0), (65, 0.3), (50, 1.5),
+            (40, 5.0), (25, 20.0), (10, 50.0),
+        ],
+        "download_factor": [
+            (100, 1.0), (90, 0.98), (75, 0.90), (60, 0.75),
+            (50, 0.55), (40, 0.35), (25, 0.12), (10, 0.03),
+        ],
+        "upload_factor": [
+            (100, 1.0), (90, 0.95), (75, 0.82), (60, 0.62),
+            (50, 0.42), (40, 0.25), (25, 0.08), (10, 0.02),
+        ],
     },
 }
 
@@ -346,15 +434,20 @@ def calculate_profile(preset: dict, quality: int):
     delay_factor = _curve_value(q, curves["delay_factor"])
     jitter_factor = _curve_value(q, curves["jitter_factor"])
     loss_add = _curve_value(q, curves["loss_add"])
-    rate_factor = _curve_value(q, curves["rate_factor"])
+    download_factor = _curve_value(q, curves["download_factor"])
+    upload_factor = _curve_value(q, curves["upload_factor"])
 
     delay = float(preset.get("delay_ms", 0.0)) * delay_factor
     jitter = float(preset.get("jitter_ms", 0.0)) * jitter_factor
     loss = min(100.0, float(preset.get("loss_pct", 0.0)) + loss_add)
 
     # tc/tbf compatibility: bandwidth is always an integer Mbit/s.
-    download = int(round(max(1.0, float(preset.get("download_mbit", 0.0)) * rate_factor)))
-    upload = int(round(max(1.0, float(preset.get("upload_mbit", 0.0)) * rate_factor)))
+    download = int(round(max(
+        1.0, float(preset.get("download_mbit", 0.0)) * download_factor
+    )))
+    upload = int(round(max(
+        1.0, float(preset.get("upload_mbit", 0.0)) * upload_factor
+    )))
 
     return {
         "delay_ms": round(delay, 1),
