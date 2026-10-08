@@ -42,6 +42,93 @@ def run_cmd(cmd: str):
     return proc.returncode, (out or "").strip(), (err or "").strip()
 
 
+def run_process(args, timeout=45):
+    """Run a command without a shell from the application directory."""
+    try:
+        proc = subprocess.run(
+            args,
+            cwd=BASE_DIR,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+        return proc.returncode, (proc.stdout or "").strip(), (proc.stderr or "").strip()
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return 1, "", str(exc)
+
+
+def git_update_status(fetch=False):
+    """Return local/remote version information for the currently checked out branch."""
+    status = {
+        "ok": False,
+        "error": "",
+        "branch": "",
+        "commit": "",
+        "subject": "",
+        "remote_url": "",
+        "behind": 0,
+        "ahead": 0,
+        "dirty": False,
+    }
+
+    rc, branch, err = run_process([GIT, "branch", "--show-current"])
+    if rc != 0 or not branch:
+        status["error"] = err or "Unable to determine the current Git branch."
+        return status
+    status["branch"] = branch
+
+    rc, remote_url, _ = run_process([GIT, "remote", "get-url", "origin"])
+    if rc == 0:
+        status["remote_url"] = remote_url
+
+    if fetch:
+        rc, _out, err = run_process([GIT, "fetch", "--prune", "origin", branch], timeout=90)
+        if rc != 0:
+            status["error"] = err or "git fetch failed."
+            return status
+
+    rc, commit_line, err = run_process([GIT, "log", "-1", "--pretty=%h%x09%s"])
+    if rc != 0:
+        status["error"] = err or "Unable to read current Git commit."
+        return status
+    if "\t" in commit_line:
+        status["commit"], status["subject"] = commit_line.split("\t", 1)
+    else:
+        status["commit"] = commit_line
+
+    rc, dirty, _ = run_process([GIT, "status", "--porcelain", "--untracked-files=no"])
+    status["dirty"] = rc != 0 or bool(dirty.strip())
+
+    remote_ref = f"origin/{branch}"
+    rc, _out, _err = run_process([GIT, "rev-parse", "--verify", remote_ref])
+    if rc != 0:
+        status["error"] = f"Remote branch {remote_ref} was not found."
+        return status
+
+    rc, behind, err = run_process([GIT, "rev-list", "--count", f"HEAD..{remote_ref}"])
+    if rc != 0:
+        status["error"] = err or "Unable to compare local and remote versions."
+        return status
+
+    rc, ahead, err = run_process([GIT, "rev-list", "--count", f"{remote_ref}..HEAD"])
+    if rc != 0:
+        status["error"] = err or "Unable to compare local and remote versions."
+        return status
+
+    status["behind"] = int(behind or 0)
+    status["ahead"] = int(ahead or 0)
+    status["ok"] = True
+    return status
+
+
+def restart_after_update():
+    """Let the HTTP response leave first, then rely on systemd Restart=on-failure."""
+    time.sleep(1.5)
+    os._exit(75)
+
+
 # ---------- Config ----------
 
 def load_config():
@@ -671,6 +758,59 @@ def index():
         nic_states=nic_states,
         wan_links=cfg.get("wan_links", []),
         presets=presets,
+    )
+
+
+@app.route("/updates", methods=["GET", "POST"])
+def updates():
+    restarting = False
+
+    if request.method == "POST":
+        action = request.form.get("action") or "check"
+        status = git_update_status(fetch=True)
+
+        if not status["ok"]:
+            flash(status["error"], "error")
+        elif action == "update":
+            if status["dirty"]:
+                flash(
+                    "Update blocked because tracked application files have local changes.",
+                    "error",
+                )
+            elif status["ahead"] > 0 and status["behind"] > 0:
+                flash(
+                    "Update blocked because the local and remote branches have diverged.",
+                    "error",
+                )
+            elif status["behind"] == 0:
+                flash("The application is already up to date.", "info")
+            else:
+                remote_ref = f'origin/{status["branch"]}'
+                rc, out, err = run_process(
+                    [GIT, "merge", "--ff-only", remote_ref],
+                    timeout=90,
+                )
+                if rc == 0:
+                    status = git_update_status(fetch=False)
+                    restarting = True
+                    flash(
+                        "Update installed. The application is restarting.",
+                        "success",
+                    )
+                    threading.Thread(
+                        target=restart_after_update,
+                        daemon=True,
+                    ).start()
+                else:
+                    flash(err or out or "Git fast-forward update failed.", "error")
+    else:
+        status = git_update_status(fetch=False)
+
+    return render_template(
+        "updates.html",
+        page="updates",
+        update_status=status,
+        restarting=restarting,
     )
 
 
