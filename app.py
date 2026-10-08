@@ -1,9 +1,12 @@
 #!/usr/bin/env python3
 import copy
+import csv
+import io
 import json
 import math
 import os
 import re
+import shutil
 import subprocess
 import threading
 import time
@@ -18,6 +21,7 @@ from flask import (
     flash,
     jsonify,
     Response,
+    send_file,
 )
 
 app = Flask(__name__)
@@ -25,10 +29,15 @@ app.secret_key = "techkarma-netem"
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
+VERSION_PATH = BASE_DIR / "version.txt"
+RUNTIME_DIR = BASE_DIR / "runtime"
+EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
+CAPTURE_DIR = RUNTIME_DIR / "captures"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
 GIT = "/usr/bin/git"
+UPDATE_BRANCH = "main"
 
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
@@ -42,6 +51,17 @@ SCENARIO_STATE = {
     "started_at": None,
     "step": 0,
     "step_label": None,
+}
+ORIGINAL_MTUS = {}
+CAPTURE_PROCESS = None
+CAPTURE_STATE = {
+    "active": False,
+    "link_id": None,
+    "interface": None,
+    "started_at": None,
+    "duration": None,
+    "path": None,
+    "error": None,
 }
 
 
@@ -78,17 +98,27 @@ def run_process(args, timeout=45):
 
 
 def git_update_status(fetch=False):
-    """Return local/remote version information for the currently checked out branch."""
+    """
+    Compare the installed checkout against the stable update channel.
+
+    The application always checks origin/main, regardless of the local branch
+    name. This lets older installations that were originally deployed from a
+    feature branch continue receiving stable releases after that branch is
+    merged or deleted.
+    """
     status = {
         "ok": False,
         "error": "",
         "branch": "",
+        "target_branch": UPDATE_BRANCH,
         "commit": "",
         "subject": "",
         "remote_url": "",
         "behind": 0,
         "ahead": 0,
         "dirty": False,
+        "installed_version": get_app_version(),
+        "remote_version": None,
     }
 
     rc, branch, err = run_process([GIT, "branch", "--show-current"])
@@ -102,7 +132,10 @@ def git_update_status(fetch=False):
         status["remote_url"] = remote_url
 
     if fetch:
-        rc, _out, err = run_process([GIT, "fetch", "--prune", "origin", branch], timeout=90)
+        rc, _out, err = run_process(
+            [GIT, "fetch", "--prune", "origin", UPDATE_BRANCH],
+            timeout=90,
+        )
         if rc != 0:
             status["error"] = err or "git fetch failed."
             return status
@@ -119,20 +152,24 @@ def git_update_status(fetch=False):
     rc, dirty, _ = run_process([GIT, "status", "--porcelain", "--untracked-files=no"])
     status["dirty"] = rc != 0 or bool(dirty.strip())
 
-    remote_ref = f"origin/{branch}"
+    remote_ref = f"origin/{UPDATE_BRANCH}"
+    rc, remote_version, _ = run_process([GIT, "show", f"{remote_ref}:version.txt"])
+    if rc == 0 and remote_version:
+        status["remote_version"] = remote_version.strip()
+
     rc, _out, _err = run_process([GIT, "rev-parse", "--verify", remote_ref])
     if rc != 0:
-        status["error"] = f"Remote branch {remote_ref} was not found."
+        status["error"] = f"Stable update branch {remote_ref} was not found."
         return status
 
     rc, behind, err = run_process([GIT, "rev-list", "--count", f"HEAD..{remote_ref}"])
     if rc != 0:
-        status["error"] = err or "Unable to compare local and remote versions."
+        status["error"] = err or "Unable to compare local and stable versions."
         return status
 
     rc, ahead, err = run_process([GIT, "rev-list", "--count", f"{remote_ref}..HEAD"])
     if rc != 0:
-        status["error"] = err or "Unable to compare local and remote versions."
+        status["error"] = err or "Unable to compare local and stable versions."
         return status
 
     status["behind"] = int(behind or 0)
@@ -148,6 +185,13 @@ def restart_after_update():
 
 
 # ---------- Config ----------
+
+def get_app_version():
+    try:
+        return VERSION_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
 
 def load_config():
     if CONFIG_PATH.exists():
@@ -287,6 +331,108 @@ DEFAULT_SCENARIOS = [
         ],
     },
 ]
+
+
+DEFAULT_SLA_PROFILE = {
+    "name": "Generic business SLA",
+    "latency_ms": 100.0,
+    "jitter_ms": 30.0,
+    "loss_pct": 2.0,
+}
+
+
+def get_scenarios(cfg: dict):
+    """Return built-in scenarios plus validated user-defined scenarios."""
+    scenarios = json.loads(json.dumps(DEFAULT_SCENARIOS))
+    for item in cfg.get("custom_scenarios", []):
+        if isinstance(item, dict) and item.get("id") and item.get("steps"):
+            scenarios.append(item)
+    return scenarios
+
+
+def validate_scenario_steps(raw_steps):
+    """Validate a compact vendor-neutral scenario definition."""
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise ValueError("Scenario must contain at least one step.")
+    if len(raw_steps) > 30:
+        raise ValueError("A scenario can contain at most 30 steps.")
+
+    validated = []
+    for index, step in enumerate(raw_steps, start=1):
+        if not isinstance(step, dict):
+            raise ValueError(f"Step {index} must be an object.")
+
+        action = str(step.get("action", "")).strip()
+        if action not in ("quality", "fault", "mtu"):
+            raise ValueError(
+                f"Step {index}: action must be quality, fault or mtu."
+            )
+
+        try:
+            after = max(0, min(3600, int(step.get("after", 0))))
+        except (TypeError, ValueError):
+            raise ValueError(f"Step {index}: after must be an integer.")
+
+        value = step.get("value")
+        if action == "quality":
+            try:
+                value = max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {index}: quality must be 0-100.")
+        elif action == "fault":
+            if value not in (
+                "normal",
+                "blackhole",
+                "downstream_blackhole",
+                "upstream_blackhole",
+            ):
+                raise ValueError(f"Step {index}: unsupported fault.")
+        elif action == "mtu":
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {index}: MTU must be an integer.")
+            if value != 0 and not 576 <= value <= 9000:
+                raise ValueError(
+                    f"Step {index}: MTU must be 576-9000, or 0 to restore."
+                )
+
+        validated.append(
+            {
+                "after": after,
+                "action": action,
+                "value": value,
+                "label": str(step.get("label") or action)[:80],
+            }
+        )
+    return validated
+
+
+def get_sla_profile(cfg: dict):
+    stored = cfg.get("sla_profile")
+    if not isinstance(stored, dict):
+        return dict(DEFAULT_SLA_PROFILE)
+    return {
+        "name": str(stored.get("name") or DEFAULT_SLA_PROFILE["name"])[:80],
+        "latency_ms": max(0.0, float(stored.get("latency_ms", 100.0))),
+        "jitter_ms": max(0.0, float(stored.get("jitter_ms", 30.0))),
+        "loss_pct": min(
+            100.0, max(0.0, float(stored.get("loss_pct", 2.0)))
+        ),
+    }
+
+
+def evaluate_sla(effective: dict, sla: dict, fault="normal"):
+    checks = {
+        "latency": float(effective.get("delay_ms", 0.0)) <= sla["latency_ms"],
+        "jitter": float(effective.get("jitter_ms", 0.0)) <= sla["jitter_ms"],
+        "loss": float(effective.get("loss_pct", 0.0)) <= sla["loss_pct"],
+        "data_plane": fault == "normal",
+    }
+    return {
+        "pass": all(checks.values()),
+        "checks": checks,
+    }
 
 
 def get_presets(cfg: dict):
@@ -551,14 +697,12 @@ def calculate_profile(
     }
 
 
-def apply_selected_profile(link: dict, presets: dict):
-    """Apply either the quality-derived or custom profile stored on one WAN."""
-    inner = link.get("inner")
-    outer = link.get("outer")
+def get_effective_profile(link: dict, presets: dict):
+    """Return the currently configured effective impairment values without applying them."""
     preset_id = link.get("preset", "broadband")
     preset = presets.get(preset_id) or presets.get("broadband")
-    if not inner or not preset:
-        return False, "Missing interface or preset", {}
+    if not preset:
+        return {}
 
     mode = link.get("mode", "quality")
     quality = max(0, min(100, int(link.get("quality", 100))))
@@ -567,7 +711,7 @@ def apply_selected_profile(link: dict, presets: dict):
 
     if mode == "custom" and link.get("custom_profile"):
         custom = link["custom_profile"]
-        effective = {
+        return {
             "delay_ms": max(0.0, float(custom.get("delay_ms", 0.0))),
             "jitter_ms": max(0.0, float(custom.get("jitter_ms", 0.0))),
             "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
@@ -578,13 +722,25 @@ def apply_selected_profile(link: dict, presets: dict):
             "corrupt_pct": min(100.0, max(0.0, float(custom.get("corrupt_pct", 0.0)))),
             "reorder_pct": min(100.0, max(0.0, float(custom.get("reorder_pct", 0.0)))),
         }
-    else:
-        effective = calculate_profile(
-            preset,
-            quality,
-            bandwidth_download,
-            bandwidth_upload,
-        )
+
+    return calculate_profile(
+        preset,
+        quality,
+        bandwidth_download,
+        bandwidth_upload,
+    )
+
+
+def apply_selected_profile(link: dict, presets: dict):
+    """Apply either the quality-derived or custom profile stored on one WAN."""
+    inner = link.get("inner")
+    outer = link.get("outer")
+    if not inner:
+        return False, "Missing interface or preset", {}
+
+    effective = get_effective_profile(link, presets)
+    if not effective:
+        return False, "Missing interface or preset", {}
 
     ok_down, msg_down = apply_netem(
         inner,
@@ -898,16 +1054,42 @@ def restore_runtime_state():
 
 # ---------- Lab runtime / observability ----------
 
+def load_event_history():
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    if not EVENT_LOG_PATH.exists():
+        return
+    try:
+        lines = EVENT_LOG_PATH.read_text().splitlines()[-500:]
+        for line in lines:
+            try:
+                EVENT_LOG.append(json.loads(line))
+            except json.JSONDecodeError:
+                continue
+    except OSError:
+        pass
+    del EVENT_LOG[:-500]
+
+
 def log_event(kind: str, message: str, **details):
-    EVENT_LOG.append(
-        {
-            "timestamp": time.time(),
-            "kind": kind,
-            "message": message,
-            "details": details,
-        }
-    )
-    del EVENT_LOG[:-200]
+    event = {
+        "timestamp": time.time(),
+        "kind": kind,
+        "message": message,
+        "details": details,
+    }
+    EVENT_LOG.append(event)
+    del EVENT_LOG[:-500]
+
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        with EVENT_LOG_PATH.open("a") as handle:
+            handle.write(json.dumps(event, separators=(",", ":")) + "\n")
+    except OSError:
+        # History persistence must never break the lab control path.
+        pass
+
+
+load_event_history()
 
 
 def get_link(cfg: dict, link_id: str):
@@ -943,6 +1125,105 @@ def interface_counters(ifname: str):
     return result
 
 
+
+def get_interface_mtu(ifname: str):
+    if not ifname:
+        return None
+    try:
+        return int((Path("/sys/class/net") / ifname / "mtu").read_text().strip())
+    except (OSError, ValueError):
+        return None
+
+
+def apply_mtu_limit(link: dict, mtu: int):
+    """
+    Apply a transient path-MTU constriction to the bridge and both WAN ports.
+
+    mtu=0 restores the values captured before the first MTU change.
+    """
+    link_id = link.get("id") or link.get("bridge") or link.get("inner")
+    devices = [
+        dev for dev in (link.get("inner"), link.get("outer"), link.get("bridge"))
+        if dev
+    ]
+    if not devices:
+        return False, "WAN has no interfaces."
+
+    if mtu == 0:
+        errors = []
+        for dev in devices:
+            original = ORIGINAL_MTUS.pop((link_id, dev), None)
+            if original is None:
+                continue
+            rc, out, err = run_cmd(f"{IP} link set dev {dev} mtu {original}")
+            if rc != 0:
+                errors.append(f"{dev}: {err or out}")
+        if errors:
+            return False, "; ".join(errors)
+        ACTIVE_FAULTS.pop(link_id, None)
+        log_event("mtu", f"{link_id}: MTU restored", link_id=link_id)
+        return True, "OK"
+
+    mtu = max(576, min(9000, int(mtu)))
+    for dev in devices:
+        key = (link_id, dev)
+        if key not in ORIGINAL_MTUS:
+            current = get_interface_mtu(dev)
+            if current:
+                ORIGINAL_MTUS[key] = current
+
+    errors = []
+    # Bridge first, then its member ports.
+    ordered = [link.get("bridge"), link.get("inner"), link.get("outer")]
+    for dev in [item for item in ordered if item]:
+        rc, out, err = run_cmd(f"{IP} link set dev {dev} mtu {mtu}")
+        if rc != 0:
+            errors.append(f"{dev}: {err or out}")
+
+    if errors:
+        return False, "; ".join(errors)
+
+    ACTIVE_FAULTS[link_id] = f"mtu_{mtu}"
+    log_event("mtu", f"{link_id}: MTU limited to {mtu}", link_id=link_id, mtu=mtu)
+    return True, "OK"
+
+
+def capture_snapshot():
+    with RUNTIME_LOCK:
+        state = dict(CAPTURE_STATE)
+    path = state.get("path")
+    state["download_ready"] = bool(path and Path(path).exists())
+    state.pop("process", None)
+    return state
+
+
+def finish_capture(process, duration: int):
+    global CAPTURE_PROCESS
+    try:
+        process.wait(timeout=max(1, duration))
+    except subprocess.TimeoutExpired:
+        process.terminate()
+        try:
+            process.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=2)
+
+    with RUNTIME_LOCK:
+        error = None
+        if process.returncode not in (0, -15):
+            error = f"tcpdump exited with code {process.returncode}"
+        CAPTURE_STATE["active"] = False
+        CAPTURE_STATE["error"] = error
+        CAPTURE_PROCESS = None
+    log_event(
+        "capture",
+        "Packet capture finished",
+        interface=CAPTURE_STATE.get("interface"),
+        error=error,
+    )
+
+
 def apply_runtime_fault(link: dict, fault: str, presets: dict):
     """
     Apply a transient fault without changing the persisted WAN profile.
@@ -957,11 +1238,18 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
         return False, "WAN has no inner interface."
 
     if fault == "normal":
+        mtu_ok, mtu_msg = apply_mtu_limit(link, 0)
         ok, msg, _ = apply_selected_profile(link, presets)
-        if ok:
+        if ok and mtu_ok:
             ACTIVE_FAULTS.pop(link_id, None)
             log_event("fault", f"{link_id} restored to normal", link_id=link_id)
-        return ok, msg
+            return True, "OK"
+        details = []
+        if not mtu_ok:
+            details.append(mtu_msg)
+        if not ok:
+            details.append(msg)
+        return False, "; ".join(details)
 
     # First restore the configured state so one-way faults leave the opposite
     # direction in its normal configured condition.
@@ -1032,8 +1320,11 @@ def run_scenario(link_id: str, scenario: dict):
                     step.get("value", "normal"),
                     presets,
                 )
+            elif action == "mtu":
+                apply_mtu_limit(runtime_profile, int(step.get("value", 0)))
 
     finally:
+        apply_mtu_limit(original, 0)
         apply_selected_profile(original, presets)
         ACTIVE_FAULTS.pop(link_id, None)
         log_event("scenario", f'{scenario["name"]} finished', link_id=link_id)
@@ -1066,6 +1357,7 @@ def inject_nav():
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
         ],
         "config": cfg,
+        "app_version": get_app_version(),
     }
 
 
@@ -1178,29 +1470,43 @@ def index():
 @app.route("/lab")
 def lab_tools():
     cfg = load_config()
+    presets = get_presets(cfg)
+    sla_profile = get_sla_profile(cfg)
     links = cfg.get("wan_links", [])
     telemetry = []
     for link in links:
+        link_id = link.get("id") or link.get("bridge")
+        effective = get_effective_profile(link, presets)
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
         telemetry.append(
             {
-                "id": link.get("id") or link.get("bridge"),
+                "id": link_id,
                 "name": link.get("name", "WAN"),
                 "inner": link.get("inner"),
                 "outer": link.get("outer"),
+                "bridge": link.get("bridge"),
                 "quality": int(link.get("quality", 100)),
-                "fault": ACTIVE_FAULTS.get(
-                    link.get("id") or link.get("bridge"),
-                    "normal",
-                ),
+                "fault": fault,
+                "mtu": {
+                    "inner": get_interface_mtu(link.get("inner")),
+                    "outer": get_interface_mtu(link.get("outer")),
+                    "bridge": get_interface_mtu(link.get("bridge")),
+                },
+                "effective": effective,
+                "sla": evaluate_sla(effective, sla_profile, fault),
             }
         )
     return render_template(
         "lab.html",
         page="lab",
         links=telemetry,
-        scenarios=DEFAULT_SCENARIOS,
+        scenarios=get_scenarios(cfg),
+        custom_scenarios=cfg.get("custom_scenarios", []),
         scenario_state=scenario_snapshot(),
-        events=list(reversed(EVENT_LOG[-30:])),
+        sla_profile=sla_profile,
+        capture_state=capture_snapshot(),
+        tcpdump_available=bool(shutil.which("tcpdump")),
+        events=list(reversed(EVENT_LOG[-60:])),
     )
 
 
@@ -1229,11 +1535,11 @@ def lab_fault():
 def lab_scenario_start():
     link_id = request.form.get("link_id") or ""
     scenario_id = request.form.get("scenario_id") or ""
+    cfg = load_config()
     scenario = next(
-        (item for item in DEFAULT_SCENARIOS if item["id"] == scenario_id),
+        (item for item in get_scenarios(cfg) if item["id"] == scenario_id),
         None,
     )
-    cfg = load_config()
 
     if not get_link(cfg, link_id):
         flash("Unknown WAN link.", "error")
@@ -1276,12 +1582,255 @@ def lab_scenario_stop():
     return redirect(url_for("lab_tools"))
 
 
+@app.route("/lab/scenario/save", methods=["POST"])
+def lab_scenario_save():
+    cfg = load_config()
+    name = (request.form.get("name") or "").strip()
+    description = (request.form.get("description") or "").strip()
+    raw_steps = (request.form.get("steps_json") or "").strip()
+
+    if not name:
+        flash("Scenario name is required.", "error")
+        return redirect(url_for("lab_tools"))
+
+    try:
+        parsed = json.loads(raw_steps)
+        steps = validate_scenario_steps(parsed)
+    except (json.JSONDecodeError, ValueError) as exc:
+        flash(f"Scenario definition is invalid: {exc}", "error")
+        return redirect(url_for("lab_tools"))
+
+    slug = re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "scenario"
+    scenario_id = f"custom_{slug}"
+    custom = [
+        item for item in cfg.get("custom_scenarios", [])
+        if item.get("id") != scenario_id
+    ]
+    custom.append(
+        {
+            "id": scenario_id,
+            "name": name[:80],
+            "description": description[:240],
+            "steps": steps,
+        }
+    )
+    cfg["custom_scenarios"] = custom[-20:]
+    save_config(cfg)
+    log_event("scenario-config", f'Saved custom scenario "{name[:80]}"')
+    flash(f'Scenario "{name[:80]}" saved.', "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/scenario/delete", methods=["POST"])
+def lab_scenario_delete():
+    cfg = load_config()
+    scenario_id = request.form.get("scenario_id") or ""
+    before = len(cfg.get("custom_scenarios", []))
+    cfg["custom_scenarios"] = [
+        item for item in cfg.get("custom_scenarios", [])
+        if item.get("id") != scenario_id
+    ]
+    if len(cfg["custom_scenarios"]) != before:
+        save_config(cfg)
+        log_event("scenario-config", f"Deleted custom scenario {scenario_id}")
+        flash("Custom scenario deleted.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/mtu", methods=["POST"])
+def lab_mtu():
+    cfg = load_config()
+    link_id = request.form.get("link_id") or ""
+    link = get_link(cfg, link_id)
+    try:
+        mtu = int(request.form.get("mtu", "0"))
+    except ValueError:
+        mtu = 0
+
+    if not link:
+        flash("Unknown WAN link.", "error")
+    elif scenario_snapshot().get("active"):
+        flash("Stop the active scenario before changing MTU.", "error")
+    else:
+        ok, msg = apply_mtu_limit(link, mtu)
+        if ok:
+            flash(
+                "Path MTU restored." if mtu == 0 else f"Path MTU limited to {mtu} bytes.",
+                "success",
+            )
+        else:
+            flash("Failed to change path MTU: " + msg, "error")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/sla", methods=["POST"])
+def lab_sla():
+    cfg = load_config()
+    try:
+        profile = {
+            "name": (request.form.get("name") or "Generic business SLA").strip()[:80],
+            "latency_ms": max(0.0, float(request.form.get("latency_ms", "100"))),
+            "jitter_ms": max(0.0, float(request.form.get("jitter_ms", "30"))),
+            "loss_pct": min(
+                100.0,
+                max(0.0, float(request.form.get("loss_pct", "2"))),
+            ),
+        }
+    except ValueError:
+        flash("SLA thresholds must be numeric.", "error")
+        return redirect(url_for("lab_tools"))
+
+    cfg["sla_profile"] = profile
+    save_config(cfg)
+    log_event("sla-config", f'SLA profile updated: {profile["name"]}')
+    flash("Generic SLA thresholds saved.", "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/history.json")
+def lab_history_json():
+    return jsonify({"events": EVENT_LOG[-500:]})
+
+
+@app.route("/lab/history.csv")
+def lab_history_csv():
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["timestamp", "kind", "message", "details"])
+    for event in EVENT_LOG[-500:]:
+        writer.writerow(
+            [
+                event.get("timestamp"),
+                event.get("kind"),
+                event.get("message"),
+                json.dumps(event.get("details", {}), separators=(",", ":")),
+            ]
+        )
+    return Response(
+        output.getvalue(),
+        mimetype="text/csv",
+        headers={"Content-Disposition": 'attachment; filename="netem-events.csv"'},
+    )
+
+
+@app.route("/lab/history/clear", methods=["POST"])
+def lab_history_clear():
+    EVENT_LOG.clear()
+    try:
+        if EVENT_LOG_PATH.exists():
+            EVENT_LOG_PATH.unlink()
+    except OSError:
+        pass
+    flash("Runtime event history cleared.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/start", methods=["POST"])
+def lab_capture_start():
+    global CAPTURE_PROCESS
+
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump:
+        flash("tcpdump is not installed on the NetEm VM.", "error")
+        return redirect(url_for("lab_tools"))
+
+    cfg = load_config()
+    link_id = request.form.get("link_id") or ""
+    side = request.form.get("side") or "inner"
+    link = get_link(cfg, link_id)
+    if not link or side not in ("inner", "outer"):
+        flash("Invalid capture interface.", "error")
+        return redirect(url_for("lab_tools"))
+
+    ifname = link.get(side)
+    if not ifname:
+        flash("Selected WAN side has no interface.", "error")
+        return redirect(url_for("lab_tools"))
+
+    try:
+        duration = max(5, min(120, int(request.form.get("duration", "30"))))
+    except ValueError:
+        duration = 30
+
+    with RUNTIME_LOCK:
+        if CAPTURE_STATE["active"]:
+            flash("A packet capture is already running.", "error")
+            return redirect(url_for("lab_tools"))
+
+        CAPTURE_DIR.mkdir(parents=True, exist_ok=True)
+        filename = f"{int(time.time())}-{link_id}-{side}.pcap"
+        path = CAPTURE_DIR / filename
+        try:
+            CAPTURE_PROCESS = subprocess.Popen(
+                [
+                    tcpdump,
+                    "-i", ifname,
+                    "-nn",
+                    "-s", "256",
+                    "-c", "20000",
+                    "-w", str(path),
+                ],
+                cwd=BASE_DIR,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+        except OSError as exc:
+            flash(f"Unable to start tcpdump: {exc}", "error")
+            return redirect(url_for("lab_tools"))
+
+        CAPTURE_STATE.update(
+            {
+                "active": True,
+                "link_id": link_id,
+                "interface": ifname,
+                "started_at": time.time(),
+                "duration": duration,
+                "path": str(path),
+                "error": None,
+            }
+        )
+
+    threading.Thread(
+        target=finish_capture,
+        args=(CAPTURE_PROCESS, duration),
+        daemon=True,
+    ).start()
+    log_event("capture", f"Packet capture started on {ifname}", duration=duration)
+    flash(f"Packet capture started on {ifname} for up to {duration} seconds.", "success")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/stop", methods=["POST"])
+def lab_capture_stop():
+    global CAPTURE_PROCESS
+    with RUNTIME_LOCK:
+        process = CAPTURE_PROCESS
+    if process and process.poll() is None:
+        process.terminate()
+        flash("Packet capture stop requested.", "info")
+    return redirect(url_for("lab_tools"))
+
+
+@app.route("/lab/capture/download")
+def lab_capture_download():
+    state = capture_snapshot()
+    path = state.get("path")
+    if not path or not Path(path).exists():
+        flash("No packet capture is available.", "error")
+        return redirect(url_for("lab_tools"))
+    return send_file(path, as_attachment=True, download_name=Path(path).name)
+
+
 @app.route("/api/v1/state")
 def api_state():
     cfg = load_config()
+    presets = get_presets(cfg)
+    sla_profile = get_sla_profile(cfg)
     links = []
     for link in cfg.get("wan_links", []):
         link_id = link.get("id") or link.get("bridge")
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
+        effective = get_effective_profile(link, presets)
         links.append(
             {
                 "id": link_id,
@@ -1292,14 +1841,24 @@ def api_state():
                 "preset": link.get("preset", "broadband"),
                 "quality": int(link.get("quality", 100)),
                 "mode": link.get("mode", "quality"),
-                "fault": ACTIVE_FAULTS.get(link_id, "normal"),
+                "fault": fault,
+                "mtu": {
+                    "inner": get_interface_mtu(link.get("inner")),
+                    "outer": get_interface_mtu(link.get("outer")),
+                    "bridge": get_interface_mtu(link.get("bridge")),
+                },
+                "effective": effective,
+                "sla": evaluate_sla(effective, sla_profile, fault),
             }
         )
     return jsonify(
         {
             "timestamp": time.time(),
+            "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
+            "capture": capture_snapshot(),
+            "sla_profile": sla_profile,
         }
     )
 
@@ -1421,7 +1980,7 @@ def updates():
             elif status["behind"] == 0:
                 flash("The application is already up to date.", "info")
             else:
-                remote_ref = f'origin/{status["branch"]}'
+                remote_ref = f'origin/{status["target_branch"]}'
                 rc, out, err = run_process(
                     [GIT, "merge", "--ff-only", remote_ref],
                     timeout=90,

@@ -107,14 +107,15 @@
       <div class="lab-badge">LAB USE ONLY</div>
       <div class="project-credit">Fork maintained &amp; extended by <strong>Kristofer Wohlgang</strong></div>
       <div class="project-credit">Foundation: <a href="https://github.com/techkarma-no/techkarma-netem" target="_blank" rel="noopener">Techkarma NetEm</a></div>
-      <div class="project-credit">Powered by Linux tc/netem</div>
+      <div class="project-credit">Version <strong>v{{ app_version }}</strong> · Powered by Linux tc/netem</div>
     </div>
   </aside>
 
   <main class="main">
     <div class="title">Application updates</div>
     <div class="subtitle">
-      Check the configured GitHub remote for updates to the currently installed branch.
+      Check the configured GitHub remote against the stable <span class="mono">main</span> branch.
+      The local checkout may have a different branch name; updates always follow <span class="mono">origin/main</span>.
       Updates are fast-forward only and are refused if tracked application files have local changes.
     </div>
 
@@ -126,8 +127,17 @@
 
     <div class="card">
       <div class="rows">
-        <div class="key">Branch</div>
+        <div class="key">Local branch</div>
         <div class="mono">{{ update_status.branch or "unknown" }}</div>
+
+        <div class="key">Update channel</div>
+        <div class="mono">origin/{{ update_status.target_branch or "main" }}</div>
+
+        <div class="key">Installed version</div>
+        <div><strong>v{{ update_status.installed_version or app_version }}</strong></div>
+
+        <div class="key">Stable version</div>
+        <div><strong>{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}unknown{% endif %}</strong></div>
 
         <div class="key">Installed commit</div>
         <div><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
@@ -150,11 +160,11 @@
       {% elif update_status.dirty %}
         <div class="state bad">Update blocked until tracked local changes are resolved.</div>
       {% elif update_status.ahead > 0 and update_status.behind > 0 %}
-        <div class="state bad">Local and remote branches have diverged. Resolve this from Git before using in-app updates.</div>
+        <div class="state bad">The local checkout and stable main branch have diverged. Resolve this from Git before using in-app updates.</div>
       {% elif update_status.behind > 0 %}
-        <div class="state warn">{{ update_status.behind }} remote commit(s) available.</div>
+        <div class="state warn">{{ update_status.behind }} stable main commit(s) available.</div>
       {% else %}
-        <div class="state good">Application is up to date with the last checked remote state.</div>
+        <div class="state good">Application is up to date with origin/{{ update_status.target_branch or "main" }}.</div>
       {% endif %}
 
       <div class="actions">
@@ -173,7 +183,8 @@
     </div>
 
     <div class="note">
-      NetEm updates the currently checked-out branch from <span class="mono">origin</span> using a fast-forward merge only.
+      NetEm always checks <span class="mono">origin/{{ update_status.target_branch or "main" }}</span> as the stable release channel and fast-forwards the local checkout to it when possible.
+      Version numbers come from <span class="mono">version.txt</span>, which is managed by Release Please together with the changelog and GitHub release tags.
       After a successful update the process exits intentionally so the systemd service can restart it.
       The service therefore needs <span class="mono">Restart=on-failure</span> or <span class="mono">Restart=always</span>.
     </div>

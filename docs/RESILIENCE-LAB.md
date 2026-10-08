@@ -110,6 +110,78 @@ Future:
 - sanitized PCAP replay
 - IDS/IPS-safe signature test library
 
+## Feature areas 6-10
+
+### 6. Custom scenario builder
+
+User-defined scenarios are stored in `config.json` and use the same transient runtime engine as built-ins. The MVP accepts validated JSON steps with three actions:
+
+- `quality` — 0-100%
+- `fault` — normal, bidirectional blackhole, downstream blackhole or upstream blackhole
+- `mtu` — 576-9000 bytes, or 0 to restore
+
+A scenario is limited to 30 steps and each individual wait is capped at one hour.
+
+### 7. Path MTU testing
+
+The current implementation can temporarily lower the MTU of the WAN bridge and its inner/outer member interfaces. The original MTUs are retained in memory and restored when requested or when a scenario finishes.
+
+This is intentionally described as **path MTU constriction**, not yet as a full PMTUD blackhole. A future implementation can use nftables to drop oversized IPv4/IPv6 packets and selectively suppress ICMP/ICMPv6 feedback for more exact PMTUD failure testing.
+
+### 8. Generic SLA evaluator
+
+A persisted vendor-neutral SLA profile defines maximum:
+
+- latency
+- jitter
+- packet loss
+
+NetEm compares these limits with the effective impairment it is injecting. Any active runtime fault also fails the generic data-plane check.
+
+This is an **expected/injected SLA state**, not measured vendor telemetry. Future vendor adapters should display the appliance's measured SLA alongside NetEm's expected result.
+
+### 9. Persistent history and export
+
+Runtime events are appended to `runtime/events.jsonl` and reloaded when the application starts. The Lab Tools UI can export recent history as:
+
+- JSON
+- CSV
+
+History includes scenario activity, faults, MTU changes, SLA changes, captures and safe security-test events. The runtime directory is excluded from Git.
+
+### 10. Bounded packet capture
+
+When `tcpdump` is installed, Lab Tools can capture on the configured inner or outer WAN interface.
+
+Guardrails in the MVP:
+
+- configured WAN interfaces only
+- maximum 120-second duration
+- maximum 20,000 packets
+- 256-byte snap length
+- one capture at a time
+- explicit stop
+- download of the resulting PCAP
+
+The service needs `CAP_NET_RAW` in addition to `CAP_NET_ADMIN` for this optional feature.
+
+## Release management
+
+The repository uses Release Please with the `simple` release strategy.
+
+Release state is source controlled in:
+
+- `version.txt`
+- `.release-please-manifest.json`
+- `release-please-config.json`
+- `CHANGELOG.md`
+
+The GitHub Actions workflow runs against `main`. Release Please collects Conventional Commits, opens/updates a release PR, updates the version/changelog in that PR, and creates the GitHub tag/release when the release PR is merged.
+
+The NetEm updater independently treats `origin/main` as the stable appliance update channel. This means a VM originally installed from an old feature branch can still fast-forward to the stable mainline after that feature branch is merged or deleted.
+
+---
+
 ## External projects and dependencies
 
 The current MVP does not vendor another GitHub project because the implemented functions map directly to Linux `tc/netem`, Linux interface counters and Flask.
