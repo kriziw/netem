@@ -57,6 +57,179 @@ def save_config(cfg: dict):
     tmp.replace(CONFIG_PATH)
 
 
+DEFAULT_PRESETS = {
+    "dia": {
+        "name": "DIA",
+        "delay_ms": 5.0,
+        "jitter_ms": 1.0,
+        "loss_pct": 0.0,
+        "download_mbit": 1000.0,
+        "upload_mbit": 1000.0,
+    },
+    "dsl": {
+        "name": "DSL",
+        "delay_ms": 25.0,
+        "jitter_ms": 8.0,
+        "loss_pct": 0.1,
+        "download_mbit": 100.0,
+        "upload_mbit": 20.0,
+    },
+    "broadband": {
+        "name": "Broadband",
+        "delay_ms": 15.0,
+        "jitter_ms": 5.0,
+        "loss_pct": 0.1,
+        "download_mbit": 300.0,
+        "upload_mbit": 50.0,
+    },
+    "4g": {
+        "name": "4G",
+        "delay_ms": 45.0,
+        "jitter_ms": 20.0,
+        "loss_pct": 0.5,
+        "download_mbit": 80.0,
+        "upload_mbit": 20.0,
+    },
+    "5g": {
+        "name": "5G",
+        "delay_ms": 20.0,
+        "jitter_ms": 8.0,
+        "loss_pct": 0.2,
+        "download_mbit": 300.0,
+        "upload_mbit": 50.0,
+    },
+    "satellite": {
+        "name": "Satellite",
+        "delay_ms": 300.0,
+        "jitter_ms": 30.0,
+        "loss_pct": 0.5,
+        "download_mbit": 100.0,
+        "upload_mbit": 20.0,
+    },
+}
+
+
+def get_presets(cfg: dict):
+    """Return editable presets, seeding the defaults when none are stored yet."""
+    stored = cfg.get("presets")
+    if stored:
+        return stored
+
+    presets = json.loads(json.dumps(DEFAULT_PRESETS))
+    cfg["presets"] = presets
+    save_config(cfg)
+    return presets
+
+
+def quality_status(quality: int):
+    quality = max(0, min(100, int(quality)))
+    if quality == 0:
+        return "Down"
+    if quality >= 90:
+        return "Excellent"
+    if quality >= 75:
+        return "Good"
+    if quality >= 50:
+        return "Fair"
+    if quality >= 25:
+        return "Poor"
+    return "Critical"
+
+
+def calculate_profile(preset: dict, quality: int):
+    """
+    Convert a technology preset + relative quality into effective shaping values.
+
+    100% means the preset's nominal values. Lower quality progressively raises
+    latency/jitter/loss and reduces both bandwidth directions. Quality is
+    relative to the selected access type, not an absolute comparison between
+    technologies.
+    """
+    q = max(0, min(100, int(quality)))
+    if q == 0:
+        return {
+            "delay_ms": max(float(preset.get("delay_ms", 0.0)), 1000.0),
+            "jitter_ms": max(float(preset.get("jitter_ms", 0.0)), 200.0),
+            "loss_pct": 100.0,
+            "download_mbit": 1.0,
+            "upload_mbit": 1.0,
+        }
+
+    degradation = (100.0 - q) / 100.0
+    curve = degradation * degradation
+
+    delay = float(preset.get("delay_ms", 0.0)) * (1.0 + 4.0 * curve)
+    jitter = float(preset.get("jitter_ms", 0.0)) * (1.0 + 6.0 * curve)
+    loss = min(
+        100.0,
+        float(preset.get("loss_pct", 0.0)) + 20.0 * (degradation ** 3),
+    )
+
+    # Keep useful granularity at medium quality but collapse throughput as the
+    # link approaches critical condition.
+    rate_factor = 0.05 + 0.95 * ((q / 100.0) ** 1.3)
+
+    return {
+        "delay_ms": round(delay, 3),
+        "jitter_ms": round(jitter, 3),
+        "loss_pct": round(loss, 3),
+        "download_mbit": round(
+            max(1.0, float(preset.get("download_mbit", 0.0)) * rate_factor), 3
+        ),
+        "upload_mbit": round(
+            max(1.0, float(preset.get("upload_mbit", 0.0)) * rate_factor), 3
+        ),
+    }
+
+
+def apply_selected_profile(link: dict, presets: dict):
+    """Apply either the quality-derived or custom profile stored on one WAN."""
+    inner = link.get("inner")
+    outer = link.get("outer")
+    preset_id = link.get("preset", "broadband")
+    preset = presets.get(preset_id) or presets.get("broadband")
+    if not inner or not preset:
+        return False, "Missing interface or preset", {}
+
+    mode = link.get("mode", "quality")
+    quality = max(0, min(100, int(link.get("quality", 100))))
+
+    if mode == "custom" and link.get("custom_profile"):
+        custom = link["custom_profile"]
+        effective = {
+            "delay_ms": max(0.0, float(custom.get("delay_ms", 0.0))),
+            "jitter_ms": max(0.0, float(custom.get("jitter_ms", 0.0))),
+            "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
+            "download_mbit": max(0.0, float(custom.get("download_mbit", 0.0))),
+            "upload_mbit": max(0.0, float(custom.get("upload_mbit", 0.0))),
+        }
+    else:
+        effective = calculate_profile(preset, quality)
+
+    ok_down, msg_down = apply_netem(
+        inner,
+        effective["delay_ms"],
+        effective["jitter_ms"],
+        effective["loss_pct"],
+        effective["download_mbit"],
+    )
+
+    ok_up, msg_up = True, "OK"
+    if outer:
+        ok_up, msg_up = apply_netem(
+            outer, 0.0, 0.0, 0.0, effective["upload_mbit"]
+        )
+
+    if ok_down and ok_up:
+        return True, "OK", effective
+
+    details = []
+    if not ok_down:
+        details.append(f"download/impairment: {msg_down}")
+    if not ok_up:
+        details.append(f"upload: {msg_up}")
+    return False, "; ".join(details), effective
+
 # ---------- NIC discovery ----------
 
 def get_all_nics():
@@ -286,6 +459,31 @@ def delete_bridge(br_name: str):
     run_cmd(f"{IP} link delete {br_name} type bridge")
 
 
+def restore_runtime_state():
+    """
+    Restore optional runtime state from config.json.
+
+    Linux bridges and qdiscs are runtime objects and disappear after reboot.
+    The GUI controls whether saved bridges and shaping should be recreated
+    automatically when the application starts.
+    """
+    cfg = load_config()
+    links = cfg.get("wan_links", [])
+
+    if cfg.get("restore_bridges_on_startup", True):
+        for link in links:
+            bridge = link.get("bridge")
+            inner = link.get("inner")
+            outer = link.get("outer")
+            if bridge and inner and outer:
+                ensure_bridge(bridge, inner, outer)
+
+    if cfg.get("restore_shaping_on_startup", True):
+        presets = get_presets(cfg)
+        for link in links:
+            apply_selected_profile(link, presets)
+
+
 # ---------- Nav context ----------
 
 @app.context_processor
@@ -294,6 +492,7 @@ def inject_nav():
     return {
         "nav_items": [
             {"id": "dashboard", "label": "Dashboard", "endpoint": "index"},
+            {"id": "presets", "label": "Presets", "endpoint": "presets"},
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
         ],
         "config": cfg,
@@ -315,20 +514,55 @@ def index():
         cfg["mgmt_interface"] = mgmt
         save_config(cfg)
 
+    presets = get_presets(cfg)
     nic_states = []
     for link in cfg.get("wan_links", []):
         name = link.get("name", "WAN")
         inner = link.get("inner")
-
         if not inner:
             continue
 
-        qdisc_info = get_qdisc_state(inner)
+        outer = link.get("outer")
+        preset_id = link.get("preset", "broadband")
+        if preset_id not in presets:
+            preset_id = next(iter(presets), "")
+        preset = presets.get(preset_id, {})
+        quality = max(0, min(100, int(link.get("quality", 100))))
+        mode = link.get("mode", "quality")
+        if mode == "custom" and link.get("custom_profile"):
+            effective = {
+                "delay_ms": float(link["custom_profile"].get("delay_ms", 0.0)),
+                "jitter_ms": float(link["custom_profile"].get("jitter_ms", 0.0)),
+                "loss_pct": float(link["custom_profile"].get("loss_pct", 0.0)),
+                "download_mbit": float(link["custom_profile"].get("download_mbit", 0.0)),
+                "upload_mbit": float(link["custom_profile"].get("upload_mbit", 0.0)),
+            }
+        else:
+            effective = calculate_profile(preset, quality) if preset else {}
+            mode = "quality"
+
         nic_states.append(
             {
+                "id": link.get("id") or link.get("bridge") or inner,
                 "name": inner,
-                "label": f"{name} (inner)",
-                "qdisc": qdisc_info,
+                "outer": outer,
+                "label": name,
+                "preset_id": preset_id,
+                "quality": quality,
+                "mode": mode,
+                "quality_status": "Custom" if mode == "custom" else quality_status(quality),
+                "effective": effective,
+                "qdisc": get_qdisc_state(inner),
+                "outer_qdisc": get_qdisc_state(outer) if outer else {
+                    "raw": "",
+                    "parsed": {
+                        "kind": None,
+                        "delay_ms": None,
+                        "jitter_ms": None,
+                        "loss_pct": None,
+                        "rate_mbit": None,
+                    },
+                },
             }
         )
 
@@ -338,6 +572,7 @@ def index():
         mgmt_interface=mgmt,
         nic_states=nic_states,
         wan_links=cfg.get("wan_links", []),
+        presets=presets,
     )
 
 
@@ -361,9 +596,21 @@ def setup():
         wan1_name = (request.form.get("wan1_name") or "").strip()
         wan2_name = (request.form.get("wan2_name") or "").strip()
 
-        # Tear down old bridges
+        restore_bridges_on_startup = request.form.get("restore_bridges_on_startup") == "on"
+        restore_shaping_on_startup = request.form.get("restore_shaping_on_startup") == "on"
+
+        # Preserve the selected access preset and quality while interface
+        # mappings or aliases are edited.
         old_links = cfg.get("wan_links", [])
+        old_by_id = {}
         for link in old_links:
+            link_id = link.get("id") or (
+                "wan1" if link.get("bridge") == "br-wan1" else
+                "wan2" if link.get("bridge") == "br-wan2" else ""
+            )
+            if link_id:
+                old_by_id[link_id] = link
+
             for dev in (link.get("inner"), link.get("outer")):
                 if dev:
                     clear_qdisc(dev)
@@ -375,30 +622,49 @@ def setup():
 
         # WAN 1
         if wan1_inner and wan1_outer:
+            previous = old_by_id.get("wan1", {})
             ensure_bridge("br-wan1", wan1_inner, wan1_outer)
             wan_links.append(
                 {
+                    "id": "wan1",
                     "name": wan1_name or "WAN 1",
                     "bridge": "br-wan1",
                     "inner": wan1_inner,
                     "outer": wan1_outer,
+                    "preset": previous.get("preset", "broadband"),
+                    "quality": int(previous.get("quality", 100)),
+                    "mode": previous.get("mode", "quality"),
+                    "custom_profile": previous.get("custom_profile"),
+                    "mode": previous.get("mode", "quality"),
+                    "custom_profile": previous.get("custom_profile"),
                 }
             )
 
         # WAN 2
         if wan2_inner and wan2_outer:
+            previous = old_by_id.get("wan2", {})
             ensure_bridge("br-wan2", wan2_inner, wan2_outer)
             wan_links.append(
                 {
+                    "id": "wan2",
                     "name": wan2_name or "WAN 2",
                     "bridge": "br-wan2",
                     "inner": wan2_inner,
                     "outer": wan2_outer,
+                    "preset": previous.get("preset", "broadband"),
+                    "quality": int(previous.get("quality", 100)),
                 }
             )
 
         cfg["wan_links"] = wan_links
+        cfg["restore_bridges_on_startup"] = restore_bridges_on_startup
+        cfg["restore_shaping_on_startup"] = restore_shaping_on_startup
         save_config(cfg)
+
+        if restore_shaping_on_startup:
+            presets_cfg = get_presets(cfg)
+            for link in wan_links:
+                apply_selected_profile(link, presets_cfg)
 
         if wan_links:
             flash("WAN links saved and bridges created.", "success")
@@ -409,12 +675,22 @@ def setup():
 
     # GET
     setup_nics = get_setup_nics(cfg)
+    links_by_id = {}
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or (
+            "wan1" if link.get("bridge") == "br-wan1" else
+            "wan2" if link.get("bridge") == "br-wan2" else ""
+        )
+        if link_id:
+            links_by_id[link_id] = link
 
     return render_template(
         "setup.html",
         page="setup",
         all_nics=setup_nics,
         config=cfg,
+        wan1=links_by_id.get("wan1", {}),
+        wan2=links_by_id.get("wan2", {}),
     )
 
 
@@ -440,50 +716,186 @@ def reset_config():
 @app.route("/configure", methods=["POST"])
 def configure():
     """
-    Apply netem settings to a single interface.
-    Expect form fields:
-      itf, delay_ms, jitter_ms, loss_pct, rate_mbit
+    Apply a persisted preset in either quality-driven or custom override mode.
     """
-    ifname = request.form.get("itf") or request.args.get("itf")
-    if not ifname:
-        flash("Missing interface name.", "error")
+    link_id = request.form.get("link_id") or ""
+    preset_id = request.form.get("preset_id") or ""
+    mode = request.form.get("mode") or "quality"
+    if mode not in ("quality", "custom"):
+        mode = "quality"
+
+    try:
+        quality = int(request.form.get("quality", "100"))
+    except ValueError:
+        quality = 100
+    quality = max(0, min(100, quality))
+
+    cfg = load_config()
+    presets = get_presets(cfg)
+    preset = presets.get(preset_id)
+    if not preset:
+        flash("Unknown preset.", "error")
         return redirect(url_for("index"))
 
-    def parse_float(field: str, default: float = 0.0):
-        val = request.form.get(field)
-        if val is None or val == "":
-            return default
-        try:
-            return float(val)
-        except ValueError:
-            return default
+    link = next(
+        (
+            item
+            for item in cfg.get("wan_links", [])
+            if (item.get("id") or item.get("bridge")) == link_id
+        ),
+        None,
+    )
+    if not link:
+        flash("Unknown WAN link.", "error")
+        return redirect(url_for("index"))
 
-    delay_ms = parse_float("delay_ms", 0.0)
-    jitter_ms = parse_float("jitter_ms", 0.0)
-    loss_pct = parse_float("loss_pct", 0.0)
-    rate_mbit = parse_float("rate_mbit", 0.0)
+    link["preset"] = preset_id
+    link["quality"] = quality
+    link["mode"] = mode
 
-    ok, msg = apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit)
-    if ok:
-        flash(f"Applied netem on {ifname}: {msg}", "success")
+    if mode == "custom":
+        baseline = calculate_profile(preset, quality)
+
+        def custom_float(field, default):
+            value = request.form.get(field)
+            if value is None or value == "":
+                return float(default)
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                return float(default)
+
+        link["custom_profile"] = {
+            "delay_ms": custom_float("custom_delay_ms", baseline["delay_ms"]),
+            "jitter_ms": custom_float("custom_jitter_ms", baseline["jitter_ms"]),
+            "loss_pct": min(
+                100.0,
+                custom_float("custom_loss_pct", baseline["loss_pct"]),
+            ),
+            "download_mbit": custom_float(
+                "custom_download_mbit", baseline["download_mbit"]
+            ),
+            "upload_mbit": custom_float(
+                "custom_upload_mbit", baseline["upload_mbit"]
+            ),
+        }
     else:
-        flash(f"Failed to apply netem on {ifname}: {msg}", "error")
+        # Returning to the quality slider deliberately discards manual overrides.
+        link.pop("custom_profile", None)
+
+    ok, msg, _effective = apply_selected_profile(link, presets)
+
+    if ok:
+        save_config(cfg)
+        if mode == "custom":
+            flash(
+                f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
+                "with custom impairment values.",
+                "success",
+            )
+        else:
+            flash(
+                f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
+                f'at {quality}% ({quality_status(quality)}).',
+                "success",
+            )
+    else:
+        flash("Failed to apply WAN profile: " + msg, "error")
 
     return redirect(url_for("index"))
+
+@app.route("/presets", methods=["GET", "POST"])
+def presets():
+    cfg = load_config()
+    current = get_presets(cfg)
+
+    if request.method == "POST":
+        updated = {}
+        for preset_id, existing in current.items():
+            def field_float(field, default):
+                value = request.form.get(f"{preset_id}_{field}")
+                if value is None or value == "":
+                    return float(default)
+                try:
+                    return max(0.0, float(value))
+                except ValueError:
+                    return float(default)
+
+            updated[preset_id] = {
+                "name": (
+                    request.form.get(f"{preset_id}_name")
+                    or existing.get("name")
+                    or preset_id
+                ).strip(),
+                "delay_ms": field_float("delay_ms", existing.get("delay_ms", 0.0)),
+                "jitter_ms": field_float(
+                    "jitter_ms", existing.get("jitter_ms", 0.0)
+                ),
+                "loss_pct": min(
+                    100.0,
+                    field_float("loss_pct", existing.get("loss_pct", 0.0)),
+                ),
+                "download_mbit": field_float(
+                    "download_mbit", existing.get("download_mbit", 0.0)
+                ),
+                "upload_mbit": field_float(
+                    "upload_mbit", existing.get("upload_mbit", 0.0)
+                ),
+            }
+
+        cfg["presets"] = updated
+        save_config(cfg)
+
+        # Keep live links consistent with their displayed preset values.
+        for link in cfg.get("wan_links", []):
+            apply_selected_profile(link, updated)
+
+        flash("Presets saved and active WAN profiles refreshed.", "success")
+        return redirect(url_for("presets"))
+
+    return render_template(
+        "presets.html",
+        page="presets",
+        presets=current,
+    )
+
+
+@app.route("/presets/reset", methods=["POST"])
+def reset_presets():
+    cfg = load_config()
+    cfg["presets"] = json.loads(json.dumps(DEFAULT_PRESETS))
+    save_config(cfg)
+
+    for link in cfg.get("wan_links", []):
+        apply_selected_profile(link, cfg["presets"])
+
+    flash("Preset defaults restored and active WAN profiles refreshed.", "info")
+    return redirect(url_for("presets"))
 
 
 @app.route("/clear", methods=["POST"])
 def clear():
     ifname = request.form.get("itf") or request.args.get("itf")
+    outer_ifname = request.form.get("outer_itf") or request.args.get("outer_itf")
     if not ifname:
         flash("Missing interface name.", "error")
         return redirect(url_for("index"))
 
     clear_qdisc(ifname)
-    flash(f"Cleared qdisc on {ifname}", "info")
+    if outer_ifname:
+        clear_qdisc(outer_ifname)
+
+    cfg = load_config()
+    shaping = cfg.get("shaping_profiles", {})
+    if ifname in shaping:
+        shaping.pop(ifname, None)
+        cfg["shaping_profiles"] = shaping
+        save_config(cfg)
+
+    flash("Cleared WAN shaping.", "info")
     return redirect(url_for("index"))
 
 
 if __name__ == "__main__":
-    # For devel 
-    app.run(host="0.0.0.0", port=8081, debug=True)
+    restore_runtime_state()
+    app.run(host="0.0.0.0", port=8081, debug=False)

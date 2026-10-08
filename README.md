@@ -1,306 +1,346 @@
-# Techkarma NetEm
+# NetEm WAN Lab
 
-**Techkarma NetEm** is a modern, browser‑based WAN emulator built on top of Linux `tc/netem`.  
-It lets you shape **latency, jitter, packet loss, and bandwidth** across transparent L2 bridges —
-perfect for testing **firewalls, SD‑WAN units, routers, Starlink behaviour, 4G/5G, IPS systems, failover logic**, and more.
+A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failover labs.
 
-This project is open‑core:  
-- **Free open-source edition** (this repository)  
-- **Paid OVA appliance** --- prebuilt Debian VM (ready-to-run)
+This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
 
-➡ Official site: **https://techkarma.no/**
-➡ Quickstart Guide: **GUIDE.md**\
-➡ OVA Appliance: **https://buymeacoffee.com/techkarma/extras**
+## What this fork adds
 
----
+- **Persistent WAN topology**
+  - Optional automatic recreation of configured Linux bridges when the application starts.
+  - Prevents WAN paths disappearing after a VM reboot.
 
-# Features
+- **Persistent WAN profile state**
+  - WAN aliases, selected access preset and quality level are stored per link.
+  - The selected profile can be reapplied automatically after reboot.
 
-### Two independent WAN links  
-Each WAN link uses:
-- **Inner interface** → toward your test device (FW/SD‑WAN/router)
-- **Outer interface** → toward upstream/ISP side  
-Bridges (`br-wan1`, `br-wan2`) are created automatically.
+- **WAN technology presets**
+  - DIA
+  - DSL
+  - Broadband
+  - 4G
+  - 5G
+  - Satellite
 
-### GUI-based shaping  
-Clean UI with sliders for:
-- Delay (ms)  
-- Jitter (ms)  
-- Packet loss (%)  
-- Bandwidth limit (Mbit/s)
+- **Quality control + custom overrides per WAN**
+  - Each technology preset represents nominal 100% conditions.
+  - A 0–100% quality slider progressively worsens latency, jitter, loss and available bandwidth.
+  - Status is shown as Excellent, Good, Fair, Poor, Critical or Down.
+  - Any individual parameter can still be edited directly. Doing so switches that WAN to **Custom** mode.
+  - In Custom mode the quality slider is visually muted but still usable; moving it again removes the manual overrides and returns to quality-derived values.
 
-### Link Aliases  
-Give each WAN link a friendly name:  
-`Fiber primary`, `Starlink`, `5G backup`, etc.
+- **Asymmetric bandwidth simulation**
+  - Independent nominal download and upload capacity per preset.
+  - Useful for DSL, residential broadband, cellular and satellite links where upstream capacity is commonly lower than downstream capacity.
 
-### Powered by Linux NetEm  
-Under the hood:
-- `tc qdisc netem` for latency/jitter/loss  
-- `tbf` (token bucket filter) for bandwidth  
-- Linux bridges for transparent forwarding  
+- **GUI preset editor**
+  - Preset baseline values can be edited from a dedicated Presets menu.
+  - Project defaults can be restored from the same screen.
 
-### Designed for real labs  
-Optimized for:
-- Fortinet  
-- Cisco  
-- Juniper  
-- Palo Alto  
-- SD‑WAN platforms  
-- Starlink testing  
-- Failover tuning  
-- IPS/IDS behaviour analysis  
+- **Safer service behavior**
+  - Flask debug mode is disabled for normal application startup.
+
+The technology presets are representative lab profiles rather than claims about any specific ISP or carrier. They are intended as useful starting points. Edit their nominal values in the Presets menu, then change each WAN's simulated condition with the quality slider.
 
 ---
 
-# Screenshots
+## Typical use cases
 
-### **Dashboard**
-![Dashboard screenshot](docs/dashboard.png)
-
-### **Setup Wizard**
-![Setup screenshot](docs/setup.png)
+- Fortinet SD-WAN labs
+- Cisco SD-WAN testing
+- Palo Alto / Prisma SD-WAN testing
+- Juniper WAN testing
+- Dual-ISP failover
+- SLA / health-check tuning
+- Broadband vs DIA behavior
+- 4G / 5G backup links
+- Satellite WAN simulation
+- Packet loss and jitter testing
+- Bandwidth-constrained application testing
 
 ---
 
-# Architecture
+## Architecture
 
-```
-        +----------------------+
-        |  Test Device (FW)    |
-        +----------+-----------+
-                   |
-               (inner NIC)
-                   |
-         +---------+----------+
-         |   Techkarma NetEm  |
-         |     br-wan1        |
-         |   tc/netem+tbf     |
-         +---------+----------+
-                   |
-               (outer NIC)
-                   |
-        +----------+-----------+
-        |   Upstream Router    |
-        +----------------------+
+Each emulated WAN is a transparent Layer-2 path:
+
+```text
+Test device / firewall
+        |
+    inner NIC
+        |
+   +-----------+
+   | br-wanX   |
+   +-----------+
+        |
+    outer NIC
+        |
+Upstream / ISP router
 ```
 
-2 bridges = 2 independent WAN paths.
+The application uses:
+
+- Linux bridges for transparent forwarding
+- `tc netem` for latency, jitter and packet loss
+- `tbf` for bandwidth limiting
+
+Two WAN links are supported by the current GUI:
+
+```text
+WAN 1: inner NIC <-> br-wan1 <-> outer NIC
+WAN 2: inner NIC <-> br-wan2 <-> outer NIC
+```
 
 ---
 
-# Installation (Debian 12 Recommended)
+## Installation
 
-## 1. Install dependencies
+Debian 12 is the recommended base.
+
+### 1. Install dependencies
 
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git
 ```
 
-## 2. Clone the repo
+### 2. Clone this fork
 
 ```bash
 cd /opt
-sudo git clone https://github.com/techkarma-no/techkarma-netem.git
-sudo chown -R $USER:$USER techkarma-netem
-cd techkarma-netem
+sudo git clone https://github.com/kriziw/netem.git
+sudo chown -R $USER:$USER netem
+cd netem
 ```
 
-## 3. Create a virtualenv
+### 3. Create the Python environment
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install flask
-```
-
-## 4. Run manually (development mode)
-
-```bash
-FLASK_APP=app.py python app.py
-```
-
-Then open:
-
-```
-http://<vm-ip>:8081/
-```
-
-You will see the **Setup** screen on first launch.
-
----
-
-# Systemd Service (Recommended)
-
-## 1. Create `.venv` (if not already)
-
-```bash
-cd /opt/techkarma-netem
 python3 -m venv .venv
 source .venv/bin/activate
 pip install flask
 deactivate
 ```
 
-## 2. Create systemd unit
+### 4. Run manually
 
-File: `/etc/systemd/system/techkarma-netem.service`
+```bash
+cd /opt/netem
+.venv/bin/python app.py
+```
+
+Open:
+
+```text
+http://<vm-ip>:8081/
+```
+
+---
+
+## systemd service
+
+For a lab appliance, running NetEm as a service is recommended.
+
+Create:
+
+```text
+/etc/systemd/system/netem.service
+```
+
+with:
 
 ```ini
 [Unit]
-Description=Techkarma NetEm - WAN Emulator UI
+Description=NetEm WAN Emulator
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/opt/techkarma-netem
-ExecStart=/opt/techkarma-netem/.venv/bin/python app.py
-User=techkarma
-Group=techkarma
+WorkingDirectory=/opt/netem
+ExecStart=/opt/netem/.venv/bin/python app.py
 Restart=on-failure
 RestartSec=3
+
+# The application needs CAP_NET_ADMIN to create bridges and qdiscs.
+AmbientCapabilities=CAP_NET_ADMIN
+CapabilityBoundingSet=CAP_NET_ADMIN
+NoNewPrivileges=true
 
 [Install]
 WantedBy=multi-user.target
 ```
 
-## 3. Enable the service
+Then:
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable techkarma-netem
-sudo systemctl start techkarma-netem
-sudo systemctl status techkarma-netem
+sudo systemctl enable --now netem
+sudo systemctl status netem
 ```
 
 ---
 
-# First-Time Setup
+## First-time setup
 
-1. Go to `http://<vm-ip>:8081/setup`
-2. Assign:
-   - WAN1 alias  
-   - WAN1 inner  
-   - WAN1 outer  
-3. Optionally repeat for WAN2  
-4. Save – bridges are created automatically  
-5. Open **Dashboard**
+Open the **Setup** page and configure the two sides of each WAN.
 
-Your links are now live.
+Example:
+
+```text
+WAN1 inner: enp6s19
+WAN1 outer: enp6s20
+
+WAN2 inner: enp6s21
+WAN2 outer: enp6s22
+```
+
+The application creates:
+
+```text
+br-wan1
+br-wan2
+```
+
+### Startup persistence
+
+The Setup page includes two independent options:
+
+**Restore WAN bridges when the application starts**
+
+Recommended for persistent labs. Linux bridges are runtime objects and otherwise disappear after a reboot.
+
+**Restore selected presets and quality on startup**
+
+Recommended for repeatable labs. When enabled, each WAN's persisted access preset and quality level are reapplied after reboot. Disable it if you want the topology restored but the links to start without shaping.
 
 ---
 
-# How It Works (Under the Hood)
+## WAN presets
 
-Each WAN link is implemented as:
+The Dashboard includes representative presets:
 
-```
-br-wanX
-   |-- inner NIC (towards firewall/test device)
-   |-- outer NIC (towards WAN/upstream)
-```
+| Profile | Nominal delay | Nominal jitter | Nominal loss | Download | Upload |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| DIA | 5 ms | 1 ms | 0% | 1000 Mbit/s | 1000 Mbit/s |
+| DSL | 25 ms | 8 ms | 0.1% | 100 Mbit/s | 20 Mbit/s |
+| Broadband | 15 ms | 5 ms | 0.1% | 300 Mbit/s | 50 Mbit/s |
+| 4G | 45 ms | 20 ms | 0.5% | 80 Mbit/s | 20 Mbit/s |
+| 5G | 20 ms | 8 ms | 0.2% | 300 Mbit/s | 50 Mbit/s |
+| Satellite | 300 ms | 30 ms | 0.5% | 100 Mbit/s | 20 Mbit/s |
 
-Traffic is shaped on the **inner NIC** via:
+These values are deliberately generic. Actual broadband, cellular and satellite performance varies significantly by provider, access technology, RF conditions, congestion, geography and service tier.
 
-- `tc qdisc add dev <nic> root netem delay ... jitter ... loss ...`
-- `tc qdisc add dev <nic> parent 1:1 tbf rate ...`
+For example, a GEO satellite profile will generally need far more delay than LEO satellite service. The preset should therefore be treated as a quick starting point rather than a standards-based definition.
 
-Clearing shaping:
+### Quality model
+
+The preset table defines the **100% / nominal** state. The Dashboard stores one quality value per WAN:
+
+| Quality | Status |
+| ---: | --- |
+| 90–100% | Excellent |
+| 75–89% | Good |
+| 50–74% | Fair |
+| 25–49% | Poor |
+| 1–24% | Critical |
+| 0% | Down |
+
+As quality is reduced, the emulator progressively increases latency, jitter and packet loss and reduces both downstream and upstream capacity. The quality score is **relative to the selected access technology**: 100% Satellite remains a satellite link; it does not become equivalent to DIA.
+
+The Presets menu lets you change the 100% baseline values used by this calculation.
+
+---
+
+## How shaping works
+
+Delay, jitter and packet loss are applied on the configured **inner interface**.
+
+Bandwidth is directional:
+
+- **Download** is limited on inner-interface egress, toward the firewall/test device.
+- **Upload** is limited on outer-interface egress, toward the WAN/upstream router.
+
+Conceptually:
 
 ```bash
-tc qdisc del dev <nic> root
+# Impairment + download limit
+tc qdisc add dev <inner-nic> root netem delay ...
+tc qdisc add dev <inner-nic> parent ... tbf rate <download>
+
+# Independent upload limit
+tc qdisc add dev <outer-nic> root netem
+tc qdisc add dev <outer-nic> parent ... tbf rate <upload>
 ```
+
+The Dashboard exposes:
+
+- Access preset
+- Quality slider
+- Derived quality status
+- Editable latency, jitter, packet loss, download and upload values
+- Automatic **Custom** mode when any individual value is changed
+
+For example, a WAN can remain on the 5G preset at 100% quality, then have only jitter manually increased. The WAN becomes Custom while the remaining values stay at their current derived values. Moving the quality slider again deliberately discards those custom values and recalculates the full profile from the selected preset and quality.
+
+The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
 
 ---
 
-# Use Cases
+## Verify bridges
 
-### SD‑WAN Failover
-Emulate:
-- Bad LTE  
-- Moderate Starlink  
-- Weak backup radio  
-Trigger realistic failover behavior.
+To inspect the current Layer-2 topology:
 
-### Starlink Behavior
-Reproduce:
-- Latency spikes  
-- Temporary packet loss  
-- Saturation under load  
-
-### IPS/Firewall Performance
-Test how your NGFW behaves under real-world poor WAN conditions.
-
----
-
-# Troubleshooting
-
-### “No qdisc visible”
-Run:
 ```bash
-which tc
-tc qdisc show dev <nic>
-```
-
-### Bridges not created
-Make sure no conflicting names exist:
-```bash
+bridge link
 brctl show
-ip link show
 ```
 
-### UI not loading
-Check:
-```bash
-sudo systemctl status techkarma-netem
-sudo ss -ltnp | grep 8081
+Example:
+
+```text
+br-wan1
+  enp6s19
+  enp6s20
+
+br-wan2
+  enp6s21
+  enp6s22
 ```
 
 ---
 
-# Roadmap
+## Security
 
-- Multiple WAN links (more than 2)
-- Profile presets
-- API for automation
-- Automatic Starlink-behavior presets
-- Import/export config
-- Authentication for GUI
-- Built‑in package installer
+The application directly controls Linux networking and therefore requires elevated networking capabilities.
 
----
+Recommended practices:
 
-# OVA Appliance Edition (Paid Edition)
-
-A ready-to-use VM image for: - Proxmox\
-- VMware ESXi\
-- VMware Workstation\
-- VirtualBox\
-- XCP-NG
-
-Includes: - Debian preconfigured\
-- Techkarma NetEm preinstalled\
-- Web UI running automatically\
-- Forced password change on first boot
-
-Buy & auto-download:\
-https://buymeacoffee.com/techkarma/extras
+- Keep the management interface separate from the emulated WAN interfaces.
+- Do not expose the Flask application directly to the public Internet.
+- Put remote access behind an authenticated reverse proxy or trusted access layer.
+- Prefer `CAP_NET_ADMIN` over running the application as unrestricted root where practical.
 
 ---
 
-# Contributing
+## Upstream project and attribution
 
-PRs, issues and feature requests welcome.  
-Please open GitHub issues before large contributions.
+This project is derived from:
+
+**Techkarma NetEm**  
+Original repository: https://github.com/techkarma-no/techkarma-netem  
+Original author/project: Techkarma / techkarma-no
+
+The original project established the WAN emulator concept, Flask interface, bridge handling and Linux `tc/netem` implementation on which this fork is based.
+
+This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, persisted WAN identities, editable access-technology presets, a per-WAN quality model, and asymmetric bandwidth shaping.
+
+If you are looking for the original project or its appliance offering, please refer to the upstream repository and Techkarma documentation.
 
 ---
 
-# License
+## License
 
-MIT License – see `LICENSE`.
+The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
----
-
-Made by techkarma  
-for people who need real WAN behavior in their labs.
+The upstream attribution above is retained to make the origin of the fork and subsequent changes clear.

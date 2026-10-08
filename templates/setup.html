@@ -324,6 +324,33 @@
       margin-bottom: 10px;
     }
 
+    .option-block {
+      margin-top: 16px;
+      padding-top: 14px;
+      border-top: 1px solid #1f2937;
+    }
+
+    .check-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 9px;
+      margin: 9px 0;
+      font-size: 0.82rem;
+      color: #cbd5e1;
+    }
+
+    .check-row input {
+      margin-top: 2px;
+    }
+
+    .check-help {
+      display: block;
+      margin-top: 2px;
+      color: var(--text-muted);
+      font-size: 0.75rem;
+      line-height: 1.35;
+    }
+
     .btn-primary {
       background: var(--accent);
       color: #020617;
@@ -447,6 +474,7 @@
                 id="wan1_name"
                 name="wan1_name"
                 type="text"
+                value="{{ wan1.get('name', '') }}"
                 placeholder="e.g. Starlink, Fiber primary"
               />
 
@@ -454,7 +482,7 @@
               <select id="wan1_inner" name="wan1_inner">
                 <option value="">-- not used --</option>
                 {% for nic in all_nics %}
-                  <option value="{{ nic }}">{{ nic }}</option>
+                  <option value="{{ nic }}" {% if wan1.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
                 {% endfor %}
               </select>
 
@@ -462,7 +490,7 @@
               <select id="wan1_outer" name="wan1_outer">
                 <option value="">-- not used --</option>
                 {% for nic in all_nics %}
-                  <option value="{{ nic }}">{{ nic }}</option>
+                  <option value="{{ nic }}" {% if wan1.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
                 {% endfor %}
               </select>
             </div>
@@ -475,6 +503,7 @@
                 id="wan2_name"
                 name="wan2_name"
                 type="text"
+                value="{{ wan2.get('name', '') }}"
                 placeholder="e.g. Backup 5G"
               />
 
@@ -482,7 +511,7 @@
               <select id="wan2_inner" name="wan2_inner">
                 <option value="">-- not used --</option>
                 {% for nic in all_nics %}
-                  <option value="{{ nic }}">{{ nic }}</option>
+                  <option value="{{ nic }}" {% if wan2.get('inner') == nic %}selected{% endif %}>{{ nic }}</option>
                 {% endfor %}
               </select>
 
@@ -490,10 +519,40 @@
               <select id="wan2_outer" name="wan2_outer">
                 <option value="">-- not used --</option>
                 {% for nic in all_nics %}
-                  <option value="{{ nic }}">{{ nic }}</option>
+                  <option value="{{ nic }}" {% if wan2.get('outer') == nic %}selected{% endif %}>{{ nic }}</option>
                 {% endfor %}
               </select>
             </div>
+          </div>
+
+          <div class="option-block">
+            <div class="card-title" style="margin-bottom:8px;">Startup persistence</div>
+
+            <label class="check-row">
+              <input
+                type="checkbox"
+                name="restore_bridges_on_startup"
+                {% if config.get('restore_bridges_on_startup', true) %}checked{% endif %}>
+              <span>
+                Restore WAN bridges when the application starts
+                <span class="check-help">
+                  Recommended. Recreates the saved br-wan1/br-wan2 topology after a VM reboot.
+                </span>
+              </span>
+            </label>
+
+            <label class="check-row">
+              <input
+                type="checkbox"
+                name="restore_shaping_on_startup"
+                {% if config.get('restore_shaping_on_startup', true) %}checked{% endif %}>
+              <span>
+                Restore selected presets and quality on startup
+                <span class="check-help">
+                  Recommended for repeatable labs. Reapplies each WAN's saved access profile and quality after reboot.
+                </span>
+              </span>
+            </label>
           </div>
 
           <button class="btn btn-primary" type="submit">
