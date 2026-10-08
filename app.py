@@ -1770,10 +1770,18 @@ def tests():
 
 @app.route("/sessions")
 def sessions():
+    active = session_snapshot()
+    active_events = []
+    if active.get("active"):
+        active_events = list(reversed([
+            event for event in EVENT_LOG
+            if event.get("details", {}).get("session_id") == active.get("id")
+        ][-30:]))
     return render_template(
         "sessions.html",
         page="sessions",
-        active_session=session_snapshot(),
+        active_session=active,
+        active_events=active_events,
         sessions=session_rows(),
     )
 
