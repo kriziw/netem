@@ -6,7 +6,7 @@ A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failov
 
 This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
 
-## Resilience platform: top 5
+## Resilience platform: top 10
 
 The current development direction is vendor-neutral: impairments are applied to the network path itself rather than relying on any one SD-WAN vendor's API.
 
@@ -15,6 +15,11 @@ The current development direction is vendor-neutral: impairments are applied to 
 3. **Advanced packet impairments** — correlated loss, packet duplication, corruption and reordering in addition to delay/jitter/loss/bandwidth.
 4. **Live observability + vendor-neutral integration** — live interface telemetry, runtime event history, JSON state/telemetry APIs and Prometheus metrics.
 5. **Safe security & traffic events** — harmless EICAR delivery, a benign beacon callback sink and a DDoS-impact scenario that simulates availability degradation without generating attack traffic.
+6. **Custom scenario builder** — persist reusable quality/fault/MTU sequences without changing application code.
+7. **Path MTU testing** — temporarily constrain a WAN path to exercise MTU-sensitive applications and tunnels.
+8. **Generic SLA evaluator** — compare injected latency/jitter/loss against vendor-neutral pass/fail thresholds before checking the SD-WAN appliance's own telemetry.
+9. **Persistent history & export** — retain lab events across service restarts and export them as JSON or CSV.
+10. **Bounded packet capture** — short diagnostic PCAPs on configured WAN interfaces with duration, packet-count and snap-length limits.
 
 These capabilities live under the **Lab Tools** page. The initial implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the read-only API later.
 
@@ -132,6 +137,9 @@ Debian 12 is the recommended base.
 ```bash
 sudo apt update
 sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git
+
+# Optional: enables bounded PCAP capture from Lab Tools
+sudo apt install -y tcpdump
 ```
 
 ### 2. Clone this fork
@@ -192,9 +200,10 @@ ExecStart=/opt/netem/.venv/bin/python app.py
 Restart=on-failure
 RestartSec=3
 
-# The application needs CAP_NET_ADMIN to create bridges and qdiscs.
-AmbientCapabilities=CAP_NET_ADMIN
-CapabilityBoundingSet=CAP_NET_ADMIN
+# CAP_NET_ADMIN is required for bridges/qdiscs/MTU changes.
+# CAP_NET_RAW is only required for the optional bounded packet-capture feature.
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
 NoNewPrivileges=true
 
 [Install]
@@ -329,18 +338,53 @@ The Presets menu exposes the editable nominal values for each access technology.
 
 ---
 
-## In-app updates
+## Releases and in-app updates
 
-The **Updates** page can check and install updates from the Git repository configured as `origin`.
+Releases are managed with **Release Please** and semantic versions. The current version is stored in `version.txt` and is displayed throughout the UI. Release Please also maintains `CHANGELOG.md`, creates release PRs, tags merged releases and creates GitHub Releases.
+
+The release workflow runs on pushes to `main`. Use Conventional Commit prefixes when merging changes:
+
+```text
+feat: add a new lab capability
+fix: correct WAN restore behavior
+perf: improve telemetry polling
+docs: document an integration
+chore: maintenance
+```
+
+A `feat:` normally drives a minor version bump, `fix:` a patch bump, and a breaking change a major bump.
+
+The repository contains:
+
+```text
+.github/workflows/release-please.yml
+release-please-config.json
+.release-please-manifest.json
+version.txt
+CHANGELOG.md
+```
+
+The workflow uses `RELEASE_PLEASE_TOKEN` when that repository secret exists, otherwise it falls back to the workflow's GitHub token. If the fallback token is used, GitHub Actions must be permitted to create pull requests in the repository settings.
+
+### In-app updater
+
+The **Updates** page treats `origin/main` as the stable update channel regardless of which local branch the appliance was originally installed from. This fixes older installations that remained on a now-merged/deleted feature branch.
+
+The page shows:
+
+- installed semantic version
+- stable semantic version from `origin/main`
+- installed commit
+- number of stable commits available
+- tracked-local-change state
 
 The updater:
 
-- follows the currently checked-out branch
-- fetches that branch from `origin`
+- fetches `origin/main`
 - refuses to update when tracked files have local modifications
 - refuses diverged histories
 - installs only a Git fast-forward
-- exits the application after a successful update so systemd can restart it
+- exits after a successful update so systemd can restart it
 
 For automatic restart after an in-app update, the service should use:
 
@@ -350,7 +394,7 @@ Restart=on-failure
 
 or `Restart=always`.
 
-Untracked runtime files such as `config.json` and `.venv/` are ignored by Git and are not replaced by application updates.
+Runtime state such as `config.json`, `.venv/`, persistent event history and PCAP captures is ignored by Git and is not replaced by application updates.
 
 ---
 
@@ -386,7 +430,9 @@ Recommended practices:
 - Keep the management interface separate from the emulated WAN interfaces.
 - Do not expose the Flask application directly to the public Internet.
 - Put remote access behind an authenticated reverse proxy or trusted access layer.
-- Prefer `CAP_NET_ADMIN` over running the application as unrestricted root where practical.
+- Prefer Linux capabilities over running the application as unrestricted root where practical.
+- If packet capture is enabled, the service additionally needs `CAP_NET_RAW`; otherwise omit it.
+- Packet capture is bounded to configured WAN interfaces, a maximum of 120 seconds, 20,000 packets and a 256-byte snap length.
 
 ---
 
