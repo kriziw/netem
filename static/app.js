@@ -42,6 +42,60 @@ window.NetEmUI = (() => {
     element.setAttribute("d", pathFor(values, 100, 100, fixedMax));
   }
 
+  function niceMax(value) {
+    const n = Number(value);
+    if (!Number.isFinite(n) || n <= 0) return 1;
+    const magnitude = Math.pow(10, Math.floor(Math.log10(n)));
+    const normalized = n / magnitude;
+    const nice = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 5 ? 5 : 10;
+    return nice * magnitude;
+  }
+
+  function renderSeries(paths, series, options = {}) {
+    const arrays = series.filter(Array.isArray);
+    const flat = arrays.flat().map(Number).filter(Number.isFinite);
+    const max = options.fixedMax != null
+      ? Number(options.fixedMax)
+      : niceMax(Math.max(...flat, 0));
+    const min = options.fixedMin != null ? Number(options.fixedMin) : 0;
+    const span = Math.max(.0001, max - min);
+
+    arrays.forEach((values, index) => {
+      const element = paths[index];
+      if (!element) return;
+      const path = values.map((raw, pointIndex) => {
+        const value = Number(raw);
+        const x = values.length === 1 ? 0 : pointIndex * 100 / (values.length - 1);
+        const y = 96 - ((value - min) / span) * 92;
+        return (pointIndex ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2);
+      }).join(" ");
+      element.setAttribute("d", path);
+    });
+
+    if (options.axis) {
+      const unit = options.unit || "";
+      const digits = options.digits ?? (max < 10 ? 1 : 0);
+      const values = [max, max * .75, max * .5, max * .25, min];
+      options.axis.innerHTML = values.map(value =>
+        '<span>' + Number(value).toFixed(digits) + unit + '</span>'
+      ).join("");
+    }
+
+    if (options.timeAxis && Array.isArray(options.timestamps) && options.timestamps.length) {
+      const first = Number(options.timestamps[0]);
+      const last = Number(options.timestamps[options.timestamps.length - 1]);
+      const spanSec = Math.max(0, last - first);
+      const left = spanSec >= 120
+        ? "−" + Math.round(spanSec / 60) + "m"
+        : spanSec >= 10
+          ? "−" + Math.round(spanSec) + "s"
+          : "Start";
+      options.timeAxis.innerHTML = '<span>' + left + '</span><span>Now</span>';
+    }
+
+    return {min, max};
+  }
+
   function createLiveClient(options = {}) {
     const interval = Math.max(500, options.interval || 1500);
     const maxPoints = Math.max(20, options.maxPoints || 180);
@@ -89,10 +143,21 @@ window.NetEmUI = (() => {
           let down = 0, up = 0, rxpps = 0, txpps = 0;
           if (prev) {
             const dt = Math.max(.001, telemetry.timestamp - previousTelemetry.timestamp);
-            down = Math.max(0, link.inner.counters.tx_bytes - prev.inner.counters.tx_bytes) * 8 / dt / 1000000;
-            up = Math.max(0, link.outer.counters.tx_bytes - prev.outer.counters.tx_bytes) * 8 / dt / 1000000;
-            rxpps = Math.max(0, link.inner.counters.rx_packets - prev.inner.counters.rx_packets) / dt;
-            txpps = Math.max(0, link.outer.counters.tx_packets - prev.outer.counters.tx_packets) / dt;
+
+            const currentDownBytes = Number(link.traffic?.download?.bytes ?? link.inner?.counters?.tx_bytes ?? 0);
+            const currentUpBytes = Number(link.traffic?.upload?.bytes ?? link.outer?.counters?.tx_bytes ?? 0);
+            const previousDownBytes = Number(prev.traffic?.download?.bytes ?? prev.inner?.counters?.tx_bytes ?? 0);
+            const previousUpBytes = Number(prev.traffic?.upload?.bytes ?? prev.outer?.counters?.tx_bytes ?? 0);
+
+            const currentDownPackets = Number(link.traffic?.download?.packets ?? link.inner?.counters?.tx_packets ?? 0);
+            const currentUpPackets = Number(link.traffic?.upload?.packets ?? link.outer?.counters?.tx_packets ?? 0);
+            const previousDownPackets = Number(prev.traffic?.download?.packets ?? prev.inner?.counters?.tx_packets ?? 0);
+            const previousUpPackets = Number(prev.traffic?.upload?.packets ?? prev.outer?.counters?.tx_packets ?? 0);
+
+            down = Math.max(0, currentDownBytes - previousDownBytes) * 8 / dt / 1000000;
+            up = Math.max(0, currentUpBytes - previousUpBytes) * 8 / dt / 1000000;
+            rxpps = Math.max(0, currentDownPackets - previousDownPackets) / dt;
+            txpps = Math.max(0, currentUpPackets - previousUpPackets) / dt;
           }
 
           const h = bucket(link.id);
@@ -132,5 +197,5 @@ window.NetEmUI = (() => {
     return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
   }
 
-  return {formatRate, formatNumber, statusClass, setPath, createLiveClient, eventTime};
+  return {formatRate, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
 })();

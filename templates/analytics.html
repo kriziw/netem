@@ -52,16 +52,20 @@
 <div class="grid grid-2">
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Throughput</div><div class="card-sub">Actual traffic across the selected WAN</div></div>
+      <div><div class="card-title">Throughput</div><div class="card-sub">Measured traffic crossing the selected WAN · downstream = inner TX, upstream = outer TX</div></div>
       <div class="card-actions"><span class="top-pill" id="live-throughput-value">—</span></div>
     </div>
     <div class="card-pad">
-      <div class="chart">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path class="chart-line primary" id="chart-down"></path>
-          <path class="chart-line secondary" id="chart-up"></path>
-        </svg>
-        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      <div class="chart-frame">
+        <div class="chart-y-axis" id="axis-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+        <div class="chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path class="chart-line primary" id="chart-down"></path>
+            <path class="chart-line secondary" id="chart-up"></path>
+          </svg>
+          <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+        </div>
+        <div class="chart-x-axis" id="axis-throughput-x"><span>Start</span><span>Now</span></div>
       </div>
       <div class="chart-legend">
         <span class="legend-item"><span class="legend-dot"></span>Downstream</span>
@@ -72,20 +76,24 @@
 
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Packet rate</div><div class="card-sub">Packets per second through the selected path</div></div>
+      <div><div class="card-title">Packet rate</div><div class="card-sub">Directional packets per second through the selected WAN</div></div>
       <div class="card-actions"><span class="top-pill" id="live-pps-value">—</span></div>
     </div>
     <div class="card-pad">
-      <div class="chart">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path class="chart-line primary" id="chart-rxpps"></path>
-          <path class="chart-line secondary" id="chart-txpps"></path>
-        </svg>
-        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      <div class="chart-frame">
+        <div class="chart-y-axis" id="axis-pps-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+        <div class="chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path class="chart-line primary" id="chart-rxpps"></path>
+            <path class="chart-line secondary" id="chart-txpps"></path>
+          </svg>
+          <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+        </div>
+        <div class="chart-x-axis" id="axis-pps-x"><span>Start</span><span>Now</span></div>
       </div>
       <div class="chart-legend">
-        <span class="legend-item"><span class="legend-dot"></span>RX PPS</span>
-        <span class="legend-item"><span class="legend-dot blue"></span>TX PPS</span>
+        <span class="legend-item"><span class="legend-dot"></span>Downstream PPS</span>
+        <span class="legend-item"><span class="legend-dot blue"></span>Upstream PPS</span>
       </div>
     </div>
   </section>
@@ -96,12 +104,16 @@
       <div class="card-actions"><span class="top-pill" id="live-delay-value">—</span></div>
     </div>
     <div class="card-pad">
-      <div class="chart">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path class="chart-line primary" id="chart-latency"></path>
-          <path class="chart-line warning" id="chart-jitter"></path>
-        </svg>
-        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      <div class="chart-frame">
+        <div class="chart-y-axis" id="axis-delay-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+        <div class="chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path class="chart-line primary" id="chart-latency"></path>
+            <path class="chart-line warning" id="chart-jitter"></path>
+          </svg>
+          <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+        </div>
+        <div class="chart-x-axis" id="axis-delay-x"><span>Start</span><span>Now</span></div>
       </div>
       <div class="chart-legend">
         <span class="legend-item"><span class="legend-dot"></span>Latency</span>
@@ -116,12 +128,16 @@
       <div class="card-actions"><span class="top-pill" id="live-loss-value">—</span></div>
     </div>
     <div class="card-pad">
-      <div class="chart">
-        <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-          <path class="chart-line danger" id="chart-loss"></path>
-          <path class="chart-line secondary" id="chart-quality"></path>
-        </svg>
-        <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+      <div class="chart-frame">
+        <div class="chart-y-axis" id="axis-quality-y"><span>100%</span><span>75%</span><span>50%</span><span>25%</span><span>0%</span></div>
+        <div class="chart">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <path class="chart-line danger" id="chart-loss"></path>
+            <path class="chart-line secondary" id="chart-quality"></path>
+          </svg>
+          <div class="chart-empty" data-chart-empty>Collecting samples…</div>
+        </div>
+        <div class="chart-x-axis" id="axis-quality-x"><span>Start</span><span>Now</span></div>
       </div>
       <div class="chart-legend">
         <span class="legend-item"><span class="legend-dot" style="background:var(--danger)"></span>Loss %</span>
@@ -211,19 +227,53 @@ function render(history, state) {
   const link = (state.links || []).find(item => item.id === id);
   if (!h || !link) return;
 
-  NetEmUI.setPath(document.getElementById("chart-down"), h.down);
-  NetEmUI.setPath(document.getElementById("chart-up"), h.up);
-  NetEmUI.setPath(document.getElementById("chart-rxpps"), h.rxpps);
-  NetEmUI.setPath(document.getElementById("chart-txpps"), h.txpps);
-  NetEmUI.setPath(document.getElementById("chart-latency"), h.latency);
-  NetEmUI.setPath(document.getElementById("chart-jitter"), h.jitter);
-  NetEmUI.setPath(document.getElementById("chart-loss"), h.loss, 100);
-  NetEmUI.setPath(document.getElementById("chart-quality"), h.quality, 100);
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-down"), document.getElementById("chart-up")],
+    [h.down, h.up],
+    {
+      axis: document.getElementById("axis-throughput-y"),
+      timeAxis: document.getElementById("axis-throughput-x"),
+      timestamps: h.timestamps,
+      unit: " Mb/s"
+    }
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-rxpps"), document.getElementById("chart-txpps")],
+    [h.rxpps, h.txpps],
+    {
+      axis: document.getElementById("axis-pps-y"),
+      timeAxis: document.getElementById("axis-pps-x"),
+      timestamps: h.timestamps,
+      unit: " pps"
+    }
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-latency"), document.getElementById("chart-jitter")],
+    [h.latency, h.jitter],
+    {
+      axis: document.getElementById("axis-delay-y"),
+      timeAxis: document.getElementById("axis-delay-x"),
+      timestamps: h.timestamps,
+      unit: " ms"
+    }
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-loss"), document.getElementById("chart-quality")],
+    [h.loss, h.quality],
+    {
+      fixedMax: 100,
+      fixedMin: 0,
+      axis: document.getElementById("axis-quality-y"),
+      timeAxis: document.getElementById("axis-quality-x"),
+      timestamps: h.timestamps,
+      unit: "%"
+    }
+  );
 
   const i = h.down.length - 1;
   if (i >= 0) {
     document.getElementById("live-throughput-value").textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
-    document.getElementById("live-pps-value").textContent = Math.round(h.rxpps[i]) + " RX · " + Math.round(h.txpps[i]) + " TX";
+    document.getElementById("live-pps-value").textContent = Math.round(h.rxpps[i]) + " down · " + Math.round(h.txpps[i]) + " up";
     document.getElementById("live-delay-value").textContent = NetEmUI.formatNumber(h.latency[i],1) + " ms · " + NetEmUI.formatNumber(h.jitter[i],1) + " ms";
     document.getElementById("live-loss-value").textContent = NetEmUI.formatNumber(h.loss[i],2) + "% · " + Math.round(h.quality[i]) + "% quality";
     document.querySelectorAll("[data-chart-empty]").forEach(el => el.style.display = h.down.length > 1 ? "none" : "grid");
