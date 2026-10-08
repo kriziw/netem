@@ -23,7 +23,7 @@ The current development direction is vendor-neutral: impairments are applied to 
 
 The current UI organizes these capabilities into dedicated operational workspaces rather than a single Lab Tools page. The implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the normalized API later.
 
-See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture and [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the user-interface model and roadmap.
+See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture, [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the interface model, and [docs/ROADMAP.md](docs/ROADMAP.md) for the prioritized next capabilities.
 
 ## Enterprise UI
 
