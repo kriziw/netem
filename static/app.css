@@ -217,6 +217,35 @@ input[type="range"] { width:100%; accent-color:var(--accent); }
 .progress.warn > span { background:var(--warning); }
 .progress.bad > span { background:var(--danger); }
 
+.chart-frame {
+  display:grid;
+  grid-template-columns:48px minmax(0,1fr);
+  grid-template-rows:190px 18px;
+  column-gap:8px;
+}
+.chart-y-axis {
+  grid-column:1;
+  grid-row:1;
+  display:flex;
+  flex-direction:column;
+  justify-content:space-between;
+  align-items:flex-end;
+  padding:2px 0 2px 0;
+  color:var(--muted-2);
+  font-size:9.5px;
+  font-variant-numeric:tabular-nums;
+}
+.chart-x-axis {
+  grid-column:2;
+  grid-row:2;
+  display:flex;
+  justify-content:space-between;
+  align-items:flex-end;
+  color:var(--muted-2);
+  font-size:9.5px;
+  font-variant-numeric:tabular-nums;
+}
+.chart-frame .chart { grid-column:2; grid-row:1; }
 .chart {
   position:relative; height:190px; border-radius:10px; overflow:hidden;
   background:
