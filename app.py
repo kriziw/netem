@@ -317,6 +317,107 @@ DEFAULT_SCENARIOS = [
 ]
 
 
+DEFAULT_SLA_PROFILE = {
+    "name": "Generic business SLA",
+    "latency_ms": 100.0,
+    "jitter_ms": 30.0,
+    "loss_pct": 2.0,
+}
+
+
+def get_scenarios(cfg: dict):
+    """Return built-in scenarios plus validated user-defined scenarios."""
+    scenarios = json.loads(json.dumps(DEFAULT_SCENARIOS))
+    for item in cfg.get("custom_scenarios", []):
+        if isinstance(item, dict) and item.get("id") and item.get("steps"):
+            scenarios.append(item)
+    return scenarios
+
+
+def validate_scenario_steps(raw_steps):
+    """Validate a compact vendor-neutral scenario definition."""
+    if not isinstance(raw_steps, list) or not raw_steps:
+        raise ValueError("Scenario must contain at least one step.")
+    if len(raw_steps) > 30:
+        raise ValueError("A scenario can contain at most 30 steps.")
+
+    validated = []
+    for index, step in enumerate(raw_steps, start=1):
+        if not isinstance(step, dict):
+            raise ValueError(f"Step {index} must be an object.")
+
+        action = str(step.get("action", "")).strip()
+        if action not in ("quality", "fault", "mtu"):
+            raise ValueError(
+                f"Step {index}: action must be quality, fault or mtu."
+            )
+
+        try:
+            after = max(0, min(3600, int(step.get("after", 0))))
+        except (TypeError, ValueError):
+            raise ValueError(f"Step {index}: after must be an integer.")
+
+        value = step.get("value")
+        if action == "quality":
+            try:
+                value = max(0, min(100, int(value)))
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {index}: quality must be 0-100.")
+        elif action == "fault":
+            if value not in (
+                "normal",
+                "blackhole",
+                "downstream_blackhole",
+                "upstream_blackhole",
+            ):
+                raise ValueError(f"Step {index}: unsupported fault.")
+        elif action == "mtu":
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {index}: MTU must be an integer.")
+            if value != 0 and not 576 <= value <= 9000:
+                raise ValueError(
+                    f"Step {index}: MTU must be 576-9000, or 0 to restore."
+                )
+
+        validated.append(
+            {
+                "after": after,
+                "action": action,
+                "value": value,
+                "label": str(step.get("label") or action)[:80],
+            }
+        )
+    return validated
+
+
+def get_sla_profile(cfg: dict):
+    stored = cfg.get("sla_profile")
+    if not isinstance(stored, dict):
+        return dict(DEFAULT_SLA_PROFILE)
+    return {
+        "name": str(stored.get("name") or DEFAULT_SLA_PROFILE["name"])[:80],
+        "latency_ms": max(0.0, float(stored.get("latency_ms", 100.0))),
+        "jitter_ms": max(0.0, float(stored.get("jitter_ms", 30.0))),
+        "loss_pct": min(
+            100.0, max(0.0, float(stored.get("loss_pct", 2.0)))
+        ),
+    }
+
+
+def evaluate_sla(effective: dict, sla: dict):
+    checks = {
+        "latency": float(effective.get("delay_ms", 0.0)) <= sla["latency_ms"],
+        "jitter": float(effective.get("jitter_ms", 0.0)) <= sla["jitter_ms"],
+        "loss": float(effective.get("loss_pct", 0.0)) <= sla["loss_pct"],
+    }
+    return {
+        "pass": all(checks.values()),
+        "checks": checks,
+    }
+
+
 def get_presets(cfg: dict):
     """Return editable presets and migrate older stored presets in place."""
     stored = cfg.get("presets")
