@@ -174,9 +174,9 @@
         <div class="card-sub">Run repeatable multi-stage WAN events. The persisted WAN profile is restored automatically when the scenario finishes or is stopped.</div>
 
         {% if scenario_state.active %}
-          <div class="scenario-status active">
-            Running <strong>{{ scenario_state.scenario_name }}</strong> on <strong>{{ scenario_state.link_id }}</strong><br>
-            Step {{ scenario_state.step }} · {{ scenario_state.step_label }}
+          <div class="scenario-status active" data-role="scenario-active">
+            Running <strong data-role="scenario-name">{{ scenario_state.scenario_name }}</strong> on <strong data-role="scenario-link">{{ scenario_state.link_id }}</strong><br>
+            Step <span data-role="scenario-step">{{ scenario_state.step }}</span> · <span data-role="scenario-label">{{ scenario_state.step_label }}</span>
           </div>
           <form method="post" action="{{ url_for('lab_scenario_stop') }}">
             <button class="btn btn-danger" type="submit">Stop &amp; restore WAN</button>
@@ -309,6 +309,7 @@
 
 <script>
 let previous = null;
+const scenarioWasActive = {{ 'true' if scenario_state.active else 'false' }};
 
 function fmtRate(bytesPerSecond) {
   const mbps = bytesPerSecond * 8 / 1000000;
@@ -319,9 +320,24 @@ function fmtRate(bytesPerSecond) {
 
 async function refreshTelemetry() {
   try {
-    const response = await fetch("{{ url_for('api_telemetry') }}", {cache:"no-store"});
-    if (!response.ok) return;
-    const data = await response.json();
+    const [telemetryResponse, stateResponse] = await Promise.all([
+      fetch("{{ url_for('api_telemetry') }}", {cache:"no-store"}),
+      fetch("{{ url_for('api_state') }}", {cache:"no-store"})
+    ]);
+    if (!telemetryResponse.ok || !stateResponse.ok) return;
+    const data = await telemetryResponse.json();
+    const state = await stateResponse.json();
+
+    const step = document.querySelector('[data-role="scenario-step"]');
+    const label = document.querySelector('[data-role="scenario-label"]');
+    if (step && state.scenario.active) {
+      step.textContent = state.scenario.step;
+      label.textContent = state.scenario.step_label || "";
+    }
+    if (scenarioWasActive && !state.scenario.active) {
+      window.location.reload();
+      return;
+    }
 
     if (previous) {
       const dt = Math.max(0.001, data.timestamp - previous.timestamp);
