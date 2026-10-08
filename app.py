@@ -634,6 +634,11 @@ def setup():
         cfg["restore_shaping_on_startup"] = restore_shaping_on_startup
         save_config(cfg)
 
+        if restore_shaping_on_startup:
+            presets_cfg = get_presets(cfg)
+            for link in wan_links:
+                apply_selected_profile(link, presets_cfg)
+
         if wan_links:
             flash("WAN links saved and bridges created.", "success")
             return redirect(url_for("index"))
@@ -772,7 +777,12 @@ def presets():
 
         cfg["presets"] = updated
         save_config(cfg)
-        flash("Presets saved.", "success")
+
+        # Keep live links consistent with their displayed preset values.
+        for link in cfg.get("wan_links", []):
+            apply_selected_profile(link, updated)
+
+        flash("Presets saved and active WAN profiles refreshed.", "success")
         return redirect(url_for("presets"))
 
     return render_template(
