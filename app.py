@@ -29,6 +29,7 @@ app.secret_key = "techkarma-netem"
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
+VERSION_PATH = BASE_DIR / "version.txt"
 RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
@@ -116,6 +117,8 @@ def git_update_status(fetch=False):
         "behind": 0,
         "ahead": 0,
         "dirty": False,
+        "installed_version": get_app_version(),
+        "remote_version": None,
     }
 
     rc, branch, err = run_process([GIT, "branch", "--show-current"])
@@ -150,6 +153,10 @@ def git_update_status(fetch=False):
     status["dirty"] = rc != 0 or bool(dirty.strip())
 
     remote_ref = f"origin/{UPDATE_BRANCH}"
+    rc, remote_version, _ = run_process([GIT, "show", f"{remote_ref}:version.txt"])
+    if rc == 0 and remote_version:
+        status["remote_version"] = remote_version.strip()
+
     rc, _out, _err = run_process([GIT, "rev-parse", "--verify", remote_ref])
     if rc != 0:
         status["error"] = f"Stable update branch {remote_ref} was not found."
@@ -178,6 +185,13 @@ def restart_after_update():
 
 
 # ---------- Config ----------
+
+def get_app_version():
+    try:
+        return VERSION_PATH.read_text().strip() or "dev"
+    except OSError:
+        return "dev"
+
 
 def load_config():
     if CONFIG_PATH.exists():
@@ -1342,6 +1356,7 @@ def inject_nav():
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
         ],
         "config": cfg,
+        "app_version": get_app_version(),
     }
 
 
@@ -1826,6 +1841,7 @@ def api_state():
     return jsonify(
         {
             "timestamp": time.time(),
+            "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
         }
