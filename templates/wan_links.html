@@ -1,0 +1,381 @@
+{% extends "base.html" %}
+{% block title %}WAN Links · NetEm WAN Lab{% endblock %}
+{% block crumb %}WAN Links{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Control plane</div>
+    <h1>WAN links</h1>
+    <p class="page-description">Define access technology and capacity, tune link quality, apply advanced impairments and inject transient faults without losing live operational context.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('presets') }}">Access profiles</a>
+    <a class="btn" href="{{ url_for('setup') }}">Topology settings</a>
+  </div>
+</div>
+
+<div class="grid grid-2">
+{% for link in links %}
+  <section class="card" id="{{ link.id }}">
+    <div class="card-head">
+      <div>
+        <div class="wan-name">{{ link.label }}</div>
+        <div class="wan-tech">{{ link.inner }} ↔ {{ link.outer }} · {{ link.bridge }}</div>
+      </div>
+      <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
+        {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else link.quality_status }}
+      </span>
+    </div>
+
+    <div class="card-pad wan-summary">
+      <div class="wan-head">
+        <div>
+          <div class="card-title">{{ link.preset_name }}</div>
+          <div class="card-sub">{{ link.mode|capitalize }} mode · nominal {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+        </div>
+        <div style="text-align:right">
+          <div class="stat-label">Quality</div>
+          <div style="font-size:20px;font-weight:700" data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</div>
+        </div>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-label">Latency</div><div class="metric-value"><span data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</span> <span class="metric-unit">ms</span></div></div>
+        <div class="metric-box"><div class="metric-label">Jitter</div><div class="metric-value"><span data-live="{{ link.id }}-jitter">{{ link.effective.jitter_ms }}</span> <span class="metric-unit">ms</span></div></div>
+        <div class="metric-box"><div class="metric-label">Loss</div><div class="metric-value"><span data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</span><span class="metric-unit">%</span></div></div>
+      </div>
+
+      <div class="metric-row">
+        <div class="metric-box"><div class="metric-label">Live down</div><div class="metric-value" data-live="{{ link.id }}-down">—</div></div>
+        <div class="metric-box"><div class="metric-label">Live up</div><div class="metric-value" data-live="{{ link.id }}-up">—</div></div>
+        <div class="metric-box"><div class="metric-label">Expected SLA</div><div class="metric-value {{ 'good' if link.sla.pass else 'bad' }}" data-live="{{ link.id }}-sla">{{ "PASS" if link.sla.pass else "FAIL" }}</div></div>
+      </div>
+
+      <div class="actions">
+        <button class="btn btn-primary" type="button" data-open-drawer="{{ link.id }}">Adjust link</button>
+        <form method="post" action="{{ url_for('lab_fault') }}">
+          <input type="hidden" name="link_id" value="{{ link.id }}">
+          <input type="hidden" name="fault" value="normal">
+          <input type="hidden" name="return_to" value="wan_links">
+          <button class="btn" type="submit">Restore</button>
+        </form>
+        <form method="post" action="{{ url_for('lab_fault') }}" onsubmit="return confirm('Blackhole {{ link.label }} while keeping carrier state up?');">
+          <input type="hidden" name="link_id" value="{{ link.id }}">
+          <input type="hidden" name="fault" value="blackhole">
+          <input type="hidden" name="return_to" value="wan_links">
+          <button class="btn btn-danger" type="submit">Blackhole</button>
+        </form>
+      </div>
+    </div>
+  </section>
+
+  <aside class="drawer" id="drawer-{{ link.id }}" data-drawer="{{ link.id }}">
+    <div class="drawer-head">
+      <div><div class="wan-name">{{ link.label }}</div><div class="wan-tech">{{ link.preset_name }} · {{ link.inner }} ↔ {{ link.outer }}</div></div>
+      <button class="drawer-close" type="button" data-close-drawer>×</button>
+    </div>
+    <div class="drawer-body">
+      <div class="drawer-tabs">
+        <button class="drawer-tab active" type="button" data-tab="profile">Profile</button>
+        <button class="drawer-tab" type="button" data-tab="quality">Quality</button>
+        <button class="drawer-tab" type="button" data-tab="advanced">Advanced</button>
+        <button class="drawer-tab" type="button" data-tab="faults">Faults</button>
+        <button class="drawer-tab" type="button" data-tab="diagnostics">Diagnostics</button>
+      </div>
+
+      <form method="post" action="{{ url_for('configure') }}" class="wan-form" data-wan-form="{{ link.id }}">
+        <input type="hidden" name="link_id" value="{{ link.id }}">
+        <input type="hidden" name="mode" value="{{ link.mode }}" data-role="mode">
+        <input type="hidden" name="return_to" value="wan_links">
+
+        <div class="tab-panel active" data-panel="profile">
+          <div class="section-title" style="margin-top:0">Circuit identity</div>
+          <label>Access technology</label>
+          <select name="preset_id" data-role="preset">
+            {% for preset_id, preset in presets.items() %}
+              <option value="{{ preset_id }}" {% if preset_id == link.preset_id %}selected{% endif %}>{{ preset.name }}</option>
+            {% endfor %}
+          </select>
+
+          <div class="section-title">Nominal line rate</div>
+          <div class="form-grid">
+            <div>
+              <label>Download</label>
+              <select name="bandwidth_download_mbit" data-role="base-download">
+                <option value="" {% if link.bandwidth_download_mbit is none %}selected{% endif %}>Profile default</option>
+                {% if link.bandwidth_download_mbit is not none and link.bandwidth_download_mbit not in bandwidth_options %}
+                  <option value="{{ link.bandwidth_download_mbit }}" selected>{{ link.bandwidth_download_mbit }} Mbit/s</option>
+                {% endif %}
+                {% for rate in bandwidth_options %}
+                  <option value="{{ rate }}" {% if link.bandwidth_download_mbit == rate %}selected{% endif %}>{{ rate }} Mbit/s</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div>
+              <label>Upload</label>
+              <select name="bandwidth_upload_mbit" data-role="base-upload">
+                <option value="" {% if link.bandwidth_upload_mbit is none %}selected{% endif %}>Profile default</option>
+                {% if link.bandwidth_upload_mbit is not none and link.bandwidth_upload_mbit not in bandwidth_options %}
+                  <option value="{{ link.bandwidth_upload_mbit }}" selected>{{ link.bandwidth_upload_mbit }} Mbit/s</option>
+                {% endif %}
+                {% for rate in bandwidth_options %}
+                  <option value="{{ rate }}" {% if link.bandwidth_upload_mbit == rate %}selected{% endif %}>{{ rate }} Mbit/s</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+          <div class="field-help">Bandwidth overrides remain part of the normal profile and do not switch the WAN to Custom mode.</div>
+          <button class="btn btn-sm" type="button" data-role="reset-bandwidth" style="margin-top:10px">Reset to profile defaults</button>
+        </div>
+
+        <div class="tab-panel" data-panel="quality">
+          <div class="section-title" style="margin-top:0">Relative circuit health</div>
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+            <label style="margin:0">Simulated quality</label>
+            <strong data-role="quality-value">{{ "Custom" if link.mode == "custom" else (link.quality|string + "%") }}</strong>
+          </div>
+          <input type="range" name="quality" min="0" max="100" step="1" value="{{ link.quality }}" data-role="quality">
+          <div style="display:flex;justify-content:space-between;color:var(--muted-2);font-size:9.5px"><span>Down</span><span>Degraded</span><span>Nominal</span></div>
+
+          <div class="section-title">Effective impairment</div>
+          <div class="form-grid">
+            <div><label>Latency · <span data-value-for="delay">{{ link.effective.delay_ms }} ms</span></label><input type="range" min="0" max="2000" step="1" name="custom_delay_ms" value="{{ link.effective.delay_ms|round|int }}" data-role="delay"></div>
+            <div><label>Jitter · <span data-value-for="jitter">{{ link.effective.jitter_ms }} ms</span></label><input type="range" min="0" max="1000" step="1" name="custom_jitter_ms" value="{{ link.effective.jitter_ms|round|int }}" data-role="jitter"></div>
+            <div><label>Packet loss · <span data-value-for="loss">{{ link.effective.loss_pct }}%</span></label><input type="range" min="0" max="100" step="0.1" name="custom_loss_pct" value="{{ link.effective.loss_pct }}" data-role="loss"></div>
+            <div><label>Download · <span data-value-for="download">{{ link.effective.download_mbit }} Mbit/s</span></label><input type="range" min="0" max="5000" step="1" name="custom_download_mbit" value="{{ link.effective.download_mbit }}" data-role="download"></div>
+            <div><label>Upload · <span data-value-for="upload">{{ link.effective.upload_mbit }} Mbit/s</span></label><input type="range" min="0" max="5000" step="1" name="custom_upload_mbit" value="{{ link.effective.upload_mbit }}" data-role="upload"></div>
+          </div>
+          <div class="field-help">Moving an impairment slider switches this WAN to Custom. Moving the quality slider again returns to the selected access model.</div>
+        </div>
+
+        <div class="tab-panel" data-panel="advanced">
+          <div class="section-title" style="margin-top:0">Packet behaviour</div>
+          <div class="form-grid">
+            <div><label>Loss correlation · <span data-value-for="loss-correlation">{{ link.effective.loss_correlation_pct }}%</span></label><input type="range" min="0" max="100" step="0.1" name="custom_loss_correlation_pct" value="{{ link.effective.loss_correlation_pct }}" data-role="loss-correlation"></div>
+            <div><label>Duplication · <span data-value-for="duplicate">{{ link.effective.duplicate_pct }}%</span></label><input type="range" min="0" max="25" step="0.1" name="custom_duplicate_pct" value="{{ link.effective.duplicate_pct }}" data-role="duplicate"></div>
+            <div><label>Corruption · <span data-value-for="corrupt">{{ link.effective.corrupt_pct }}%</span></label><input type="range" min="0" max="25" step="0.1" name="custom_corrupt_pct" value="{{ link.effective.corrupt_pct }}" data-role="corrupt"></div>
+            <div><label>Reordering · <span data-value-for="reorder">{{ link.effective.reorder_pct }}%</span></label><input type="range" min="0" max="50" step="0.1" name="custom_reorder_pct" value="{{ link.effective.reorder_pct }}" data-role="reorder"></div>
+          </div>
+          <div class="field-help">Advanced controls use native Linux tc/netem and are persisted as part of Custom mode.</div>
+        </div>
+
+        <div class="tab-panel" data-panel="faults">
+          <div class="section-title" style="margin-top:0">Transient data-plane faults</div>
+          <p class="page-description" style="margin-bottom:12px">These actions do not overwrite the persisted WAN profile. Blackholes keep carrier state up so SD-WAN health checks must detect the failure.</p>
+          <div class="grid grid-2">
+            {% for value, label in [('blackhole','Bidirectional blackhole'),('downstream_blackhole','Downstream blackhole'),('upstream_blackhole','Upstream blackhole'),('normal','Restore normal')] %}
+            <button class="btn {{ 'btn-danger' if value != 'normal' else '' }}" type="submit" formaction="{{ url_for('lab_fault') }}" name="fault" value="{{ value }}"
+                    onclick="this.form.querySelector('[name=mode]').disabled=true; this.form.querySelector('[name=preset_id]').disabled=true;">{{ label }}</button>
+            {% endfor %}
+          </div>
+
+          <div class="section-title">Path MTU</div>
+          <div class="form-grid">
+            <div>
+              <label>Temporary MTU</label>
+              <select name="mtu" data-role="mtu-select">
+                <option value="1500">1500 bytes</option>
+                <option value="1492">1492 · PPPoE-like</option>
+                <option value="1400">1400 bytes</option>
+                <option value="1380">1380 bytes</option>
+                <option value="1300">1300 bytes</option>
+                <option value="1200">1200 bytes</option>
+                <option value="0">Restore original</option>
+              </select>
+            </div>
+            <div style="display:flex;align-items:end"><button class="btn" type="submit" formaction="{{ url_for('lab_mtu') }}">Apply MTU</button></div>
+          </div>
+          <div class="field-help">Current inner / outer / bridge MTU: {{ link.mtu.inner or "?" }} / {{ link.mtu.outer or "?" }} / {{ link.mtu.bridge or "?" }}</div>
+        </div>
+
+        <div class="tab-panel" data-panel="diagnostics">
+          <div class="kv">
+            <div class="k">Inner interface</div><div class="v mono">{{ link.inner }}</div>
+            <div class="k">Outer interface</div><div class="v mono">{{ link.outer }}</div>
+            <div class="k">Bridge</div><div class="v mono">{{ link.bridge }}</div>
+            <div class="k">Runtime fault</div><div class="v">{{ link.fault }}</div>
+          </div>
+          <div class="section-title">Traffic control state</div>
+          <details><summary>Inner / downstream</summary><div class="details-body"><pre>{{ link.qdisc.raw or "no qdisc configured" }}</pre></div></details>
+          <details><summary>Outer / upstream</summary><div class="details-body"><pre>{{ link.outer_qdisc.raw or "no qdisc configured" }}</pre></div></details>
+        </div>
+
+        <div class="actions" style="margin-top:17px" data-save-actions>
+          <button class="btn btn-primary" type="submit">Apply WAN configuration</button>
+        </div>
+      </form>
+    </div>
+  </aside>
+{% endfor %}
+</div>
+
+{% if not links %}
+<div class="card"><div class="empty-state"><strong>No WAN links configured</strong>Configure topology under Settings → Topology.</div></div>
+{% endif %}
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+const presets = {{ presets | tojson }};
+const qualityCurves = {{ quality_curves | tojson }};
+
+function curveValue(q, points) {
+  const ordered = [...points].sort((a,b) => b[0] - a[0]);
+  if (q >= ordered[0][0]) return Number(ordered[0][1]);
+  if (q <= ordered[ordered.length - 1][0]) return Number(ordered[ordered.length - 1][1]);
+  for (let i = 0; i < ordered.length - 1; i++) {
+    const [qh, vh] = ordered[i], [ql, vl] = ordered[i + 1];
+    if (qh >= q && q >= ql) {
+      const t = (qh - q) / (qh - ql);
+      const k = 2.2;
+      const eased = (1 - Math.exp(-k * t)) / (1 - Math.exp(-k));
+      return Number(vh) + (Number(vl) - Number(vh)) * eased;
+    }
+  }
+  return Number(ordered[ordered.length - 1][1]);
+}
+
+function effective(preset, q, baseDown, baseUp) {
+  if (q === 0) return {delay_ms:Math.max(Number(preset.delay_ms||0),1000),jitter_ms:Math.max(Number(preset.jitter_ms||0),200),loss_pct:100,download_mbit:1,upload_mbit:1};
+  const curves = qualityCurves[preset.quality_model || "broadband"] || qualityCurves.broadband;
+  return {
+    delay_ms: Number(preset.delay_ms||0) * curveValue(q, curves.delay_factor),
+    jitter_ms: Number(preset.jitter_ms||0) * curveValue(q, curves.jitter_factor),
+    loss_pct: Math.min(100, Number(preset.loss_pct||0) + curveValue(q, curves.loss_add)),
+    download_mbit: Math.max(1, Math.round(Number(baseDown) * curveValue(q, curves.download_factor))),
+    upload_mbit: Math.max(1, Math.round(Number(baseUp) * curveValue(q, curves.upload_factor)))
+  };
+}
+
+const backdrop = document.getElementById("drawer-backdrop");
+function closeDrawers() {
+  document.querySelectorAll(".drawer.open").forEach(d => d.classList.remove("open"));
+  backdrop.classList.remove("open");
+}
+document.querySelectorAll("[data-open-drawer]").forEach(btn => btn.addEventListener("click", () => {
+  closeDrawers();
+  document.getElementById("drawer-" + btn.dataset.openDrawer).classList.add("open");
+  backdrop.classList.add("open");
+}));
+document.querySelectorAll("[data-close-drawer]").forEach(btn => btn.addEventListener("click", closeDrawers));
+backdrop.addEventListener("click", closeDrawers);
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawers(); });
+
+document.querySelectorAll(".drawer").forEach(drawer => {
+  drawer.querySelectorAll(".drawer-tab").forEach(tab => tab.addEventListener("click", () => {
+    drawer.querySelectorAll(".drawer-tab").forEach(x => x.classList.toggle("active", x === tab));
+    drawer.querySelectorAll(".tab-panel").forEach(panel => panel.classList.toggle("active", panel.dataset.panel === tab.dataset.tab));
+    drawer.querySelector("[data-save-actions]").style.display = ["profile","quality","advanced"].includes(tab.dataset.tab) ? "flex" : "none";
+  }));
+
+  const form = drawer.querySelector(".wan-form");
+  const preset = form.querySelector('[data-role="preset"]');
+  const quality = form.querySelector('[data-role="quality"]');
+  const mode = form.querySelector('[data-role="mode"]');
+  const qValue = form.querySelector('[data-role="quality-value"]');
+  const baseDown = form.querySelector('[data-role="base-download"]');
+  const baseUp = form.querySelector('[data-role="base-upload"]');
+  const reset = form.querySelector('[data-role="reset-bandwidth"]');
+
+  const fields = {
+    delay_ms: form.querySelector('[data-role="delay"]'),
+    jitter_ms: form.querySelector('[data-role="jitter"]'),
+    loss_pct: form.querySelector('[data-role="loss"]'),
+    download_mbit: form.querySelector('[data-role="download"]'),
+    upload_mbit: form.querySelector('[data-role="upload"]'),
+    loss_correlation_pct: form.querySelector('[data-role="loss-correlation"]'),
+    duplicate_pct: form.querySelector('[data-role="duplicate"]'),
+    corrupt_pct: form.querySelector('[data-role="corrupt"]'),
+    reorder_pct: form.querySelector('[data-role="reorder"]')
+  };
+  const labels = {
+    delay_ms: form.querySelector('[data-value-for="delay"]'),
+    jitter_ms: form.querySelector('[data-value-for="jitter"]'),
+    loss_pct: form.querySelector('[data-value-for="loss"]'),
+    download_mbit: form.querySelector('[data-value-for="download"]'),
+    upload_mbit: form.querySelector('[data-value-for="upload"]'),
+    loss_correlation_pct: form.querySelector('[data-value-for="loss-correlation"]'),
+    duplicate_pct: form.querySelector('[data-value-for="duplicate"]'),
+    corrupt_pct: form.querySelector('[data-value-for="corrupt"]'),
+    reorder_pct: form.querySelector('[data-value-for="reorder"]')
+  };
+
+  function refreshLabels() {
+    labels.delay_ms.textContent = Math.round(Number(fields.delay_ms.value)) + " ms";
+    labels.jitter_ms.textContent = Math.round(Number(fields.jitter_ms.value)) + " ms";
+    labels.loss_pct.textContent = Number(fields.loss_pct.value).toFixed(1) + "%";
+    labels.download_mbit.textContent = Math.round(Number(fields.download_mbit.value)) + " Mbit/s";
+    labels.upload_mbit.textContent = Math.round(Number(fields.upload_mbit.value)) + " Mbit/s";
+    labels.loss_correlation_pct.textContent = Number(fields.loss_correlation_pct.value).toFixed(1) + "%";
+    labels.duplicate_pct.textContent = Number(fields.duplicate_pct.value).toFixed(1) + "%";
+    labels.corrupt_pct.textContent = Number(fields.corrupt_pct.value).toFixed(1) + "%";
+    labels.reorder_pct.textContent = Number(fields.reorder_pct.value).toFixed(1) + "%";
+  }
+
+  function qualityMode() {
+    const p = presets[preset.value];
+    if (!p) return;
+    const down = baseDown.value === "" ? Number(p.download_mbit) : Number(baseDown.value);
+    const up = baseUp.value === "" ? Number(p.upload_mbit) : Number(baseUp.value);
+    const v = effective(p, Number(quality.value), down, up);
+    mode.value = "quality";
+    qValue.textContent = quality.value + "%";
+    fields.delay_ms.value = Math.round(v.delay_ms);
+    fields.jitter_ms.value = Math.round(v.jitter_ms);
+    fields.loss_pct.value = v.loss_pct.toFixed(1);
+    fields.download_mbit.value = v.download_mbit;
+    fields.upload_mbit.value = v.upload_mbit;
+    fields.loss_correlation_pct.value = 0;
+    fields.duplicate_pct.value = 0;
+    fields.corrupt_pct.value = 0;
+    fields.reorder_pct.value = 0;
+    refreshLabels();
+  }
+
+  quality.addEventListener("input", qualityMode);
+  preset.addEventListener("change", qualityMode);
+  baseDown.addEventListener("change", () => { if (mode.value !== "custom") qualityMode(); });
+  baseUp.addEventListener("change", () => { if (mode.value !== "custom") qualityMode(); });
+  reset.addEventListener("click", () => { baseDown.value = ""; baseUp.value = ""; if (mode.value !== "custom") qualityMode(); });
+
+  Object.values(fields).forEach(field => field.addEventListener("input", () => {
+    mode.value = "custom";
+    qValue.textContent = "Custom";
+    refreshLabels();
+  }));
+
+  refreshLabels();
+});
+
+NetEmUI.createLiveClient({
+  interval:1500,
+  maxPoints:60,
+  onSample({state,history}) {
+    (state.links || []).forEach(link => {
+      const h = history[link.id];
+      const latest = h && h.down.length ? h.down.length - 1 : -1;
+      const set = (key,value) => {
+        const el = document.querySelector('[data-live="' + link.id + '-' + key + '"]');
+        if (el) el.textContent = value;
+      };
+      set("quality", Number(link.quality ?? 100) + "%");
+      set("latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
+      set("jitter", NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1));
+      set("loss", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
+      set("sla", link.sla?.pass ? "PASS" : "FAIL");
+      if (latest >= 0) {
+        set("down", NetEmUI.formatRate(h.down[latest]));
+        set("up", NetEmUI.formatRate(h.up[latest]));
+      }
+      const status = document.querySelector('[data-live="' + link.id + '-status"]');
+      if (status) {
+        status.className = "status " + NetEmUI.statusClass(link);
+        status.textContent = link.fault !== "normal" ? link.fault.replaceAll("_"," ") : (link.sla?.pass ? "Healthy" : "SLA fail");
+      }
+    });
+  }
+});
+</script>
+{% endblock %}
