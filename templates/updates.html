@@ -133,6 +133,12 @@
         <div class="key">Update channel</div>
         <div class="mono">origin/{{ update_status.target_branch or "main" }}</div>
 
+        <div class="key">Installed version</div>
+        <div><strong>v{{ update_status.installed_version or app_version }}</strong></div>
+
+        <div class="key">Stable version</div>
+        <div><strong>{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}unknown{% endif %}</strong></div>
+
         <div class="key">Installed commit</div>
         <div><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
 
@@ -178,6 +184,7 @@
 
     <div class="note">
       NetEm always checks <span class="mono">origin/{{ update_status.target_branch or "main" }}</span> as the stable release channel and fast-forwards the local checkout to it when possible.
+      Version numbers come from <span class="mono">version.txt</span>, which is managed by Release Please together with the changelog and GitHub release tags.
       After a successful update the process exits intentionally so the systemd service can restart it.
       The service therefore needs <span class="mono">Restart=on-failure</span> or <span class="mono">Restart=always</span>.
     </div>
