@@ -430,7 +430,7 @@ def restore_runtime_state():
             if bridge and inner and outer:
                 ensure_bridge(bridge, inner, outer)
 
-    if cfg.get("restore_shaping_on_startup", False):
+    if cfg.get("restore_shaping_on_startup", True):
         presets = get_presets(cfg)
         for link in links:
             inner = link.get("inner")
