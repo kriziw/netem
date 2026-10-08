@@ -2129,7 +2129,7 @@ def updates():
 
     return render_template(
         "updates.html",
-        page="updates",
+        page="settings",
         update_status=status,
         restarting=restarting,
     )
@@ -2249,7 +2249,7 @@ def setup():
 
     return render_template(
         "setup.html",
-        page="setup",
+        page="settings",
         all_nics=setup_nics,
         config=cfg,
         wan1=links_by_id.get("wan1", {}),
@@ -2464,7 +2464,7 @@ def presets():
 
     return render_template(
         "presets.html",
-        page="presets",
+        page="settings",
         presets=current,
         quality_models=QUALITY_MODELS,
     )
