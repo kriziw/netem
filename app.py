@@ -57,6 +57,131 @@ def save_config(cfg: dict):
     tmp.replace(CONFIG_PATH)
 
 
+DEFAULT_PRESETS = {
+    "dia": {
+        "name": "DIA",
+        "delay_ms": 5.0,
+        "jitter_ms": 1.0,
+        "loss_pct": 0.0,
+        "download_mbit": 1000.0,
+        "upload_mbit": 1000.0,
+    },
+    "dsl": {
+        "name": "DSL",
+        "delay_ms": 25.0,
+        "jitter_ms": 8.0,
+        "loss_pct": 0.1,
+        "download_mbit": 100.0,
+        "upload_mbit": 20.0,
+    },
+    "broadband": {
+        "name": "Broadband",
+        "delay_ms": 15.0,
+        "jitter_ms": 5.0,
+        "loss_pct": 0.1,
+        "download_mbit": 300.0,
+        "upload_mbit": 50.0,
+    },
+    "4g": {
+        "name": "4G",
+        "delay_ms": 45.0,
+        "jitter_ms": 20.0,
+        "loss_pct": 0.5,
+        "download_mbit": 80.0,
+        "upload_mbit": 20.0,
+    },
+    "5g": {
+        "name": "5G",
+        "delay_ms": 20.0,
+        "jitter_ms": 8.0,
+        "loss_pct": 0.2,
+        "download_mbit": 300.0,
+        "upload_mbit": 50.0,
+    },
+    "satellite": {
+        "name": "Satellite",
+        "delay_ms": 300.0,
+        "jitter_ms": 30.0,
+        "loss_pct": 0.5,
+        "download_mbit": 100.0,
+        "upload_mbit": 20.0,
+    },
+}
+
+
+def get_presets(cfg: dict):
+    """Return editable presets, seeding the defaults when none are stored yet."""
+    stored = cfg.get("presets")
+    if stored:
+        return stored
+
+    presets = json.loads(json.dumps(DEFAULT_PRESETS))
+    cfg["presets"] = presets
+    save_config(cfg)
+    return presets
+
+
+def quality_status(quality: int):
+    quality = max(0, min(100, int(quality)))
+    if quality == 0:
+        return "Down"
+    if quality >= 90:
+        return "Excellent"
+    if quality >= 75:
+        return "Good"
+    if quality >= 50:
+        return "Fair"
+    if quality >= 25:
+        return "Poor"
+    return "Critical"
+
+
+def calculate_profile(preset: dict, quality: int):
+    """
+    Convert a technology preset + relative quality into effective shaping values.
+
+    100% means the preset's nominal values. Lower quality progressively raises
+    latency/jitter/loss and reduces both bandwidth directions. Quality is
+    relative to the selected access type, not an absolute comparison between
+    technologies.
+    """
+    q = max(0, min(100, int(quality)))
+    if q == 0:
+        return {
+            "delay_ms": max(float(preset.get("delay_ms", 0.0)), 1000.0),
+            "jitter_ms": max(float(preset.get("jitter_ms", 0.0)), 200.0),
+            "loss_pct": 100.0,
+            "download_mbit": 1.0,
+            "upload_mbit": 1.0,
+        }
+
+    degradation = (100.0 - q) / 100.0
+    curve = degradation * degradation
+
+    delay = float(preset.get("delay_ms", 0.0)) * (1.0 + 4.0 * curve)
+    jitter = float(preset.get("jitter_ms", 0.0)) * (1.0 + 6.0 * curve)
+    loss = min(
+        100.0,
+        float(preset.get("loss_pct", 0.0)) + 20.0 * (degradation ** 3),
+    )
+
+    # Keep useful granularity at medium quality but collapse throughput as the
+    # link approaches critical condition.
+    rate_factor = 0.05 + 0.95 * ((q / 100.0) ** 1.3)
+
+    return {
+        "delay_ms": round(delay, 3),
+        "jitter_ms": round(jitter, 3),
+        "loss_pct": round(loss, 3),
+        "download_mbit": round(
+            max(1.0, float(preset.get("download_mbit", 0.0)) * rate_factor), 3
+        ),
+        "upload_mbit": round(
+            max(1.0, float(preset.get("upload_mbit", 0.0)) * rate_factor), 3
+        ),
+    }
+
+
 # ---------- NIC discovery ----------
 
 def get_all_nics():
