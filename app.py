@@ -183,7 +183,7 @@ def calculate_profile(preset: dict, quality: int):
 
 
 def apply_selected_profile(link: dict, presets: dict):
-    """Apply the preset/quality currently stored on one WAN link."""
+    """Apply either the quality-derived or custom profile stored on one WAN."""
     inner = link.get("inner")
     outer = link.get("outer")
     preset_id = link.get("preset", "broadband")
@@ -191,8 +191,20 @@ def apply_selected_profile(link: dict, presets: dict):
     if not inner or not preset:
         return False, "Missing interface or preset", {}
 
+    mode = link.get("mode", "quality")
     quality = max(0, min(100, int(link.get("quality", 100))))
-    effective = calculate_profile(preset, quality)
+
+    if mode == "custom" and link.get("custom_profile"):
+        custom = link["custom_profile"]
+        effective = {
+            "delay_ms": max(0.0, float(custom.get("delay_ms", 0.0))),
+            "jitter_ms": max(0.0, float(custom.get("jitter_ms", 0.0))),
+            "loss_pct": min(100.0, max(0.0, float(custom.get("loss_pct", 0.0)))),
+            "download_mbit": max(0.0, float(custom.get("download_mbit", 0.0))),
+            "upload_mbit": max(0.0, float(custom.get("upload_mbit", 0.0))),
+        }
+    else:
+        effective = calculate_profile(preset, quality)
 
     ok_down, msg_down = apply_netem(
         inner,
@@ -217,7 +229,6 @@ def apply_selected_profile(link: dict, presets: dict):
     if not ok_up:
         details.append(f"upload: {msg_up}")
     return False, "; ".join(details), effective
-
 
 # ---------- NIC discovery ----------
 
@@ -517,7 +528,18 @@ def index():
             preset_id = next(iter(presets), "")
         preset = presets.get(preset_id, {})
         quality = max(0, min(100, int(link.get("quality", 100))))
-        effective = calculate_profile(preset, quality) if preset else {}
+        mode = link.get("mode", "quality")
+        if mode == "custom" and link.get("custom_profile"):
+            effective = {
+                "delay_ms": float(link["custom_profile"].get("delay_ms", 0.0)),
+                "jitter_ms": float(link["custom_profile"].get("jitter_ms", 0.0)),
+                "loss_pct": float(link["custom_profile"].get("loss_pct", 0.0)),
+                "download_mbit": float(link["custom_profile"].get("download_mbit", 0.0)),
+                "upload_mbit": float(link["custom_profile"].get("upload_mbit", 0.0)),
+            }
+        else:
+            effective = calculate_profile(preset, quality) if preset else {}
+            mode = "quality"
 
         nic_states.append(
             {
@@ -527,7 +549,8 @@ def index():
                 "label": name,
                 "preset_id": preset_id,
                 "quality": quality,
-                "quality_status": quality_status(quality),
+                "mode": mode,
+                "quality_status": "Custom" if mode == "custom" else quality_status(quality),
                 "effective": effective,
                 "qdisc": get_qdisc_state(inner),
                 "outer_qdisc": get_qdisc_state(outer) if outer else {
@@ -610,6 +633,10 @@ def setup():
                     "outer": wan1_outer,
                     "preset": previous.get("preset", "broadband"),
                     "quality": int(previous.get("quality", 100)),
+                    "mode": previous.get("mode", "quality"),
+                    "custom_profile": previous.get("custom_profile"),
+                    "mode": previous.get("mode", "quality"),
+                    "custom_profile": previous.get("custom_profile"),
                 }
             )
 
@@ -689,10 +716,13 @@ def reset_config():
 @app.route("/configure", methods=["POST"])
 def configure():
     """
-    Apply a persisted access preset at the requested quality level.
+    Apply a persisted preset in either quality-driven or custom override mode.
     """
     link_id = request.form.get("link_id") or ""
     preset_id = request.form.get("preset_id") or ""
+    mode = request.form.get("mode") or "quality"
+    if mode not in ("quality", "custom"):
+        mode = "quality"
 
     try:
         quality = int(request.form.get("quality", "100"))
@@ -721,20 +751,58 @@ def configure():
 
     link["preset"] = preset_id
     link["quality"] = quality
+    link["mode"] = mode
+
+    if mode == "custom":
+        baseline = calculate_profile(preset, quality)
+
+        def custom_float(field, default):
+            value = request.form.get(field)
+            if value is None or value == "":
+                return float(default)
+            try:
+                return max(0.0, float(value))
+            except ValueError:
+                return float(default)
+
+        link["custom_profile"] = {
+            "delay_ms": custom_float("custom_delay_ms", baseline["delay_ms"]),
+            "jitter_ms": custom_float("custom_jitter_ms", baseline["jitter_ms"]),
+            "loss_pct": min(
+                100.0,
+                custom_float("custom_loss_pct", baseline["loss_pct"]),
+            ),
+            "download_mbit": custom_float(
+                "custom_download_mbit", baseline["download_mbit"]
+            ),
+            "upload_mbit": custom_float(
+                "custom_upload_mbit", baseline["upload_mbit"]
+            ),
+        }
+    else:
+        # Returning to the quality slider deliberately discards manual overrides.
+        link.pop("custom_profile", None)
+
     ok, msg, _effective = apply_selected_profile(link, presets)
 
     if ok:
         save_config(cfg)
-        flash(
-            f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
-            f'at {quality}% ({quality_status(quality)}).',
-            "success",
-        )
+        if mode == "custom":
+            flash(
+                f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
+                "with custom impairment values.",
+                "success",
+            )
+        else:
+            flash(
+                f'{link.get("name", "WAN")} set to {preset.get("name", preset_id)} '
+                f'at {quality}% ({quality_status(quality)}).',
+                "success",
+            )
     else:
         flash("Failed to apply WAN profile: " + msg, "error")
 
     return redirect(url_for("index"))
-
 
 @app.route("/presets", methods=["GET", "POST"])
 def presets():
