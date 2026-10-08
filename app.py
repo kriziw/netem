@@ -462,6 +462,7 @@ def inject_nav():
     return {
         "nav_items": [
             {"id": "dashboard", "label": "Dashboard", "endpoint": "index"},
+            {"id": "presets", "label": "Presets", "endpoint": "presets"},
             {"id": "setup", "label": "Setup", "endpoint": "setup"},
         ],
         "config": cfg,
@@ -483,33 +484,43 @@ def index():
         cfg["mgmt_interface"] = mgmt
         save_config(cfg)
 
+    presets = get_presets(cfg)
     nic_states = []
     for link in cfg.get("wan_links", []):
         name = link.get("name", "WAN")
         inner = link.get("inner")
-
         if not inner:
             continue
 
         outer = link.get("outer")
-        qdisc_info = get_qdisc_state(inner)
-        outer_qdisc_info = get_qdisc_state(outer) if outer else {
-            "raw": "",
-            "parsed": {
-                "kind": None,
-                "delay_ms": None,
-                "jitter_ms": None,
-                "loss_pct": None,
-                "rate_mbit": None,
-            },
-        }
+        preset_id = link.get("preset", "broadband")
+        if preset_id not in presets:
+            preset_id = next(iter(presets), "")
+        preset = presets.get(preset_id, {})
+        quality = max(0, min(100, int(link.get("quality", 100))))
+        effective = calculate_profile(preset, quality) if preset else {}
+
         nic_states.append(
             {
+                "id": link.get("id") or link.get("bridge") or inner,
                 "name": inner,
                 "outer": outer,
                 "label": name,
-                "qdisc": qdisc_info,
-                "outer_qdisc": outer_qdisc_info,
+                "preset_id": preset_id,
+                "quality": quality,
+                "quality_status": quality_status(quality),
+                "effective": effective,
+                "qdisc": get_qdisc_state(inner),
+                "outer_qdisc": get_qdisc_state(outer) if outer else {
+                    "raw": "",
+                    "parsed": {
+                        "kind": None,
+                        "delay_ms": None,
+                        "jitter_ms": None,
+                        "loss_pct": None,
+                        "rate_mbit": None,
+                    },
+                },
             }
         )
 
@@ -519,6 +530,7 @@ def index():
         mgmt_interface=mgmt,
         nic_states=nic_states,
         wan_links=cfg.get("wan_links", []),
+        presets=presets,
     )
 
 
