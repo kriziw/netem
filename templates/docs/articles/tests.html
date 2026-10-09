@@ -1,34 +1,59 @@
-<h2 id="purpose">Why Tests replaces feature-centric pages</h2>
-<p>The Tests page groups capabilities by validation outcome instead of implementation primitive. The normal path is to choose a test, select the target WAN and run it. Detailed scenario JSON remains available under Advanced.</p>
+<h2 id="purpose">Guided tests and conditional orchestration</h2>
+<p>The Tests page groups capabilities by validation outcome instead of implementation primitive. A test can now combine timed impairment stages with state-driven <code>wait</code> and <code>assert</code> stages.</p>
 
-<h2 id="quick-tests">Quick network tests</h2>
+<h2 id="quick-tests">Built-in tests</h2>
+<p>Progressive brownout, SLA failover, Flaky underlay and Availability stress remain available as one-click tests. The built-in SLA failover test now includes two assertions: expected SLA must fail after the blackhole and recover after the path is restored.</p>
+
+<h2 id="actions">Supported scenario actions</h2>
 <div class="docs-table"><table>
-<thead><tr><th>Test</th><th>What it does</th><th>Use it for</th></tr></thead>
+<thead><tr><th>Action</th><th>Purpose</th></tr></thead>
 <tbody>
-<tr><td>Progressive brownout</td><td>Gradually degrades quality and then recovers.</td><td>Thresholds, hysteresis and brownout response.</td></tr>
-<tr><td>SLA failover</td><td>Creates a carrier-up blackhole and then restores it.</td><td>Failure detection and path failover.</td></tr>
-<tr><td>Flaky underlay</td><td>Alternates one-way downstream/upstream failures.</td><td>Asymmetric-failure detection.</td></tr>
-<tr><td>Availability stress</td><td>Progressively degrades quality to severe levels.</td><td>Safe saturation-impact testing without attack traffic.</td></tr>
+<tr><td><code>quality</code></td><td>Apply a 0–100% access-model quality level.</td></tr>
+<tr><td><code>fault</code></td><td>Apply/clear bidirectional or one-way blackholes.</td></tr>
+<tr><td><code>mtu</code></td><td>Apply 576–9000 byte MTU, or 0 to restore.</td></tr>
+<tr><td><code>wait</code></td><td>Pause until a condition becomes true or the timeout expires.</td></tr>
+<tr><td><code>assert</code></td><td>Evaluate a condition as a pass/fail requirement; result is written to the Lab Session report.</td></tr>
 </tbody></table></div>
-<p>Each card shows approximate duration and stage count. Only one scenario can run at a time. Completion or manual stop restores the configured WAN baseline.</p>
 
-<h2 id="security">Security tests</h2>
-<p>The same page contains the harmless EICAR artifact and benign beacon endpoint. These are intentionally safe detection/visibility tools rather than malware or unrestricted offensive tooling.</p>
+<h2 id="conditions">Condition sources</h2>
+<ul>
+<li><strong>Expected SLA:</strong> wait/assert on <code>pass</code> or <code>fail</code> for the scenario WAN or an explicitly named WAN.</li>
+<li><strong>Active probe:</strong> compare probe <code>success</code> or <code>latency_ms</code> using <code>== != &lt; &lt;= &gt; &gt;=</code>.</li>
+<li><strong>Measured traffic:</strong> compare persisted <code>down_mbps</code>, <code>up_mbps</code>, <code>down_pps</code> or <code>up_pps</code>.</li>
+</ul>
+<p>Conditional stages support 1–600 second timeouts, 0.25–5 second polling, and <code>on_fail</code> behavior of <code>stop</code> or <code>continue</code>. A failed condition marks the overall scenario failed even when execution continues.</p>
 
-<h2 id="capture">Packet capture</h2>
-<p>Packet capture is available in the same workflow so you can diagnose a test without leaving the page. It is limited to configured WAN interfaces, one capture at a time, 5–120 seconds, 20,000 packets and 256-byte snap length.</p>
-
-<h2 id="custom">Custom tests</h2>
-<p>Saved custom scenarios appear below the guided tests. The advanced builder accepts the same validated JSON stage model as before: <code>quality</code>, <code>fault</code> and <code>mtu</code> actions, up to 30 stages.</p>
+<h2 id="example">Conditional example</h2>
 <pre>[
-  {"after": 0,  "action": "quality", "value": 100, "label": "Baseline"},
-  {"after": 10, "action": "quality", "value": 45,  "label": "Brownout"},
-  {"after": 15, "action": "fault",   "value": "blackhole", "label": "Outage"},
-  {"after": 20, "action": "fault",   "value": "normal", "label": "Restore"}
+  {"after":0, "action":"quality", "value":100, "label":"Baseline"},
+  {"after":10, "action":"fault", "value":"blackhole", "label":"Inject outage"},
+  {"after":0, "action":"assert",
+   "condition":{"type":"sla","state":"fail"},
+   "timeout":5, "label":"Expected SLA detects failure"},
+  {"after":20, "action":"fault", "value":"normal", "label":"Restore path"},
+  {"after":0, "action":"wait",
+   "condition":{"type":"sla","state":"pass"},
+   "timeout":10, "label":"Wait for recovery"}
 ]</pre>
 
-<h2 id="running">Running-test bar</h2>
-<p>While a scenario is active, a sticky running-test bar remains visible with the current stage and a Stop &amp; restore action. The stage indicator updates from the live state API rather than requiring a page refresh.</p>
+<h2 id="probe-condition">Probe assertion example</h2>
+<pre>{"after":0, "action":"assert",
+ "condition":{
+   "type":"probe",
+   "probe_id":"probe-wan1-internet",
+   "field":"success",
+   "op":"==",
+   "value":false
+ },
+ "timeout":8,
+ "label":"Internet probe fails"}</pre>
+<p>Probe conditions reject stale results instead of treating an old success/failure as current evidence.</p>
 
-<h2 id="session">Using Tests with Sessions</h2>
-<p>For a meaningful validation run, start a Lab Session first, then run one or more tests. Scenario, fault, MTU, capture and security events written during that period are associated with the active session automatically.</p>
+<h2 id="running">Running-test state</h2>
+<p>The sticky running-test bar shows the current stage, condition description, latest observed value and true stage-count progress. Stop &amp; restore interrupts both timed waits and conditional polling.</p>
+
+<h2 id="session">Assertions and Lab Sessions</h2>
+<p>Start a Lab Session before running a scored validation. Every assertion writes an <code>assertion</code> event containing the requirement, observed value, elapsed evaluation time and PASS/FAIL result. Completed session reports aggregate those results automatically.</p>
+
+<h2 id="security">Security and capture tools</h2>
+<p>EICAR, benign beacon and bounded packet capture remain on the same Tests page. These are diagnostics/detection-validation tools and are not used as unrestricted offensive functionality.</p>
