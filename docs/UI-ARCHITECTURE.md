@@ -1,167 +1,139 @@
 # UI Architecture
 
-NetEm WAN Lab is designed as an operational resilience-testing platform rather than a configuration-centric frontend.
+NetEm WAN Lab is organized around operational outcomes rather than implementation primitives.
 
-The user experience separates **operate**, **observe**, and **configure** workflows so future capabilities can be added without turning one page into a collection of unrelated cards.
+The primary interaction model is:
 
-## Navigation
+> see live state → choose a test or WAN → apply a controlled condition → measure the outcome → assert requirements → retain evidence.
 
-### Operate
+## Primary navigation
 
-- **Overview** — primary live operations screen.
-- **WAN Links** — configure link identity/capacity/quality and inject transient faults.
-- **Scenarios** — scenario library, execution and custom scenario authoring.
-- **Traffic & Security** — safe security-test events, bounded capture and future controlled traffic generation/replay.
+- **Command Center** — live topology, WAN pulse, quick controls, current test/session context and recent activity.
+- **Tests** — guided resilience/security/diagnostic workflows plus advanced custom scenario definitions.
+- **Analytics** — persistent + live WAN telemetry, active measurements, expected SLA and injected/measured comparison.
+- **Sessions** — named validation runs and completed evidence reports.
+- **Settings** — topology, access profiles, integrations, updates and system configuration.
+- **Help & documentation** — lower-sidebar searchable wiki plus contextual Guide links.
 
-### Observe
+Advanced WAN configuration remains available contextually rather than occupying primary navigation.
 
-- **Analytics** — rolling live traffic/impairment charts, SLA state and event history.
-- **Integrations** — REST/Prometheus surfaces and future vendor adapters.
+## Command Center
 
-### Configure
+The Command Center is intended to remain open during a test.
 
-- **Settings** — system-level configuration hub.
-  - Topology & interfaces
-  - Access profiles
-  - Application & updates
-  - SLA configuration
-  - API/integration references
-  - Future retention/authentication/backup controls
+Each WAN shows the selected access technology and nominal line rate, injected latency/loss/quality, expected SLA state, measured downstream/upstream throughput, traffic-driven flow animation, and a rolling throughput sparkline.
 
-## Design language
+Clicking a WAN opens a drawer for quality degradation with expected-effect preview, nominal bandwidth override, bidirectional/one-way blackholes, restore, MTU constraint, and links to advanced packet behavior and packet capture.
 
-The UI uses a self-contained dark enterprise design system with no external font, CSS or JavaScript dependencies.
+## Progressive disclosure
 
-Principles:
+Common goals are shown before Linux/networking primitives. For example, “Fail a WAN” appears before low-level loss/qdisc configuration, while correlated loss, duplication, corruption and qdisc diagnostics remain available under Advanced WAN settings.
 
-- status and telemetry are more prominent than forms;
-- configuration actions open focused drawers or dedicated settings pages;
-- runtime/destructive impairments remain visually distinct;
-- active faults are visible globally;
-- future capabilities have reserved locations rather than being bolted into unrelated screens;
-- the browser remains usable on a disconnected/offline lab network.
+## Tests
 
-## Overview
+The Tests workspace combines the former Scenarios and Traffic & Security concepts.
 
-Overview is intended to stay open during a test.
+Current guided tests include Progressive brownout, SLA failover, Flaky underlay, Availability stress, EICAR validation, benign beacon and bounded packet capture.
 
-It includes:
+Custom scenarios support timed and conditional stages.
 
-- lab health KPIs;
-- current scenario/capture state;
-- a live path topology;
-- injected latency/jitter/loss;
-- live per-WAN traffic;
-- rolling downstream charts;
-- recent event timeline;
-- links to WAN controls and deeper analytics.
+### Scenario actions
 
-The topology is deliberately vendor-neutral: the left endpoint is the appliance under test and the right endpoint is the upstream network.
+- quality
+- fault
+- mtu
+- wait
+- assert
 
-## WAN Links
+### Condition sources
 
-Each WAN is represented by a concise status card.
+- expected SLA state
+- active-probe success/latency
+- measured traffic rate/PPS
 
-Detailed configuration is moved into a right-side drawer with tabs:
+Assertions create structured PASS/FAIL events and are included in Lab Session reports.
 
-1. **Profile** — access technology and nominal line rate.
-2. **Quality** — relative quality plus manual impairment controls.
-3. **Advanced** — correlation, duplication, corruption and reordering.
-4. **Faults** — blackholes and path MTU constraints.
-5. **Diagnostics** — Linux interfaces, bridge and qdisc state.
+## Global live interaction
 
-This keeps monitoring visible while configuration is being changed.
+The UI adds live behavior only when it represents real state:
 
-## Scenarios
-
-Scenarios have their own workspace rather than sharing a generic Lab Tools page.
-
-Current model:
-
-- built-in scenario library;
-- visual stage timeline;
-- target-WAN selection;
-- active-scenario progress;
-- custom JSON scenario builder;
-- scenario/fault/MTU event timeline.
-
-Future reserved model:
-
-- graphical stage editor;
-- parallel WAN actions;
-- conditions such as "wait until SLA failed";
-- pass/fail assertions;
-- scheduled runs;
-- scenario result reports.
-
-## Traffic & Security
-
-Security and traffic generation are separated from impairment controls.
-
-Current safe capabilities:
-
-- EICAR anti-malware test artifact;
-- benign beacon/callback sink;
-- availability-stress scenario;
-- bounded tcpdump capture.
-
-Reserved future capabilities:
-
-- bounded iperf3 traffic generator;
-- rate/target/duration guardrails;
-- sanitized tcpreplay workflow;
-- DNS anomaly profiles;
-- safe IDS/IPS signature tests.
+- traffic flow animation is driven by measured counter deltas;
+- WAN sparklines use measured throughput;
+- rate deltas show short-term change;
+- running tests expose current stage and conditional wait state;
+- a global Activity rail refreshes runtime events;
+- Ctrl+K opens global navigation/WAN access.
 
 ## Analytics
 
-The live Analytics page keeps a rolling browser-side sample window and displays:
+Analytics combines three perspectives:
 
-- downstream/upstream throughput;
-- RX/TX PPS;
-- injected latency/jitter;
-- packet loss/quality;
-- expected generic SLA state;
-- persistent event history.
+1. **Injected** — NetEm runtime impairment state.
+2. **Measured** — Linux traffic counters and active probes.
+3. **Observed** — future SD-WAN vendor adapter state.
 
-The current live charts intentionally use the existing REST APIs, so no new runtime dependency is required.
+### Persistent telemetry
 
-Future phases can replace or supplement polling with Server-Sent Events while keeping the same UI model.
+A background worker stores WAN and probe samples in SQLite at runtime. Stored WAN fields include downstream/upstream Mbit/s, downstream/upstream PPS, injected latency/jitter/loss/quality, expected SLA, runtime fault and active Lab Session ID.
 
-## Injected vs observed
+Default retention is seven days. Analytics can load historical ranges and append live browser samples without losing history on refresh.
 
-The long-term analytics model separates:
+### Active measurements
 
-- **NetEm injected state** — what the impairment engine applied;
-- **vendor observed state** — what an SD-WAN/firewall reports through an optional adapter.
+Supported probe types are ICMP, TCP connect, HTTP/HTTPS and DNS query.
 
-A normalized vendor-adapter model can support Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud, Versa and others without coupling core NetEm operation to any vendor.
+Automatic probe source uses NetEm host routing. Because the normal transparent WAN interfaces are unnumbered, this is not treated as proof that a specific transparent WAN was traversed. Optional interface binding is available when usable L3 routing/source addressing exists.
 
-Future scenario reports can calculate:
+## Lab Sessions
 
-- SLA detection delay;
-- path-selection/failover delay;
-- total reaction time;
-- recovery convergence time;
-- injected vs measured latency/jitter/loss.
+A Lab Session gives one validation objective a stable identity.
 
-## Data evolution
+While active, session ID is attached to runtime events, WAN telemetry rows, active-probe samples and scenario/assertion results.
 
-The current application exposes:
+Completing a session snapshots an evidence report.
 
-- `/api/v1/state`
-- `/api/v1/telemetry`
-- `/api/v1/events`
-- `/metrics`
+Report scoring:
 
-The browser maintains a rolling live view.
+- PASS — at least one assertion ran and no assertion/test failed;
+- FAIL — assertion or scenario failed;
+- UNSCORED — no explicit assertion ran.
 
-A future self-contained historical analytics layer should use SQLite for local time-series/session storage, while Prometheus remains an external export integration rather than a mandatory internal dependency.
+Reports include assertion evidence, scenario results, WAN statistics, probe statistics and correlated events. HTML is printable and JSON is available for automation.
+
+## APIs
+
+Current read-only integration surfaces include:
+
+- /api/v1/state
+- /api/v1/telemetry
+- /api/v1/history
+- /api/v1/probes
+- /api/v1/events
+- /metrics
+- completed Session report JSON routes
+
+## Vendor-neutral principle
+
+Core impairment, measurement, scenario and evidence models remain vendor-neutral.
+
+A future adapter layer should normalize member/link health, observed latency/jitter/loss, appliance SLA state, selected path and transition timestamps.
+
+Fortinet is the recommended first adapter, but Cisco, Palo Alto, Juniper, VMware/VeloCloud, Versa and others should feed the same common model.
+
+## Next architecture milestones
+
+See docs/ROADMAP.md. The next priorities after the measurement/evidence milestone are:
+
+1. normalized vendor adapters, Fortinet first;
+2. parallel multi-WAN scenarios;
+3. bounded traffic generation;
+4. session comparison analytics;
+5. qdisc/update self-verification;
+6. remote probe agent for true appliance-side independent measurements.
 
 ## Backward compatibility
 
-The old `/lab` route redirects to Scenarios.
-
-The legacy `index` endpoint remains available at `/dashboard` for older bookmarks/integrations, but renders the new Overview experience.
-
-Existing control routes and configuration formats are retained so the redesign does not require a migration of `config.json`.
+- /dashboard renders the Command Center.
+- /scenarios and /traffic-security redirect to Tests.
+- /lab redirects to Tests.
+- existing control routes and config.json remain compatible.
