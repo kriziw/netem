@@ -1473,6 +1473,28 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
+SHAPER_QUEUE_MS = 50
+SHAPER_BURST_MS = 1
+UNSHAPED_SIZING_MBIT = 1000
+
+
+def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
+    """Queue sizes that scale with the configured rate instead of fixed bytes.
+
+    A fixed 32 KB rate-limiter queue held under 3 ms at 100 Mbit/s, so TCP's
+    window bursts overflowed it on an otherwise idle link and every transfer paid
+    for retransmissions. Like a real access link, the queue now holds about
+    50 ms of data. netem also keeps every packet for its delay, so its packet
+    queue must hold rate × (delay + jitter) or it drops on long-delay links.
+    """
+    bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
+    hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
+    netem_limit = max(1000, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
+    burst = max(3200, int(bytes_per_ms * SHAPER_BURST_MS))
+    limit = max(65536, int(bytes_per_ms * SHAPER_QUEUE_MS))
+    return netem_limit, burst, limit
+
+
 def apply_netem(
     ifname: str,
     delay_ms: float,
@@ -1493,7 +1515,8 @@ def apply_netem(
     # Always start clean
     clear_qdisc(ifname)
 
-    parts = ["netem"]
+    netem_limit, burst_bytes, limit_bytes = shaper_queue_sizes(rate_mbit, delay_ms, jitter_ms)
+    parts = ["netem", f"limit {netem_limit}"]
     if delay_ms and delay_ms > 0:
         if jitter_ms and jitter_ms > 0:
             parts.append(f"delay {delay_ms:.1f}ms {jitter_ms:.1f}ms")
@@ -1527,7 +1550,7 @@ def apply_netem(
         rate_str = f"{rate_value}mbit"
         tbf_cmd = (
             f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
-            f"rate {rate_str} buffer 3200 limit 32768"
+            f"rate {rate_str} buffer {burst_bytes} limit {limit_bytes}"
         )
         rc2, out2, err2 = run_cmd(tbf_cmd)
         if rc2 != 0:
