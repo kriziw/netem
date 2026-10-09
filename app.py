@@ -3,6 +3,11 @@ import copy
 import csv
 import io
 import ipaddress
+import hashlib
+import hmac
+import http.client
+import secrets
+import tempfile
 import json
 import math
 import os
@@ -31,10 +36,11 @@ from flask import (
     Response,
     send_file,
     abort,
+    session,
 )
 
 app = Flask(__name__)
-app.secret_key = "techkarma-netem"  
+
 
 BASE_DIR = Path(__file__).parent
 CONFIG_PATH = BASE_DIR / "config.json"
@@ -45,6 +51,41 @@ SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
 TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
 SECRETS_PATH = RUNTIME_DIR / "secrets.json"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
+
+def _session_secret():
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    path = RUNTIME_DIR / "session.secret"
+    try:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return path.read_text().strip()
+    with os.fdopen(fd, "w") as stream:
+        value = secrets.token_urlsafe(48)
+        stream.write(value)
+    return value
+
+
+app.secret_key = _session_secret()
+app.config.update(SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE="Lax")
+
+
+@app.context_processor
+def integration_form_token():
+    session.setdefault("integration_csrf", secrets.token_urlsafe(32))
+    return {"integration_csrf": session["integration_csrf"]}
+
+
+@app.before_request
+def protect_integration_forms():
+    if request.method == "POST" and request.endpoint in (
+        "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
+        "traffic_generator_adjust", "traffic_generator_stop",
+    ):
+        supplied = request.form.get("integration_csrf", "")
+        expected = session.get("integration_csrf", "")
+        if not supplied or not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
+            abort(400, "Invalid form token. Reload the page and retry.")
+
 
 TRAFFIC_GENERATOR_DISCOVERY_PORT = 47890
 TRAFFIC_GENERATOR_DISCOVERY_MAGIC = "NETEM_TRAFFIC_SIMULATOR_DISCOVERY_V1"
@@ -70,6 +111,7 @@ ACTIVE_SESSION = {
     "name": None,
     "started_at": None,
 }
+CONFIG_LOCK = threading.RLock()
 SCENARIO_STOP = threading.Event()
 SCENARIO_STATE = {
     "active": False,
@@ -244,11 +286,15 @@ def load_config():
 
 
 def save_config(cfg: dict):
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    with tmp.open("w") as f:
-        json.dump(cfg, f, indent=2)
-    tmp.replace(CONFIG_PATH)
-
+    with CONFIG_LOCK:
+        fd, name = tempfile.mkstemp(prefix="config.", dir=CONFIG_PATH.parent)
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(cfg, stream, indent=2)
+            os.replace(name, CONFIG_PATH)
+        finally:
+            if os.path.exists(name):
+                os.unlink(name)
 
 def load_secrets():
     if not SECRETS_PATH.exists():
@@ -262,10 +308,14 @@ def load_secrets():
 
 def save_secrets(secrets_data):
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    tmp = SECRETS_PATH.with_suffix(".tmp")
-    tmp.write_text(json.dumps(secrets_data, indent=2))
-    os.chmod(tmp, 0o600)
-    tmp.replace(SECRETS_PATH)
+    fd, name = tempfile.mkstemp(prefix="secrets.", dir=SECRETS_PATH.parent)
+    try:
+        with os.fdopen(fd, "w") as stream:
+            json.dump(secrets_data, stream, indent=2)
+        os.replace(name, SECRETS_PATH)
+    finally:
+        if os.path.exists(name):
+            os.unlink(name)
     try:
         os.chmod(SECRETS_PATH, 0o600)
     except OSError:
@@ -295,48 +345,72 @@ def traffic_generator_base_url(cfg=None):
 
 def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
     cfg = load_config()
-    base_url = traffic_generator_base_url(cfg)
+    integration = traffic_generator_config(cfg)
     key = traffic_generator_api_key()
-    if not base_url:
+    if not integration.get("host"):
         raise RuntimeError("Traffic Simulator is not configured.")
     if not key:
         raise RuntimeError("Traffic Simulator API key is not configured.")
-
-    body = None
-    headers = {
-        "Accept": "application/json",
-        "Authorization": f"Bearer {key}",
-        "User-Agent": f"NetEm-WAN-Lab/{get_app_version()}",
-    }
-    if payload is not None:
-        body = json.dumps(payload).encode("utf-8")
-        headers["Content-Type"] = "application/json"
-
-    integration = traffic_generator_config(cfg)
+    if not path.startswith("/api/v1/"):
+        raise RuntimeError("Invalid Traffic Simulator API path.")
     allow_self_signed = bool(integration.get("allow_self_signed", True))
-    context = (
-        ssl._create_unverified_context()
-        if allow_self_signed
-        else ssl.create_default_context()
-    )
-    req = urllib_request.Request(
-        base_url + path,
-        data=body,
-        headers=headers,
-        method=method,
-    )
+    context = ssl._create_unverified_context() if allow_self_signed else ssl.create_default_context()
+    connection = None
     try:
-        with urllib_request.urlopen(req, timeout=timeout, context=context) as response:
-            raw = response.read(2 * 1024 * 1024)
-            return json.loads(raw.decode("utf-8")) if raw else {}
-    except urllib_error.HTTPError as exc:
-        try:
-            detail = exc.read(8192).decode("utf-8", "replace")
-        except Exception:
-            detail = str(exc)
-        raise RuntimeError(f"Traffic Simulator returned HTTP {exc.code}: {detail[:300]}")
-    except (urllib_error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
-        raise RuntimeError(f"Traffic Simulator connection failed: {exc}")
+        connection = http.client.HTTPSConnection(
+            integration["host"], int(integration.get("port") or 8443),
+            timeout=timeout, context=context,
+        )
+        # Verify/pin before putting the Bearer key on the wire. A direct
+        # connection also avoids environment proxies and credential redirects.
+        connection.connect()
+        fingerprint = hashlib.sha256(connection.sock.getpeercert(binary_form=True)).hexdigest()
+        expected = str(integration.get("tls_sha256") or "").lower().replace(":", "")
+        if expected and not hmac.compare_digest(expected.encode(), fingerprint.encode()):
+            raise RuntimeError("Traffic Simulator TLS certificate fingerprint changed. Verify and update the trusted fingerprint in Integrations.")
+        if allow_self_signed and not expected:
+            with CONFIG_LOCK:
+                current = load_config()
+                current_integration = traffic_generator_config(current)
+                if (current_integration.get("host"), current_integration.get("port", 8443)) != (integration.get("host"), integration.get("port", 8443)):
+                    raise RuntimeError("Traffic Simulator configuration changed during connection. Retry.")
+                concurrent_pin = current_integration.get("tls_sha256")
+                if concurrent_pin and concurrent_pin != fingerprint:
+                    raise RuntimeError("Traffic Simulator TLS certificate fingerprint changed during connection.")
+                current["traffic_generator"] = dict(current_integration, tls_sha256=fingerprint)
+                save_config(current)
+        headers = {"Accept": "application/json", "Authorization": f"Bearer {key}",
+                   "User-Agent": f"NetEm-WAN-Lab/{get_app_version()}"}
+        body = None
+        if payload is not None:
+            body = json.dumps(payload, allow_nan=False).encode()
+            headers["Content-Type"] = "application/json"
+        connection.request(method, path, body=body, headers=headers)
+        response = connection.getresponse()
+        raw = response.read(2 * 1024 * 1024 + 1)
+        if not 200 <= response.status < 300:
+            # Redirects are never followed with the credential.
+            detail = raw[:8192].decode("utf-8", "replace").replace(key, "[redacted]")
+            raise RuntimeError(f"Traffic Simulator returned HTTP {response.status}: {detail[:300]}")
+        if len(raw) > 2 * 1024 * 1024:
+            raise RuntimeError("Traffic Simulator response exceeds 2 MiB.")
+        result = json.loads(raw.decode("utf-8"))
+        if not isinstance(result, dict):
+            raise RuntimeError("Traffic Simulator returned an invalid JSON object.")
+        if path == "/api/v1/status":
+            dem = result.get("dem")
+            metrics = ("experience_score", "availability_pct", "p50_ms", "p95_ms", "requests_per_second", "failures_per_second")
+            if (result.get("status") not in ("idle", "starting", "running", "stopping", "stopped", "interrupted", "failed")
+                    or not isinstance(dem, dict) or not set(metrics) <= dem.keys()
+                    or not isinstance(result.get("users"), int)
+                    or any(dem[name] is not None and (not isinstance(dem[name], (int, float)) or not math.isfinite(dem[name])) for name in metrics)):
+                raise RuntimeError("Traffic Simulator returned an invalid status payload.")
+        return result
+    except (OSError, TimeoutError, ValueError, UnicodeError, http.client.HTTPException) as exc:
+        raise RuntimeError(f"Traffic Simulator connection failed: {exc}") from exc
+    finally:
+        if connection is not None:
+            connection.close()
 
 
 def traffic_generator_snapshot(include_catalog=False):
@@ -438,11 +512,14 @@ def discover_traffic_generators(timeout=1.25):
                 payload = json.loads(data.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 continue
-            if payload.get("service") != "netem-traffic-simulator":
+            if not isinstance(payload, dict) or payload.get("service") != "netem-traffic-simulator":
                 continue
             if payload.get("protocol") != TRAFFIC_GENERATOR_DISCOVERY_MAGIC:
                 continue
             if payload.get("nonce") != nonce:
+                continue
+            port = payload.get("api_port", 8443)
+            if not isinstance(port, int) or isinstance(port, bool) or not 1 <= port <= 65535:
                 continue
             payload["detected_address"] = peer[0]
             key = f'{peer[0]}:{payload.get("api_port", 8443)}'
@@ -683,6 +760,8 @@ def validate_condition(raw, step_index):
             raise ValueError(
                 f"Step {step_index}: traffic comparison needs a numeric value."
             )
+        if not math.isfinite(value):
+            raise ValueError(f"Step {step_index}: comparison must be finite.")
         condition.update({"field": field, "op": op, "value": value})
 
     elif condition_type == "dem":
@@ -708,12 +787,18 @@ def validate_condition(raw, step_index):
             raise ValueError(
                 f"Step {step_index}: DEM comparison needs a numeric value."
             )
+        if not math.isfinite(value):
+            raise ValueError(f"Step {step_index}: comparison must be finite.")
+        try:
+            window = int(raw.get("window", 60))
+        except (TypeError, ValueError, OverflowError):
+            raise ValueError(f"Step {step_index}: DEM window must be an integer.") from None
         condition.update(
             {
                 "field": field,
                 "op": op,
                 "value": value,
-                "window": max(10, min(3600, int(raw.get("window", 60)))),
+                "window": max(10, min(3600, window)),
             }
         )
 
@@ -793,21 +878,25 @@ def validate_scenario_steps(raw_steps):
                     f"Step {index}: traffic_generator operation must be "
                     "start, adjust or stop."
                 )
+            if operation == "adjust" and set(value) - {"operation", "users", "spawn_rate", "activity", "personas", "applications"}:
+                raise ValueError(f"Step {index}: adjust supports users, spawn_rate, activity, personas and applications only.")
             cleaned = {"operation": operation}
 
             if operation in ("start", "adjust"):
                 if "users" in value:
                     try:
-                        cleaned["users"] = max(1, min(5000, int(value["users"])))
+                        cleaned["users"] = int(value["users"])
+                        if not 1 <= cleaned["users"] <= 5000 or float(value["users"]) != cleaned["users"]:
+                            raise ValueError()
                     except (TypeError, ValueError):
                         raise ValueError(
                             f"Step {index}: traffic-generator users must be an integer."
                         )
                 if "spawn_rate" in value:
                     try:
-                        cleaned["spawn_rate"] = max(
-                            0.1, min(1000.0, float(value["spawn_rate"]))
-                        )
+                        cleaned["spawn_rate"] = float(value["spawn_rate"])
+                        if not math.isfinite(cleaned["spawn_rate"]) or not 0.1 <= cleaned["spawn_rate"] <= 1000:
+                            raise ValueError()
                     except (TypeError, ValueError):
                         raise ValueError(
                             f"Step {index}: traffic-generator spawn_rate must be numeric."
@@ -829,10 +918,13 @@ def validate_scenario_steps(raw_steps):
                             raise ValueError(
                                 f"Step {index}: {key} must be an object."
                             )
-                        cleaned[key] = {
-                            str(name)[:80]: max(0.0, min(100.0, float(weight)))
-                            for name, weight in list(value[key].items())[:30]
-                        }
+                        try:
+                            weights = {str(name)[:80]: float(weight) for name, weight in value[key].items()}
+                            if len(weights) > 30 or not weights or any(not math.isfinite(weight) or weight < 0 for weight in weights.values()) or sum(weights.values()) <= 0:
+                                raise ValueError()
+                        except (TypeError, ValueError, OverflowError):
+                            raise ValueError(f"Step {index}: {key} needs finite nonnegative weights with a positive total.") from None
+                        cleaned[key] = weights
 
             if operation == "start":
                 cleaned.setdefault("profile", "office")
@@ -2793,11 +2885,13 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
             return False, None, str(exc)
 
         field = condition.get("field", "experience_score")
+        if field != "active_users" and payload.get("truncated"):
+            return False, None, "DEM transaction window exceeded the sample limit"
         experience = payload.get("endpoint_experience") or {}
         actual = (
             payload.get("active_users")
             if field == "active_users"
-            else experience.get(field)
+            else experience.get("score" if field == "experience_score" else field)
         )
         passed = compare_condition_value(
             actual,
@@ -2870,6 +2964,7 @@ def run_scenario(link_id: str, scenario: dict):
     original = copy.deepcopy(link)
     runtime_profile = copy.deepcopy(original)
     scenario_result = "passed"
+    scenario_workload_id = None
     scenario_error = None
     started_at = time.time()
 
@@ -2940,6 +3035,22 @@ def run_scenario(link_id: str, scenario: dict):
                     scenario_error = msg
                     break
 
+            elif action == "traffic_generator":
+                payload = dict(step["value"])
+                operation = payload.pop("operation")
+                result = traffic_generator_request(
+                    f"/api/v1/workloads/{operation}", method="POST",
+                    payload=payload, timeout=5.0,
+                )
+                if operation == "start":
+                    scenario_workload_id = (result.get("run") or {}).get("run_id")
+                elif operation == "stop":
+                    scenario_workload_id = None
+                log_event("traffic-generator", f'{scenario["name"]}: {label}',
+                          scenario_id=scenario.get("id"), link_id=link_id,
+                          action=operation, run_id=(result.get("run") or {}).get("run_id"),
+                          users=result.get("users"))
+
             elif action in ("wait", "assert"):
                 condition = step.get("condition") or {}
                 passed, observed, detail, elapsed = wait_for_scenario_condition(
@@ -2995,6 +3106,15 @@ def run_scenario(link_id: str, scenario: dict):
         scenario_error = str(exc)[:240]
 
     finally:
+        if scenario_workload_id:
+            try:
+                status = traffic_generator_request("/api/v1/status", timeout=3.0)
+                if (status.get("run") or {}).get("run_id") == scenario_workload_id and status.get("status") in ("starting", "running"):
+                    traffic_generator_request("/api/v1/workloads/stop", method="POST", payload={}, timeout=5.0)
+                    log_event("traffic-generator", "Scenario-owned workload stopped during cleanup", scenario_id=scenario.get("id"), run_id=scenario_workload_id, action="stop")
+            except RuntimeError as exc:
+                scenario_result = "failed"
+                scenario_error = f"{scenario_error + '; ' if scenario_error else ''}Workload cleanup failed: {exc}"[:240]
         apply_mtu_limit(original, 0)
         apply_selected_profile(original, presets)
         ACTIVE_FAULTS.pop(link_id, None)
@@ -3681,23 +3801,31 @@ def traffic_generator_save():
     manual = (request.form.get("manual_host") or "").strip()
     host = manual if selected in ("", "manual") else selected
 
-    if host.startswith("https://") or host.startswith("http://"):
-        parsed = urlsplit(host)
-        host = parsed.hostname or ""
-        discovered_port = parsed.port
-    else:
-        discovered_port = None
-
-    if not host or len(host) > 255 or not re.fullmatch(r"[A-Za-z0-9_.:\-]+", host):
-        flash("Enter a valid Traffic Simulator IP address or hostname.", "error")
-        return redirect(url_for("integrations") + "#traffic-simulator")
-
     try:
-        port = int(request.form.get("port") or discovered_port or 8443)
-    except ValueError:
-        port = 8443
-    if not 1 <= port <= 65535:
-        flash("Traffic Simulator API port must be 1-65535.", "error")
+        discovered_port = None
+        if host.startswith("https://") or host.startswith("http://"):
+            parsed = urlsplit(host)
+            if parsed.username is not None or parsed.password is not None:
+                raise ValueError("Do not include credentials in the simulator URL.")
+            host = parsed.hostname or ""
+            discovered_port = parsed.port
+        host = host.strip("[]")
+        if not host or len(host) > 255 or not re.fullmatch(r"[A-Za-z0-9_.:\-]+", host):
+            raise ValueError("Enter a valid Traffic Simulator IP address or hostname.")
+        port = int(discovered_port if discovered_port is not None else request.form.get("port") or 8443)
+        if not 1 <= port <= 65535:
+            raise ValueError("Traffic Simulator API port must be 1-65535.")
+        api_key = (request.form.get("api_key") or "").strip()
+        if api_key and not re.fullmatch(r"[A-Za-z0-9_-]{1,256}", api_key):
+            raise ValueError("Enter the raw simulator API key without a Bearer prefix or whitespace.")
+        fingerprint = (request.form.get("tls_sha256") or "").strip().lower().replace(":", "")
+        old = traffic_generator_config(cfg)
+        if (host, port) != (old.get("host"), old.get("port", 8443)) and fingerprint == old.get("tls_sha256"):
+            fingerprint = ""
+        if fingerprint and not re.fullmatch(r"[a-f0-9]{64}", fingerprint):
+            raise ValueError("TLS SHA-256 fingerprint must contain 64 hexadecimal digits.")
+    except (ValueError, OverflowError) as exc:
+        flash(str(exc), "error")
         return redirect(url_for("integrations") + "#traffic-simulator")
 
     integration = {
@@ -3706,12 +3834,11 @@ def traffic_generator_save():
         "allow_self_signed": request.form.get("allow_self_signed") == "on",
         "instance_name": (request.form.get("instance_name") or "").strip()[:120] or None,
         "version": (request.form.get("version") or "").strip()[:40] or None,
-        "tls_sha256": (request.form.get("tls_sha256") or "").strip()[:128] or None,
+        "tls_sha256": fingerprint or None,
     }
     cfg["traffic_generator"] = integration
     save_config(cfg)
 
-    api_key = (request.form.get("api_key") or "").strip()
     if api_key:
         secrets_data = load_secrets()
         secrets_data["traffic_generator_api_key"] = api_key
@@ -3815,7 +3942,10 @@ def traffic_generator_adjust():
 @app.route("/traffic-generator/stop", methods=["POST"])
 def traffic_generator_stop():
     try:
-        status_before = traffic_generator_request("/api/v1/status", timeout=3.0)
+        try:
+            status_before = traffic_generator_request("/api/v1/status", timeout=3.0)
+        except RuntimeError:
+            status_before = {}
         traffic_generator_request(
             "/api/v1/workloads/stop",
             method="POST",

@@ -248,7 +248,7 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Validate telemetry measurements
+      - name: Validate telemetry and Traffic Simulator regressions
         run: |
           python -m unittest discover -s tests -v
           node --test tests/telemetry.test.js

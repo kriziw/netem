@@ -208,7 +208,7 @@
           <div class="actions" style="margin-top:10px">
             <a class="btn btn-sm" href="{{ url_for('tests') }}#corporate-traffic">Control</a>
             {% if traffic_generator.status.status in ('starting','running') %}
-            <form method="post" action="{{ url_for('traffic_generator_stop') }}">
+            <form method="post" action="{{ url_for('traffic_generator_stop') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
               <input type="hidden" name="return_to" value="overview">
               <button class="btn btn-sm btn-danger" type="submit">Stop</button>
             </form>
@@ -589,7 +589,11 @@ async function refreshTrafficGeneratorOverview() {
         el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
       }
     });
-    if(!snapshot.connected) return;
+    if(!snapshot.connected) {
+      document.querySelectorAll("[data-tg-users],[data-tg-score],[data-tg-p95],[data-tg-rating],[data-tg-availability]").forEach(el=>el.textContent="—");
+      return;
+    }
+    if(!document.querySelector("[data-tg-users]")) { window.location.reload(); return; }
     document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
     document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
     document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=dem.p95_ms==null?"—":Number(dem.p95_ms).toFixed(0)+" ms");
