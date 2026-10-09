@@ -111,7 +111,7 @@ test('WAN quick controls use the URL attribute when an action input masks form.a
     fetch:async(url,options)=>{sent={url,options};return {ok:true,json:async()=>({ok:true,messages:[{message:'Applied'}]})};}};
   vm.createContext(ctx);
   const source=fs.readFileSync('templates/overview.html','utf8');
-  vm.runInContext(source.slice(source.indexOf('// Submit WAN controls'),source.indexOf('const previousRates')),ctx);
+  vm.runInContext(source.slice(source.indexOf('// Submit WAN controls'),source.indexOf('const lastTrafficSeen')),ctx);
   await submit({defaultPrevented:false,preventDefault(){}});
   assert.equal(sent.url,'https://netem.example/wan/quick');
   assert.equal(sent.options.headers.Accept,'application/json');

@@ -52,3 +52,41 @@ test('closing a dialog stops polling and ignores late responses',async()=>{
   assert.equal(dialog.querySelector('[data-simulator-content]').children.length,0);
   assert.ok(cleared()>0);dom.window.close();
 });
+
+test('throughput samples expose WAN, time and rate without labelling missing data as zero',()=>{
+  const dom=new JSDOM('<div id="axis"></div><div id="time"></div><svg><path id="wan1"></path><path id="wan2"></path></svg>',{runScripts:'outside-only'});
+  const w=dom.window;w.eval(fs.readFileSync('static/app.js','utf8'));
+  const paths=['wan1','wan2'].map(id=>w.document.getElementById(id));
+  const options={axis:w.document.getElementById('axis'),timeAxis:w.document.getElementById('time'),slots:4,timestamps:[1000,1002,1004],hoverLabels:['WAN1','WAN2'],sampleUnit:'Mbit/s'};
+  w.NetEmUI.renderSeries(paths,[[null,0,.001],[2,null,3]],options);
+  const labels=[...w.document.querySelectorAll('[data-sample-labels] title')].map(el=>el.textContent);
+  assert.equal(labels.length,3);
+  assert.match(labels[0],/WAN2: 2.00 Mbit\/s/);assert.doesNotMatch(labels[0],/WAN1/);
+  assert.match(labels[1],/WAN1: 0 bit\/s/);assert.doesNotMatch(labels[1],/WAN2/);
+  assert.match(labels[2],/WAN1: 1.00 Kbit\/s.*WAN2: 3.00 Mbit\/s/);
+  assert.ok(labels[2].startsWith(w.NetEmUI.eventTime(1004)));
+  w.NetEmUI.renderSeries(paths,[[.001],[]],{...options,timestamps:[1004]});
+  assert.match(options.axis.textContent,/0\.001/);
+  assert.equal(w.document.querySelectorAll('[data-sample-labels] title').length,1);
+  dom.window.close();
+});
+
+test('DEM indicators distinguish good, degraded, poor, no timing and disconnected measurements',()=>{
+  const metrics=['experience','success','response'];
+  const markup=metrics.map(key=>'<div data-dem-indicator="'+key+'"><span data-dem-symbol></span><span data-dem-value></span><span data-dem-status></span><p data-dem-explanation></p></div>').join('');
+  const dom=new JSDOM('<div id="dem">'+markup+'<p data-dem-window></p></div>',{runScripts:'outside-only'});
+  const w=dom.window;w.eval(fs.readFileSync('static/app.js','utf8'));const root=w.document.getElementById('dem');
+  const tone=key=>root.querySelector('[data-dem-indicator="'+key+'"]').className;
+  for(const [score,success,p95,expected] of [[75,99,400,'good'],[55,95,1800,'warn'],[54,94,1801,'bad']]){
+    w.NetEmUI.renderDemSummary(root,{requests:20,experience_score:score,availability_pct:success,p95_ms:p95,window_seconds:60});
+    for(const key of metrics)assert.match(tone(key),new RegExp(expected));
+  }
+  w.NetEmUI.renderDemSummary(root,{requests:20,experience_score:0,availability_pct:0,p95_ms:null});
+  assert.match(tone('success'),/bad/);assert.match(tone('response'),/unknown/);
+  assert.match(root.textContent,/No successful responses/);
+  for(const [data,connected] of [[{requests:0,experience_score:100},true],[{requests:20,experience_score:100},false]]){
+    w.NetEmUI.renderDemSummary(root,data,connected);for(const key of metrics)assert.match(tone(key),/unknown/);
+  }
+  assert.match(root.textContent,/unavailable/);assert.doesNotMatch(root.textContent,/100\/100/);
+  dom.window.close();
+});

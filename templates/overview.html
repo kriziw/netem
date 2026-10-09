@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_help.html" import metric_help %}
 {% block title %}Command Center · NetEm WAN Lab{% endblock %}
 {% block crumb %}Command Center{% endblock %}
 
@@ -73,7 +74,6 @@
                 <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
                 <div class="live-activity-line">
                   <span class="activity-state no-data" data-live="{{ link.id }}-activity-state">NO DATA</span>
-                  <span data-live="{{ link.id }}-pps">—</span>
                   <span data-live="{{ link.id }}-last-seen">waiting…</span>
                 </div>
               </div>
@@ -93,8 +93,8 @@
     <section class="card">
       <div class="card-head">
         <div>
-          <div class="card-title">WAN pulse</div>
-          <div class="card-sub">Measured traffic and live impairment trend. Click any card to act on that WAN.</div>
+          <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show measured traffic crossing each WAN. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic.") }}</div>
+          <div class="card-sub">Download and upload traffic. Click any card to act on that WAN.</div>
         </div>
       </div>
       <div class="card-pad">
@@ -109,17 +109,20 @@
               <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "Model SLA fail" if not link.sla.pass else "Model SLA pass" }}</span>
             </div>
             <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
-            <div class="wan-live-delta" data-live="{{ link.id }}-delta">waiting for live sample</div>
+            <div class="wan-rate-caption">Download now · toward the appliance</div>
             <div class="wan-activity-line">
               <span class="activity-state no-data" data-live="{{ link.id }}-activity-state-card">NO DATA</span>
-              <span data-live="{{ link.id }}-pps-card">—</span>
               <span data-live="{{ link.id }}-last-seen-card">waiting…</span>
             </div>
-            <div class="sparkline">
-              <svg viewBox="0 0 100 100" preserveAspectRatio="none"><path data-spark="{{ link.id }}-down"></path></svg>
+            <div class="chart-axis-title">Download (Mbit/s)</div>
+            <div class="chart-frame wan-chart-frame">
+              <div class="chart-y-axis" id="{{ link.id }}-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+              <div class="chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="{{ link.label }} download throughput history"><path class="chart-line primary" data-spark="{{ link.id }}-down"></path></svg></div>
+              <div class="chart-x-axis" id="{{ link.id }}-throughput-x"><span>−3m</span><span>Now</span></div>
             </div>
+            <div class="chart-time-title">Time before now</div>
             <div class="metric-row" style="margin-top:8px">
-              <div class="metric-box"><div class="metric-label">Up</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
+              <div class="metric-box"><div class="metric-label">Upload now</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
               <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
               <div class="metric-box"><div class="metric-label">Injected loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
             </div>
@@ -132,11 +135,12 @@
     <section class="card">
       <div class="card-head">
         <div>
-          <div class="card-title">Combined downstream throughput</div>
-          <div class="card-sub">Rolling measured traffic across all WANs · browser live window</div>
+          <div class="card-title">Download throughput by WAN {{ metric_help("throughput", "Download throughput by WAN", "Each colored line represents one WAN. The vertical scale is Mbit/s, and the horizontal scale is time before now. Hover for sample values. The scale stays steady until a higher peak requires expansion.") }}</div>
+          <div class="card-sub">Each line shows one WAN. Hover over the graph for the sample time and measured rates.</div>
         </div>
       </div>
       <div class="card-pad">
+        <div class="chart-axis-title">Download (Mbit/s)</div>
         <div class="chart-frame">
           <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
           <div class="chart">
@@ -149,9 +153,10 @@
           </div>
           <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
         </div>
+        <div class="chart-time-title">Time before now</div>
         <div class="chart-legend">
           {% for link in links %}
-          <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }}</span>
+          <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }} · <strong data-live="{{ link.id }}-down">—</strong></span>
           {% endfor %}
         </div>
       </div>
@@ -161,7 +166,7 @@
   <aside class="command-side">
     <section class="card">
       <div class="card-head">
-        <div><div class="card-title">Lab state</div><div class="card-sub">Current operational context</div></div>
+        <div><div class="card-title">Lab state {{ metric_help("lab-state", "Lab state", "Model SLA checks the configured impairment against lab thresholds. It does not prove that an application is healthy. DEM uses measured simulator transactions.") }}</div><div class="card-sub">Current operational context</div></div>
       </div>
       <div class="card-pad">
         <div class="grid grid-2">
@@ -196,14 +201,22 @@
       <div class="card-pad">
         {% if traffic_generator.connected %}
           {% set tg_dem = traffic_generator.status.dem or {} %}
-          <div class="metric-row">
-            <div class="metric-box"><div class="metric-label">Users</div><div class="metric-value" data-tg-users>{{ traffic_generator.status.users }}</div></div>
-            <div class="metric-box"><div class="metric-label">DEM</div><div class="metric-value" data-tg-score>{{ tg_dem.experience_score if tg_dem.experience_score is not none else "—" }}</div></div>
-            <div class="metric-box"><div class="metric-label">P95</div><div class="metric-value" style="font-size:11px" data-tg-p95>{{ "%.0f"|format(tg_dem.p95_ms) ~ " ms" if tg_dem.p95_ms is not none else "—" }}</div></div>
-          </div>
-          <div class="kv" style="margin-top:10px">
-            <div class="k">Experience</div><div class="v" data-tg-rating>{{ tg_dem.experience or "No data" }}</div>
-            <div class="k">Availability</div><div class="v" data-tg-availability>{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
+          {{ metric_help("dem-overview", "Digital experience", "Colors describe measured simulator transactions in the displayed window. Green is good, amber degraded, red poor, and gray unknown. Open How to read these indicators for the exact lab thresholds.") }}
+          <div class="dem-users">Simulated users: <strong data-tg-users>{{ traffic_generator.status.users }}</strong></div>
+          <div class="dem-summary" id="overview-dem">
+            <p class="card-sub" data-dem-window>Waiting for measurements…</p>
+            {% for metric, title in [('experience','Overall experience'),('success','Request success'),('response','Response time · P95')] %}
+            <div class="dem-indicator unknown" data-dem-indicator="{{ metric }}">
+              <span class="dem-signal" data-dem-symbol aria-hidden="true">—</span>
+              <div class="dem-detail"><div class="dem-heading">{{ title }} <span data-dem-status>No data</span></div><strong class="dem-value" data-dem-value>—</strong><p data-dem-explanation>Waiting for measured transactions.</p></div>
+            </div>
+            {% endfor %}
+            <details class="dem-thresholds"><summary>How to read these indicators</summary>
+              <p>Experience: green ≥75, amber 55–74, red &lt;55. The simulator weights request success 65% and application-specific response scores 35%; without timing data it uses success alone.</p>
+              <p>Request success: green ≥99%, amber 95–98.99%, red &lt;95%. This is successful simulated transactions, rather than service uptime.</p>
+              <p>P95 response: green ≤400 ms, amber 401–1800 ms, red &gt;1800 ms. These are lab display thresholds. Timing includes application work and transfer time; it is not network ping latency.</p>
+              <p>Gray means no measured data. These indicators describe simulator requests, not real employee monitoring.</p>
+            </details>
           </div>
           <div class="actions" style="margin-top:10px">
             <a class="btn btn-sm" data-simulator-modal="workload" href="{{ url_for('tests') }}#corporate-traffic">Control</a>
@@ -466,7 +479,6 @@ document.querySelectorAll('[data-wan-drawer] form').forEach(form => {
   });
 });
 
-const previousRates = {};
 const lastTrafficSeen = window.__netemLastTrafficSeen ||= {};
 NetEmUI.createLiveClient({
   interval:1500,
@@ -525,8 +537,6 @@ NetEmUI.createLiveClient({
       set("down", NetEmUI.formatRate(down));
       set("up", NetEmUI.formatRate(up));
       set("throughput", NetEmUI.formatRate(down) + " ↓ · " + NetEmUI.formatRate(up) + " ↑");
-      set("pps", NetEmUI.formatPps(totalPps));
-      set("pps-card", NetEmUI.formatPps(totalPps));
       set("last-seen", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
       set("last-seen-card", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
       set("drawer-latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
@@ -558,30 +568,21 @@ NetEmUI.createLiveClient({
       }
 
       const spark = document.querySelector('[data-spark="' + link.id + '-down"]');
-      if (spark && h) NetEmUI.renderSeries([spark],[h.down],{slots:120,animate:true,stableScale:true});
+      if (spark && h) NetEmUI.renderSeries([spark],[h.down],{
+        axis:document.getElementById(link.id+"-throughput-y"),timeAxis:document.getElementById(link.id+"-throughput-x"),
+        timestamps:h.timestamps,unit:"",slots:120,animate:true,stableScale:true,
+        hoverLabels:[link.label || link.name || link.id],sampleUnit:"Mbit/s"
+      });
 
-      const delta = document.querySelector('[data-live="' + link.id + '-delta"]');
-      if (delta) {
-        const prev = previousRates[link.id];
-        if (prev != null && down != null) {
-          const diff = down - prev;
-          delta.className = "wan-live-delta " + (diff > .1 ? "up" : diff < -.1 ? "down" : "");
-          delta.textContent = Math.abs(diff) < .1 ? "stable" : (diff > 0 ? "↑ +" : "↓ −") + NetEmUI.formatRate(Math.abs(diff)) + " since previous sample";
-        } else {
-          delta.className = "wan-live-delta";
-          delta.textContent = "waiting for comparable samples";
-        }
-        previousRates[link.id] = down;
-      }
     });
 
-    const paths=[], series=[];
+    const paths=[], series=[], labels=[];
     let timestamps=[];
     (state.links || []).forEach(link => {
       const h=history[link.id], path=document.querySelector('[data-chart="' + link.id + '-down"]');
-      if(h && path){ paths.push(path); series.push(h.down); if(h.timestamps.length>timestamps.length) timestamps=h.timestamps; }
+      if(h && path){ paths.push(path); series.push(h.down); labels.push(link.label || link.name || link.id); if(h.timestamps.length>timestamps.length) timestamps=h.timestamps; }
     });
-    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,rateAxis:true,slots:120,animate:true,stableScale:true});
+    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,slots:120,animate:true,stableScale:true,hoverLabels:labels,sampleUnit:"Mbit/s"});
     document.getElementById("throughput-empty").style.display = Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
     document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
     document.getElementById("overview-faults").textContent = faults;
@@ -606,6 +607,7 @@ NetEmUI.createLiveClient({
 async function refreshTrafficGeneratorOverview() {
   try {
     const response=await fetch("{{ url_for('api_traffic_generator') }}",{cache:"no-store"});
+    if(!response.ok) throw new Error("Simulator status unavailable");
     const snapshot=await response.json();
     const status=snapshot.status || {};
     const dem=status.dem || {};
@@ -619,17 +621,19 @@ async function refreshTrafficGeneratorOverview() {
       }
     });
     if(!snapshot.connected) {
-      document.querySelectorAll("[data-tg-users],[data-tg-score],[data-tg-p95],[data-tg-rating],[data-tg-availability]").forEach(el=>el.textContent="—");
+      document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent="—");
+      NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
       return;
     }
     if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
     document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
-    document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
-    document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=dem.p95_ms==null?"—":Number(dem.p95_ms).toFixed(0)+" ms");
-    document.querySelectorAll("[data-tg-rating]").forEach(el=>el.textContent=dem.experience||"No data");
-    document.querySelectorAll("[data-tg-availability]").forEach(el=>el.textContent=dem.availability_pct==null?"—":Number(dem.availability_pct).toFixed(2)+"%");
-  } catch (_) {}
+    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true);
+  } catch (_) {
+    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
+    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
+  }
 }
+{% if traffic_generator.connected %}NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{{ (traffic_generator.status.dem or {})|tojson }},true);{% endif %}
 refreshTrafficGeneratorOverview();
 setInterval(refreshTrafficGeneratorOverview,2500);
 {% endif %}

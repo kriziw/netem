@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_help.html" import metric_help %}
 {% block title %}WAN Links · NetEm WAN Lab{% endblock %}
 {% block crumb %}WAN Links{% endblock %}
 
@@ -31,7 +32,7 @@
     <div class="card-pad wan-summary">
       <div class="wan-head">
         <div>
-          <div class="card-title">{{ link.preset_name }}</div>
+          <div class="card-title">{{ link.preset_name }} {{ metric_help("wan-profile-" ~ link.id, "WAN profile and quality", "The profile defines capacity and baseline impairments. Quality changes configured delay, jitter and loss; model SLA evaluates those settings. Traffic counters and DEM show measured outcomes.") }}</div>
           <div class="card-sub">{{ link.mode|capitalize }} mode · nominal {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
         </div>
         <div style="text-align:right">

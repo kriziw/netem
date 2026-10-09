@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_help.html" import metric_help %}
 {% block title %}Analytics · NetEm WAN Lab{% endblock %}
 {% block crumb %}Analytics{% endblock %}
 
@@ -59,7 +60,7 @@
 <div class="grid grid-2">
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Throughput</div><div class="card-sub">Measured traffic crossing the selected WAN · downstream = inner TX, upstream = outer TX</div></div>
+      <div><div class="card-title">Throughput {{ metric_help("analytics-throughput", "Throughput", "Measured data transferred per second. Mbit/s measures data volume; download is toward the appliance and upload is toward the upstream router.") }}</div><div class="card-sub">Measured traffic crossing the selected WAN · downstream = inner TX, upstream = outer TX</div></div>
       <div class="card-actions"><span class="top-pill" id="live-throughput-value">—</span></div>
     </div>
     <div class="card-pad">
@@ -83,7 +84,7 @@
 
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Packet rate</div><div class="card-sub">Directional packets per second through the selected WAN</div></div>
+      <div><div class="card-title">Packet rate {{ metric_help("analytics-packets", "Packet rate", "PPS means packets per second. Many small packets can create a high packet rate with relatively low bandwidth. This is a diagnostic measure, not a user-experience score.") }}</div><div class="card-sub">Directional packets per second through the selected WAN</div></div>
       <div class="card-actions"><span class="top-pill" id="live-pps-value">—</span></div>
     </div>
     <div class="card-pad">
@@ -107,7 +108,7 @@
 
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Latency &amp; jitter</div><div class="card-sub">Impairment currently applied by NetEm</div></div>
+      <div><div class="card-title">Latency &amp; jitter {{ metric_help("analytics-delay", "Latency & jitter", "This chart shows delay and variation injected by NetEm. These are configured impairments. Active probes and simulator response times provide separate measured observations.") }}</div><div class="card-sub">Impairment currently applied by NetEm</div></div>
       <div class="card-actions"><span class="top-pill" id="live-delay-value">—</span></div>
     </div>
     <div class="card-pad">
@@ -131,7 +132,7 @@
 
   <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Packet loss &amp; quality</div><div class="card-sub">Injected loss and relative technology quality</div></div>
+      <div><div class="card-title">Packet loss &amp; quality {{ metric_help("analytics-quality", "Loss and quality", "Loss is the configured packet-drop percentage; quality is the profile control used to derive impairments. These are lab settings, not measured end-user success or packet loss inferred from traffic counters.") }}</div><div class="card-sub">Injected loss and relative technology quality</div></div>
       <div class="card-actions"><span class="top-pill" id="live-loss-value">—</span></div>
     </div>
     <div class="card-pad">
