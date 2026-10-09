@@ -72,6 +72,37 @@ window.NetEmUI = (() => {
     }).filter(Boolean).join(" ");
   }
 
+  const animations = new WeakMap();
+  const scales = new WeakMap();
+  function drawPath(element, path, animate = false) {
+    const pending = animations.get(element);
+    if (pending) window.cancelAnimationFrame(pending);
+    const before = element.getAttribute?.("d") || "";
+    const reduced = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const start = before.match(/[ML]-?[\d.]+,-?[\d.]+/g) || [];
+    const end = path.match(/[ML]-?[\d.]+,-?[\d.]+/g) || [];
+    // Never interpolate across a missing-data gap.
+    const compatible = start.length && end.length &&
+      start.filter(v => v[0] === "M").length === 1 && end.filter(v => v[0] === "M").length === 1;
+    if (!animate || reduced || !compatible || !window.requestAnimationFrame) {
+      element.setAttribute("d", path);
+      return;
+    }
+    const from = end.map((_, i) => start[Math.min(i, start.length - 1)].slice(1).split(",").map(Number));
+    const to = end.map(v => v.slice(1).split(",").map(Number));
+    let began;
+    const frame = now => {
+      began ??= now;
+      const t = Math.min(1, (now - began) / 600);
+      const eased = t * t * (3 - 2 * t);
+      element.setAttribute("d", end.map((v, i) => v[0] + to[i].map((n, j) =>
+        (from[i][j] + (n - from[i][j]) * eased).toFixed(2)).join(",")).join(" "));
+      if (t < 1) animations.set(element, window.requestAnimationFrame(frame));
+      else { element.setAttribute("d", path); animations.delete(element); }
+    };
+    animations.set(element, window.requestAnimationFrame(frame));
+  }
+
   function setPath(element, values, fixedMax = null) {
     if (!element) return;
     element.setAttribute("d", pathFor(values, 100, 100, fixedMax));
@@ -89,17 +120,24 @@ window.NetEmUI = (() => {
   function renderSeries(paths, series, options = {}) {
     const arrays = series.filter(Array.isArray);
     const flat = arrays.flat().filter(v => v != null).map(Number).filter(Number.isFinite);
-    const max = options.fixedMax != null
+    let max = options.fixedMax != null
       ? Number(options.fixedMax)
       : niceMax(Math.max(...flat, 0));
+    const scaleKey = options.axis || paths[0];
+    if (options.stableScale && scaleKey && options.fixedMax == null) {
+      max = Math.max(max, scales.get(scaleKey) || 0);
+      scales.set(scaleKey, max);
+    }
     const min = options.fixedMin != null ? Number(options.fixedMin) : 0;
     const span = Math.max(.0001, max - min);
 
     arrays.forEach((values, index) => {
       const element = paths[index];
       if (!element) return;
-      const path = seriesPath(values, 100, 96, 92, min, span);
-      element.setAttribute("d", path);
+      const slots = Math.max(values.length, options.slots || values.length);
+      const padded = Array(Math.max(0, slots - values.length)).fill(null).concat(values);
+      const path = seriesPath(padded, 100, 96, 92, min, span);
+      drawPath(element, path, options.animate);
     });
 
     if (options.axis) {
@@ -113,8 +151,11 @@ window.NetEmUI = (() => {
     }
 
     if (options.timeAxis && Array.isArray(options.timestamps) && options.timestamps.length) {
-      const first = Number(options.timestamps[0]);
       const last = Number(options.timestamps[options.timestamps.length - 1]);
+      const spacing = options.timestamps.length > 1
+        ? (last - Number(options.timestamps[0])) / (options.timestamps.length - 1) : 1.5;
+      const first = options.slots > options.timestamps.length
+        ? last - spacing * (options.slots - 1) : Number(options.timestamps[0]);
       const spanSec = Math.max(0, last - first);
       const left = spanSec >= 172800
         ? "−" + (spanSec / 86400).toFixed(spanSec >= 864000 ? 0 : 1) + "d"
@@ -157,8 +198,11 @@ window.NetEmUI = (() => {
   function createLiveClient(options = {}) {
     const interval = Math.max(500, options.interval || 1500);
     const maxPoints = Math.max(20, options.maxPoints || 180);
-    const history = {};
-    let previousTelemetry = null;
+    const key = options.historyKey || window.location?.pathname || "default";
+    const cache = window.__netemLiveHistory ||= {};
+    const saved = cache[key] ||= {history: {}, previousTelemetry: null};
+    const history = saved.history;
+    let previousTelemetry = saved.previousTelemetry;
     let timer = null;
     let stopped = false;
 
@@ -188,6 +232,7 @@ window.NetEmUI = (() => {
 
         const telemetry = await telemetryResponse.json();
         const state = await stateResponse.json();
+        if (stopped) return;
         const stateById = Object.fromEntries((state.links || []).map(link => [link.id, link]));
         const prevById = previousTelemetry
           ? Object.fromEntries((previousTelemetry.links || []).map(link => [link.id, link]))
@@ -213,6 +258,7 @@ window.NetEmUI = (() => {
         });
 
         previousTelemetry = telemetry;
+        saved.previousTelemetry = telemetry;
         if (options.onSample) options.onSample({telemetry, state, history});
         if (options.onStatus) options.onStatus(true);
       } catch (error) {
@@ -223,13 +269,15 @@ window.NetEmUI = (() => {
     }
 
     sample();
-    return {
+    const client = {
       stop() {
         stopped = true;
         if (timer) clearTimeout(timer);
       },
       history
     };
+    window.NetEmActions?.trackClient(client);
+    return client;
   }
 
   function eventTime(timestamp) {

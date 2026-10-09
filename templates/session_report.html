@@ -171,7 +171,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent=NetEmUI.eventTime(el.dataset.ts));
 document.querySelectorAll("[data-duration]").forEach(el => {

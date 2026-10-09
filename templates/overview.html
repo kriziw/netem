@@ -59,7 +59,7 @@
             <button class="live-path {{ state_class }}" type="button" data-open-wan="{{ link.id }}" data-live-path="{{ link.id }}">
               <div>
                 <div class="live-path-name">{{ link.label }}</div>
-                <div class="live-path-sub">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+                <div class="live-path-sub" data-live="{{ link.id }}-profile">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
               </div>
               <div class="live-path-metrics">
                 <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms injected delay</span></div>
@@ -106,7 +106,7 @@
                 <div class="card-title">{{ link.label }}</div>
                 <div class="card-sub">{{ link.preset_name }}</div>
               </div>
-              <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "MODEL FAIL" if not link.sla.pass else "MODEL PASS" }}</span>
+              <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "Model SLA fail" if not link.sla.pass else "Model SLA pass" }}</span>
             </div>
             <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
             <div class="wan-live-delta" data-live="{{ link.id }}-delta">waiting for live sample</div>
@@ -365,7 +365,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 
@@ -438,8 +437,37 @@ document.querySelectorAll("[data-set-quality]").forEach(btn => btn.addEventListe
   slider.dispatchEvent(new Event("input"));
 }));
 
+// Submit WAN controls without navigating away from the live history.
+document.querySelectorAll('[data-wan-drawer] form').forEach(form => {
+  const feedback = document.createElement("div");
+  feedback.setAttribute("role", "status");
+  feedback.className = "quick-action-feedback";
+  form.append(feedback);
+  form.addEventListener("submit", async event => {
+    if (event.defaultPrevented) return;
+    event.preventDefault();
+    const buttons = [...form.querySelectorAll('button[type="submit"]')];
+    if (buttons.some(button => button.disabled)) return;
+    buttons.forEach(button => button.disabled = true);
+    feedback.textContent = "Applying…";
+    try {
+      const response = await fetch(form.action, {
+        method: "POST", body: new FormData(form), headers: {Accept: "application/json"}
+      });
+      const result = await response.json();
+      feedback.textContent = (result.messages || []).map(item => item.message).join(" ") || "Action completed.";
+      feedback.classList.toggle("error", !response.ok || !result.ok);
+    } catch (_) {
+      feedback.textContent = "Could not confirm the change. Check the live status before retrying.";
+      feedback.classList.add("error");
+    } finally {
+      buttons.forEach(button => button.disabled = false);
+    }
+  });
+});
+
 const previousRates = {};
-const lastTrafficSeen = {};
+const lastTrafficSeen = window.__netemLastTrafficSeen ||= {};
 NetEmUI.createLiveClient({
   interval:1500,
   maxPoints:120,
@@ -487,6 +515,7 @@ NetEmUI.createLiveClient({
       }
 
       const set = (key,value) => document.querySelectorAll('[data-live="' + link.id + '-' + key + '"]').forEach(el => el.textContent=value);
+      set("profile", link.preset_name + " · " + link.nominal_download_mbit + "/" + link.nominal_upload_mbit + " Mbit/s");
       set("latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
       set("latency-small", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
       set("jitter", NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1));
@@ -510,7 +539,7 @@ NetEmUI.createLiveClient({
       });
       document.querySelectorAll('[data-live="' + link.id + '-sla"]').forEach(status => {
         status.className = "status " + (link.sla?.pass ? "good" : "bad");
-        status.textContent = link.sla?.pass ? "MODEL PASS" : "MODEL FAIL";
+        status.textContent = link.sla?.pass ? "Model SLA pass" : "Model SLA fail";
       });
 
       document.querySelectorAll(
@@ -529,7 +558,7 @@ NetEmUI.createLiveClient({
       }
 
       const spark = document.querySelector('[data-spark="' + link.id + '-down"]');
-      if (spark && h) NetEmUI.setPath(spark, h.down, null);
+      if (spark && h) NetEmUI.renderSeries([spark],[h.down],{slots:120,animate:true,stableScale:true});
 
       const delta = document.querySelector('[data-live="' + link.id + '-delta"]');
       if (delta) {
@@ -552,7 +581,7 @@ NetEmUI.createLiveClient({
       const h=history[link.id], path=document.querySelector('[data-chart="' + link.id + '-down"]');
       if(h && path){ paths.push(path); series.push(h.down); if(h.timestamps.length>timestamps.length) timestamps=h.timestamps; }
     });
-    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,rateAxis:true});
+    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,rateAxis:true,slots:120,animate:true,stableScale:true});
     document.getElementById("throughput-empty").style.display = Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
     document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
     document.getElementById("overview-faults").textContent = faults;
@@ -593,7 +622,7 @@ async function refreshTrafficGeneratorOverview() {
       document.querySelectorAll("[data-tg-users],[data-tg-score],[data-tg-p95],[data-tg-rating],[data-tg-availability]").forEach(el=>el.textContent="—");
       return;
     }
-    if(!document.querySelector("[data-tg-users]")) { window.location.reload(); return; }
+    if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
     document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
     document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
     document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=dem.p95_ms==null?"—":Number(dem.p95_ms).toFixed(0)+" ms");

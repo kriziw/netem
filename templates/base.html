@@ -250,6 +250,9 @@
   });
 })();
 </script>
-{% block scripts %}{% endblock %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script src="{{ url_for('static', filename='actions.js') }}"></script>
+<template id="page-scripts">{% block scripts %}{% endblock %}</template>
+<script>NetEmActions.mount();</script>
 </body>
 </html>

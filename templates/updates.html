@@ -107,7 +107,9 @@
   </div>
 </section>
 
+{% endblock %}
+{% block scripts %}
 {% if restarting %}
-<script>setTimeout(() => window.location.href="{{ url_for('updates') }}", 3500);</script>
+<script>setTimeout(() => window.NetEmActions.refresh(), 3500);</script>
 {% endif %}
 {% endblock %}

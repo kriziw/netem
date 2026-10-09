@@ -4020,6 +4020,20 @@ def documentation_page(slug):
 
 @app.route("/wan/quick", methods=["POST"])
 def quick_wan_action():
+    messages = []
+    asynchronous = request.headers.get("Accept") == "application/json"
+
+    def feedback(message, category):
+        messages.append({"message": message, "category": category})
+        if not asynchronous:
+            flash(message, category)
+
+    def finish():
+        if asynchronous:
+            ok = not any(item["category"] == "error" for item in messages)
+            return jsonify({"ok": ok, "messages": messages}), (200 if ok else 400)
+        return redirect_after("overview")
+
     cfg = load_config()
     presets = get_presets(cfg)
     link_id = request.form.get("link_id") or ""
@@ -4027,12 +4041,12 @@ def quick_wan_action():
     link = get_link(cfg, link_id)
 
     if not link:
-        flash("Unknown WAN link.", "error")
-        return redirect_after("overview")
+        feedback("Unknown WAN link.", "error")
+        return finish()
 
     if scenario_snapshot().get("active"):
-        flash("Stop the active scenario before changing the WAN manually.", "error")
-        return redirect_after("overview")
+        feedback("Stop the active scenario before changing the WAN manually.", "error")
+        return finish()
 
     if action == "quality":
         try:
@@ -4051,33 +4065,33 @@ def quick_wan_action():
                 link_id=link_id,
                 quality=quality,
             )
-            flash(
+            feedback(
                 f'{link.get("name", "WAN")} set to {quality}% ({quality_status(quality)}).',
                 "success",
             )
         else:
-            flash("Failed to apply WAN quality: " + msg, "error")
+            feedback("Failed to apply WAN quality: " + msg, "error")
 
     elif action in (
         "normal", "blackhole", "downstream_blackhole", "upstream_blackhole"
     ):
         ok, msg = apply_runtime_fault(link, action, presets)
         if ok:
-            flash(
+            feedback(
                 "WAN restored." if action == "normal"
                 else f'{link.get("name", "WAN")}: {action.replace("_", " ")} applied.',
                 "success",
             )
         else:
-            flash("Failed to apply runtime fault: " + msg, "error")
+            feedback("Failed to apply runtime fault: " + msg, "error")
 
     elif action == "bandwidth":
         try:
             download = max(1, min(100000, int(request.form.get("download_mbit", "1"))))
             upload = max(1, min(100000, int(request.form.get("upload_mbit", "1"))))
         except ValueError:
-            flash("Bandwidth values must be whole-number Mbit/s values.", "error")
-            return redirect_after("overview")
+            feedback("Bandwidth values must be whole-number Mbit/s values.", "error")
+            return finish()
 
         link["bandwidth_download_mbit"] = download
         link["bandwidth_upload_mbit"] = upload
@@ -4091,12 +4105,12 @@ def quick_wan_action():
                 download_mbit=download,
                 upload_mbit=upload,
             )
-            flash(
+            feedback(
                 f'{link.get("name", "WAN")} nominal rate set to {download}/{upload} Mbit/s.',
                 "success",
             )
         else:
-            flash("Failed to apply bandwidth limit: " + msg, "error")
+            feedback("Failed to apply bandwidth limit: " + msg, "error")
 
     elif action == "mtu":
         try:
@@ -4105,18 +4119,18 @@ def quick_wan_action():
             mtu = 0
         ok, msg = apply_mtu_limit(link, mtu)
         if ok:
-            flash(
+            feedback(
                 "Path MTU restored." if mtu == 0
                 else f"Path MTU limited to {mtu} bytes.",
                 "success",
             )
         else:
-            flash("Failed to change path MTU: " + msg, "error")
+            feedback("Failed to change path MTU: " + msg, "error")
 
     else:
-        flash("Unknown quick action.", "error")
+        feedback("Unknown quick action.", "error")
 
-    return redirect_after("overview")
+    return finish()
 
 
 @app.route("/lab/fault", methods=["POST"])
