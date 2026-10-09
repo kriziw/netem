@@ -1,5 +1,73 @@
 # Changelog
 
+## [0.6.0](https://github.com/kriziw/netem/compare/v0.5.0...v0.6.0) (2026-10-09)
+
+
+### Features
+
+* add active measurement controls and persistent analytics UX ([3ef884e](https://github.com/kriziw/netem/commit/3ef884ef8bee4dec0d726309574c268d70dbf8fb))
+* add active probes and persistent SQLite telemetry ([1040061](https://github.com/kriziw/netem/commit/1040061ab7c1a16d97e9d61101fbb539c9bf0354))
+* add assertions to built-in SLA failover test ([db1aced](https://github.com/kriziw/netem/commit/db1aced31c13836cc902a32512d816c9d132ee7d))
+* add clean printable session report styling ([0769a31](https://github.com/kriziw/netem/commit/0769a317142c25519dcff70e4ba8163f5603e13f))
+* add dynamic command center and simplified workflow styles ([a57dc9d](https://github.com/kriziw/netem/commit/a57dc9ddb8accc5d44695a766cf062d765c14764))
+* add lab session workflow and history ([4173d55](https://github.com/kriziw/netem/commit/4173d5516225ca8bb11fab81d2e8735a9baa40e0))
+* add live command center, active measurements and scored resilience tests ([328ac2a](https://github.com/kriziw/netem/commit/328ac2a63f954c0036fa68cc11559773d173f2f5))
+* add measurement and telemetry runtime foundations ([4d48d26](https://github.com/kriziw/netem/commit/4d48d26e1064849a93c82fc1c682ec94745d93b9))
+* add printable session evidence report ([3aed387](https://github.com/kriziw/netem/commit/3aed3871fae27777bf5bdd9f6398a1ecb8d23277))
+* consolidate scenarios security and diagnostics into guided tests ([b0c0fe0](https://github.com/kriziw/netem/commit/b0c0fe0ab540f68cb1d8d1ac942b736f57605cc1))
+* execute conditional waits and scenario assertions ([9d60a0c](https://github.com/kriziw/netem/commit/9d60a0ce5b056cbe8437a4cc03f39d3f7f3dfd42))
+* expose active session timeline ([c89573e](https://github.com/kriziw/netem/commit/c89573e8b75bf5efc4033edb9cacf61c85ea7784))
+* expose common bandwidth action in WAN quick drawer ([b13c5cb](https://github.com/kriziw/netem/commit/b13c5cb616256a659e23c4edac870f9f38b42262))
+* expose history probe and session evidence APIs in integrations ([8fe5426](https://github.com/kriziw/netem/commit/8fe54268f67359fbf4c280b63a6e513e43028280))
+* expose probe and conditional scenario state ([d582f79](https://github.com/kriziw/netem/commit/d582f7964ae97ea0849d9385e1e61d002173c4d8))
+* expose probe management and persistent history APIs ([6bc01dc](https://github.com/kriziw/netem/commit/6bc01dcc8d3d23d3cab050c0174e46d0710ddd50))
+* expose quality model to command center quick controls ([dd4ac60](https://github.com/kriziw/netem/commit/dd4ac6042854d684cd2e6fdf6cae9ab5060782e7))
+* generate evidence reports for lab sessions ([9127ce3](https://github.com/kriziw/netem/commit/9127ce35742c8419901a7d566818e567cf4beee7))
+* harden sessions and add quick bandwidth controls ([dfbad9d](https://github.com/kriziw/netem/commit/dfbad9d34dcee98bffacd40412439881bb0e375c))
+* link session history to scored evidence reports ([503452a](https://github.com/kriziw/netem/commit/503452abda73825f20b7f42991aa2d82d335562e))
+* persist session report results and export routes ([789883a](https://github.com/kriziw/netem/commit/789883aa0f27f702680017262d6abfaba5a9848f))
+* render persistent history with live probe state ([081ca2e](https://github.com/kriziw/netem/commit/081ca2ec7493168bd79e3d935c068161f1ba1bf0))
+* show live conditional scenario progress in command center ([4dd74d8](https://github.com/kriziw/netem/commit/4dd74d8431ea4a34219e153506023aef64ea349d))
+* simplify lab navigation and add session workflow ([36f695b](https://github.com/kriziw/netem/commit/36f695b63744ee039422216e8dac7c9878d5a1e6))
+* simplify navigation and add global activity and command palette ([4815745](https://github.com/kriziw/netem/commit/4815745c8e1f10546dce7e0c3306678e65a01fbe))
+* surface conditional waits and assertions in guided tests ([6ef6adf](https://github.com/kriziw/netem/commit/6ef6adfb6b31af93eaf3b2685d4a45154d921b85))
+* track conditional scenario execution state ([7d1215c](https://github.com/kriziw/netem/commit/7d1215c85404e4382d030504c65eb11e0e0cea58))
+* turn overview into interactive live command center ([4ab4cc9](https://github.com/kriziw/netem/commit/4ab4cc9cc3c0e836063ed2b6c2537fa99b81744e))
+* validate conditional wait and assertion scenario stages ([9b5f22d](https://github.com/kriziw/netem/commit/9b5f22de9b3245e4c0b7c9ae00c18e24aee0dc90))
+
+
+### Bug Fixes
+
+* align WAN sparkline coordinate system ([68516a1](https://github.com/kriziw/netem/commit/68516a142a01282cba10a11f78f08f77b6310e3a))
+* format long persistent telemetry ranges readably ([d73af6b](https://github.com/kriziw/netem/commit/d73af6bcd3a3969418fcf4112ef15d451a646355))
+* highlight selected tests in guided workflow ([2493fb9](https://github.com/kriziw/netem/commit/2493fb9ef5c56bc8276bbb7e559c0037cb0aa907))
+* retain failed scenario result when conditional execution continues ([64c1309](https://github.com/kriziw/netem/commit/64c1309f4ce3f6d4017d864e1f9850e493536f3c))
+
+
+### Documentation
+
+* add command center tests and session guides to wiki ([124411a](https://github.com/kriziw/netem/commit/124411a3e680b71c185da42f5bf8e71742bc216e))
+* add guided tests workflow ([e557fea](https://github.com/kriziw/netem/commit/e557fea23e38f41d119a62e7e9e10da1832285ab))
+* add in-app product roadmap ([ff27daf](https://github.com/kriziw/netem/commit/ff27dafb4436520ab73a6183e72adedeb1537ff7))
+* add lab sessions guide ([e7cf610](https://github.com/kriziw/netem/commit/e7cf6103fbde565ed496597b856f03ce47ddf909))
+* add prioritized resilience platform roadmap ([47451c0](https://github.com/kriziw/netem/commit/47451c074d46fb59b59b9746262c3a023d799cc8))
+* clarify active probe interface binding capability ([0c6a1e1](https://github.com/kriziw/netem/commit/0c6a1e1f44a26f345738db40ee614af6383ab9fe))
+* describe command center tests sessions and progressive disclosure ([55b34de](https://github.com/kriziw/netem/commit/55b34de199f1b8d03ae15fbe12235baa6c13fd60))
+* document conditional test orchestration ([54a27fe](https://github.com/kriziw/netem/commit/54a27fe2ff69a95e341f0d976638a9dcd98d8856))
+* document history probes and session report APIs ([2b16d65](https://github.com/kriziw/netem/commit/2b16d65723047db6e5d586fc44b4d6751750f89c))
+* document measurement persistence reports and assertions ([7498435](https://github.com/kriziw/netem/commit/7498435e42e4839a6428d11830d9271a2bb9428a))
+* document persistent telemetry and active measurements ([33d4035](https://github.com/kriziw/netem/commit/33d4035689be1e0f252d935ec5ea53ec9e54b549))
+* document scored session evidence reports ([a36f5e1](https://github.com/kriziw/netem/commit/a36f5e13472ffe21512d6f80fe101e6aef0e8bea))
+* expose product roadmap in in-app help ([b70a1a3](https://github.com/kriziw/netem/commit/b70a1a393ffad1e658248fdb09fb60bd69436688))
+* install ping dependency for ICMP measurements ([d853c65](https://github.com/kriziw/netem/commit/d853c65fdc629619faf3208b02c7546436364562))
+* link prioritized feature roadmap ([14eae13](https://github.com/kriziw/netem/commit/14eae13d7ba0b83f7bdaa28c2f87811452973c4b))
+* mark measurement and conditional milestones implemented ([85a419a](https://github.com/kriziw/netem/commit/85a419a91b53bc0c3a7e277d1d2afc33e5a1aa89))
+* update command center guide ([4db54b4](https://github.com/kriziw/netem/commit/4db54b4aa75437a9a8ce17fbabf9176c60d65d00))
+* update reference for probes telemetry and conditions ([a33d066](https://github.com/kriziw/netem/commit/a33d066d14cacfcf5af017f4943a4e0b8f2bd8f0))
+* update resilience architecture for measurements reports and conditions ([ecad2f4](https://github.com/kriziw/netem/commit/ecad2f4ccfb37e96afc65f5f92fe682e42099334))
+* update roadmap after measurement and assertion implementation ([644c81f](https://github.com/kriziw/netem/commit/644c81fb935217c5fa1e97ab819ddc777c81ba2f))
+* update UI architecture for measurement and evidence workflows ([b7a6731](https://github.com/kriziw/netem/commit/b7a673186015a70e4e39e8e1b38d7008f987864d))
+
 ## [0.5.0](https://github.com/kriziw/netem/compare/v0.4.0...v0.5.0) (2026-10-08)
 
 
