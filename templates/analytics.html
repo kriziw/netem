@@ -7,7 +7,7 @@
   <div>
     <div class="eyebrow">Live analytics</div>
     <h1>Performance &amp; event analytics</h1>
-    <p class="page-description">Correlate live Linux interface traffic with the condition NetEm is injecting. Historical event exports remain available while persistent time-series storage is reserved for a later release.</p>
+    <p class="page-description">Correlate measured traffic, active probes and the conditions NetEm is injecting. SQLite retains server-side time series across browser reloads and lab sessions.</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="{{ url_for('lab_history_json') }}">Export events · JSON</a>
@@ -30,8 +30,8 @@
   </div>
   <div class="stat">
     <div class="stat-label">Telemetry mode</div>
-    <div class="stat-value good" style="font-size:15px" id="analytics-live">Live</div>
-    <div class="stat-sub">browser rolling window · 1.5s sampling</div>
+    <div class="stat-value good" style="font-size:15px" id="analytics-live">Persistent + live</div>
+    <div class="stat-sub">SQLite {{ telemetry_retention_hours }}h retention · ~2s server sampling</div>
   </div>
 </div>
 
@@ -41,9 +41,16 @@
       <div class="card-title">Live analysis target</div>
       <div class="card-sub">Select the WAN whose time-series should be shown below.</div>
     </div>
-    <div style="width:min(280px,45vw)">
+    <div style="display:flex;gap:8px;width:min(430px,55vw)">
       <select id="analytics-link" style="margin:0">
         {% for link in links %}<option value="{{ link.id }}">{{ link.label }} · {{ link.preset_name }}</option>{% endfor %}
+      </select>
+      <select id="analytics-range" style="margin:0;width:125px">
+        <option value="15">15 min</option>
+        <option value="60" selected>1 hour</option>
+        <option value="360">6 hours</option>
+        <option value="1440">24 hours</option>
+        <option value="10080">7 days</option>
       </select>
     </div>
   </div>
@@ -147,6 +154,76 @@
   </section>
 </div>
 
+<section class="card" id="measurements" style="margin-top:14px">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Active measurements</div>
+      <div class="card-sub">Independent ICMP, TCP, HTTP/HTTPS and DNS probes · persisted to SQLite and correlated with lab sessions</div>
+    </div>
+    <span class="status info">{{ probes|length }}/20 configured</span>
+  </div>
+  <div class="card-pad">
+    {% if probes %}
+    <div class="grid grid-2" style="margin-bottom:14px">
+      {% for probe in probes %}
+      {% set latest = probe.latest %}
+      <div class="metric-box">
+        <div style="display:flex;justify-content:space-between;gap:10px;align-items:flex-start">
+          <div>
+            <div class="card-title">{{ probe.name }}</div>
+            <div class="card-sub">{{ probe.link_id }} · {{ probe.kind|upper }} · {{ probe.target }}</div>
+          </div>
+          <span class="status {% if latest and latest.success %}good{% elif latest %}bad{% else %}info{% endif %}" data-probe-status="{{ probe.id }}">
+            {% if latest %}{{ "UP" if latest.success else "FAIL" }}{% else %}WAITING{% endif %}
+          </span>
+        </div>
+        <div class="metric-row" style="margin-top:10px">
+          <div class="metric-box"><div class="metric-label">Measured latency</div><div class="metric-value" style="font-size:13px" data-probe-latency="{{ probe.id }}">{% if latest and latest.latency_ms is not none %}{{ "%.1f"|format(latest.latency_ms) }} ms{% else %}—{% endif %}</div></div>
+          <div class="metric-box"><div class="metric-label">Interval</div><div class="metric-value" style="font-size:13px">{{ probe.interval_s }}s</div></div>
+          <div class="metric-box"><div class="metric-label">Source</div><div class="metric-value" style="font-size:11px">{{ probe.source_side }}</div></div>
+        </div>
+        <div class="field-help" data-probe-detail="{{ probe.id }}">{% if latest %}{{ latest.detail }}{% else %}No sample yet{% endif %}</div>
+        <div class="actions" style="margin-top:9px">
+          <form method="post" action="{{ url_for('probe_run') }}">
+            <input type="hidden" name="probe_id" value="{{ probe.id }}">
+            <button class="btn btn-sm" type="submit">Run now</button>
+          </form>
+          <form method="post" action="{{ url_for('probe_delete') }}" onsubmit="return confirm('Delete this active measurement?');">
+            <input type="hidden" name="probe_id" value="{{ probe.id }}">
+            <button class="btn btn-sm btn-danger" type="submit">Delete</button>
+          </form>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="empty-state"><strong>No active measurements configured</strong>Add a bounded probe below to start collecting independent reachability/transaction timing.</div>
+    {% endif %}
+
+    <details>
+      <summary>Add active measurement</summary>
+      <div class="details-body">
+        <form method="post" action="{{ url_for('probe_save') }}">
+          <div class="form-grid">
+            <div><label>Name</label><input type="text" name="name" placeholder="WAN1 Internet reachability"></div>
+            <div><label>WAN association</label><select name="link_id">{% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}</select></div>
+            <div><label>Probe type</label><select name="kind"><option value="icmp">ICMP</option><option value="tcp">TCP connect</option><option value="http">HTTP / HTTPS</option><option value="dns">DNS query</option></select></div>
+            <div><label>Target</label><input type="text" name="target" placeholder="1.1.1.1 · example.com · https://example.com/" required></div>
+            <div><label>TCP port</label><input type="number" name="port" min="1" max="65535" value="443"></div>
+            <div><label>DNS resolver</label><input type="text" name="resolver" value="1.1.1.1"></div>
+            <div><label>Source</label><select name="source_side"><option value="auto">Automatic · host routing</option><option value="inner">Bind to WAN inner interface</option><option value="outer">Bind to WAN outer interface</option></select></div>
+            <div><label>Interval · seconds</label><input type="number" name="interval_s" min="2" max="3600" value="5"></div>
+            <div><label>Timeout · seconds</label><input type="number" name="timeout_s" min="0.2" max="10" step="0.1" value="2"></div>
+          </div>
+          <label class="check-row"><input type="checkbox" name="enabled" checked> Enable continuous measurement</label>
+          <div class="docs-warning"><strong>Transparent-path note:</strong> WAN bridge ports normally have no IP addresses. “Automatic” therefore follows the NetEm host routing table and is useful for independent service reachability, but it does not prove traffic crossed the selected transparent WAN. Inner/outer binding is available when that interface has a usable L3 route/source address. A future remote probe-agent mode can provide true appliance-side path measurements without changing the transparent bridge design.</div>
+          <button class="btn btn-primary" type="submit">Save measurement</button>
+        </form>
+      </div>
+    </details>
+  </div>
+</section>
+
 <div class="grid grid-2" style="margin-top:14px">
   <section class="card">
     <div class="card-head">
@@ -167,22 +244,21 @@
     </div>
   </section>
 
-  <section class="card future-card">
+  <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Injected vs observed</div><div class="card-sub">Reserved for SD-WAN vendor adapters</div></div>
-      <span class="future-tag">Planned</span>
+      <div><div class="card-title">Injected vs measured vs observed</div><div class="card-sub">Separate what NetEm applies from independent probes and future appliance telemetry</div></div>
     </div>
     <div class="card-pad">
       <table>
-        <thead><tr><th>Metric</th><th>NetEm injected</th><th>Appliance observed</th></tr></thead>
+        <thead><tr><th>Metric</th><th>NetEm injected</th><th>Active measurement</th><th>Appliance observed</th></tr></thead>
         <tbody>
-          <tr><td>Latency</td><td id="compare-latency">—</td><td>Awaiting integration</td></tr>
-          <tr><td>Jitter</td><td id="compare-jitter">—</td><td>Awaiting integration</td></tr>
-          <tr><td>Packet loss</td><td id="compare-loss">—</td><td>Awaiting integration</td></tr>
-          <tr><td>SLA state</td><td id="compare-sla">—</td><td>Awaiting integration</td></tr>
+          <tr><td>Latency / response</td><td id="compare-latency">—</td><td id="compare-probe-latency">No probe</td><td>Awaiting adapter</td></tr>
+          <tr><td>Jitter</td><td id="compare-jitter">—</td><td>—</td><td>Awaiting adapter</td></tr>
+          <tr><td>Packet loss</td><td id="compare-loss">—</td><td>Reachability samples</td><td>Awaiting adapter</td></tr>
+          <tr><td>State</td><td id="compare-sla">—</td><td id="compare-probe-state">No probe</td><td>Awaiting adapter</td></tr>
         </tbody>
       </table>
-      <div class="field-help" style="margin-top:10px">Future adapters can add detection delay, failover convergence and recovery timing without changing the NetEm impairment engine.</div>
+      <div class="field-help" style="margin-top:10px">Active-probe response time is not identical to injected one-way latency; it measures the complete transaction/reply path from the configured probe source. Vendor adapters can later add the appliance's own SLA and path-selection state.</div>
     </div>
   </section>
 </div>
