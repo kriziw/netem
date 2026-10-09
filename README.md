@@ -38,6 +38,17 @@ The interface uses progressive disclosure so the full feature set is available w
 
 A global **Activity** rail is available from every page, and **Ctrl+K** opens a command palette for fast navigation and WAN access. The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
 
+### Measurement, persistence and evidence
+
+The platform now includes a first-party measurement/evidence layer:
+
+- **Active measurements** — bounded ICMP, TCP-connect, HTTP/HTTPS and DNS probes with persisted results and failure/recovery events.
+- **Persistent telemetry** — SQLite WAN/probe time series in `runtime/telemetry.db`, sampled server-side and retained for seven days by default.
+- **Conditional scenarios** — `wait` and `assert` stages can react to expected SLA state, active-probe results or measured traffic.
+- **Session reports** — completed Lab Sessions produce PASS/FAIL/UNSCORED evidence with assertions, test results, WAN statistics, probe success/latency percentiles and JSON/printable report output.
+
+Active probes are honest about topology scope: automatic-source probes follow the NetEm host routing table. On a fully transparent WAN with unnumbered bridge members this does not by itself prove that the selected WAN path was crossed; interface binding requires a usable L3 source/route.
+
 ---
 
 ## What this fork adds
