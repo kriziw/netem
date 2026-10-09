@@ -2088,54 +2088,303 @@ def scenario_snapshot():
         return dict(SCENARIO_STATE)
 
 
+def compare_condition_value(actual, operator, expected):
+    if actual is None:
+        return False
+    if operator == "==":
+        return actual == expected
+    if operator == "!=":
+        return actual != expected
+    try:
+        actual_n = float(actual)
+        expected_n = float(expected)
+    except (TypeError, ValueError):
+        return False
+    if operator == "<":
+        return actual_n < expected_n
+    if operator == "<=":
+        return actual_n <= expected_n
+    if operator == ">":
+        return actual_n > expected_n
+    if operator == ">=":
+        return actual_n >= expected_n
+    return False
+
+
+def condition_summary(condition: dict):
+    kind = condition.get("type")
+    if kind == "sla":
+        return f'expected SLA = {condition.get("state", "pass").upper()}'
+    if kind == "probe":
+        return (
+            f'{condition.get("probe_id")} {condition.get("field")} '
+            f'{condition.get("op")} {condition.get("value")}'
+        )
+    if kind == "traffic":
+        return (
+            f'{condition.get("field")} {condition.get("op")} '
+            f'{condition.get("value")}'
+        )
+    return "condition"
+
+
+def evaluate_scenario_condition(condition: dict, default_link_id: str):
+    cfg = load_config()
+    kind = condition.get("type")
+    link_id = condition.get("link_id") or default_link_id
+
+    if kind == "sla":
+        state = next(
+            (item for item in build_link_states(cfg) if item.get("id") == link_id),
+            None,
+        )
+        if not state:
+            return False, None, f"Unknown WAN {link_id}"
+        actual = bool(state.get("sla", {}).get("pass"))
+        expected = condition.get("state") == "pass"
+        return actual == expected, actual, "PASS" if actual else "FAIL"
+
+    if kind == "probe":
+        probe_id = condition.get("probe_id")
+        sample = latest_probe_sample(probe_id)
+        if not sample:
+            return False, None, "No probe sample yet"
+
+        probe_cfg = next(
+            (item for item in get_probes(cfg) if item.get("id") == probe_id),
+            None,
+        )
+        max_age = max(
+            15.0,
+            float((probe_cfg or {}).get("interval_s", 5)) * 3,
+        )
+        age = time.time() - float(sample.get("timestamp", 0))
+        if age > max_age:
+            return False, None, f"Probe sample is stale ({age:.1f}s old)"
+
+        field = condition.get("field", "success")
+        actual = (
+            bool(sample.get("success"))
+            if field == "success"
+            else sample.get("latency_ms")
+        )
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", "=="),
+            condition.get("value"),
+        )
+        return passed, actual, sample.get("detail") or sample.get("status")
+
+    if kind == "traffic":
+        sample = latest_telemetry_sample(link_id)
+        if not sample:
+            return False, None, "No telemetry sample yet"
+        field = condition.get("field", "down_mbps")
+        actual = sample.get(field)
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", ">="),
+            condition.get("value"),
+        )
+        return passed, actual, f"{field}={actual}"
+
+    return False, None, "Unsupported condition"
+
+
+def wait_for_scenario_condition(
+    condition: dict,
+    default_link_id: str,
+    timeout_s: float,
+    poll_s: float,
+):
+    started = time.time()
+    deadline = started + max(1.0, float(timeout_s))
+    last_observed = None
+    last_detail = None
+
+    with RUNTIME_LOCK:
+        SCENARIO_STATE["condition"] = {
+            "description": condition_summary(condition),
+            "started_at": started,
+            "timeout": timeout_s,
+            "observed": None,
+        }
+
+    while time.time() <= deadline:
+        if SCENARIO_STOP.is_set():
+            return False, last_observed, "stopped", time.time() - started
+
+        passed, observed, detail = evaluate_scenario_condition(
+            condition, default_link_id
+        )
+        last_observed = observed
+        last_detail = detail
+        with RUNTIME_LOCK:
+            if isinstance(SCENARIO_STATE.get("condition"), dict):
+                SCENARIO_STATE["condition"]["observed"] = observed
+                SCENARIO_STATE["condition"]["detail"] = detail
+
+        if passed:
+            return True, observed, detail, time.time() - started
+        SCENARIO_STOP.wait(max(0.25, min(5.0, float(poll_s))))
+
+    passed, observed, detail = evaluate_scenario_condition(
+        condition, default_link_id
+    )
+    return passed, observed, detail or last_detail, time.time() - started
+
+
 def run_scenario(link_id: str, scenario: dict):
     cfg = load_config()
     presets = get_presets(cfg)
     link = get_link(cfg, link_id)
     if not link:
         with RUNTIME_LOCK:
-            SCENARIO_STATE["active"] = False
+            SCENARIO_STATE.update(
+                {"active": False, "result": "failed", "error": "Unknown WAN"}
+            )
         return
 
     original = copy.deepcopy(link)
     runtime_profile = copy.deepcopy(original)
+    scenario_result = "passed"
+    scenario_error = None
+    started_at = time.time()
+
+    log_event(
+        "scenario",
+        f'{scenario["name"]} started',
+        scenario_id=scenario.get("id"),
+        link_id=link_id,
+        stage_count=len(scenario.get("steps", [])),
+    )
+
     try:
         for index, step in enumerate(scenario.get("steps", []), start=1):
             if SCENARIO_STOP.wait(max(0, int(step.get("after", 0)))):
+                scenario_result = "stopped"
                 break
 
-            with RUNTIME_LOCK:
-                SCENARIO_STATE["step"] = index
-                SCENARIO_STATE["step_label"] = step.get("label") or step.get("action")
-
             action = step.get("action")
+            label = step.get("label") or action
+            with RUNTIME_LOCK:
+                SCENARIO_STATE.update(
+                    {
+                        "step": index,
+                        "step_label": label,
+                        "step_action": action,
+                        "condition": None,
+                    }
+                )
+
             if action == "quality":
                 runtime_profile = copy.deepcopy(original)
                 runtime_profile["mode"] = "quality"
                 runtime_profile["quality"] = int(step.get("value", 100))
                 runtime_profile.pop("custom_profile", None)
-                apply_selected_profile(runtime_profile, presets)
+                ok, msg, _effective = apply_selected_profile(
+                    runtime_profile, presets
+                )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
                 ACTIVE_FAULTS.pop(link_id, None)
                 log_event(
                     "scenario",
-                    f'{scenario["name"]}: {step.get("label", "quality")}',
+                    f'{scenario["name"]}: {label}',
+                    scenario_id=scenario.get("id"),
                     link_id=link_id,
                     quality=runtime_profile["quality"],
                 )
+
             elif action == "fault":
-                apply_runtime_fault(
+                ok, msg = apply_runtime_fault(
                     runtime_profile,
                     step.get("value", "normal"),
                     presets,
                 )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
+
             elif action == "mtu":
-                apply_mtu_limit(runtime_profile, int(step.get("value", 0)))
+                ok, msg = apply_mtu_limit(
+                    runtime_profile, int(step.get("value", 0))
+                )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
+
+            elif action in ("wait", "assert"):
+                condition = step.get("condition") or {}
+                passed, observed, detail, elapsed = wait_for_scenario_condition(
+                    condition,
+                    link_id,
+                    step.get("timeout", 30),
+                    step.get("poll", 0.5),
+                )
+                if SCENARIO_STOP.is_set():
+                    scenario_result = "stopped"
+                    break
+
+                details = {
+                    "scenario_id": scenario.get("id"),
+                    "link_id": link_id,
+                    "label": label,
+                    "passed": bool(passed),
+                    "condition": condition,
+                    "observed": observed,
+                    "detail": detail,
+                    "elapsed_s": round(elapsed, 3),
+                }
+
+                if action == "assert":
+                    log_event(
+                        "assertion",
+                        f'{scenario["name"]}: {label} — '
+                        + ("PASS" if passed else "FAIL"),
+                        **details,
+                    )
+                else:
+                    log_event(
+                        "condition",
+                        f'{scenario["name"]}: {label} — '
+                        + ("satisfied" if passed else "timeout"),
+                        **details,
+                    )
+
+                if not passed and step.get("on_fail", "stop") == "stop":
+                    scenario_result = "failed"
+                    scenario_error = (
+                        f'{label}: condition not satisfied within '
+                        f'{step.get("timeout", 30)}s'
+                    )
+                    break
+
+        if SCENARIO_STOP.is_set() and scenario_result == "passed":
+            scenario_result = "stopped"
+
+    except Exception as exc:
+        scenario_result = "failed"
+        scenario_error = str(exc)[:240]
 
     finally:
         apply_mtu_limit(original, 0)
         apply_selected_profile(original, presets)
         ACTIVE_FAULTS.pop(link_id, None)
-        log_event("scenario", f'{scenario["name"]} finished', link_id=link_id)
+        duration_s = round(time.time() - started_at, 3)
+        log_event(
+            "scenario",
+            f'{scenario["name"]} finished — {scenario_result.upper()}',
+            scenario_id=scenario.get("id"),
+            link_id=link_id,
+            result=scenario_result,
+            error=scenario_error,
+            duration_s=duration_s,
+        )
         with RUNTIME_LOCK:
             SCENARIO_STATE.update(
                 {
@@ -2145,7 +2394,12 @@ def run_scenario(link_id: str, scenario: dict):
                     "link_id": None,
                     "started_at": None,
                     "step": 0,
+                    "step_count": 0,
                     "step_label": None,
+                    "step_action": None,
+                    "condition": None,
+                    "result": scenario_result,
+                    "error": scenario_error,
                 }
             )
         SCENARIO_STOP.clear()
