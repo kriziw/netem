@@ -903,7 +903,7 @@ pre {
 .steer-seg.congested { background:var(--warning); }
 .steer-seg.degraded { background:var(--color-ff9f6b); }
 .steer-seg.failed { background:var(--danger); }
-.steer-seg.empty { background:transparent; }
+.steer-seg.empty { background:transparent; color:var(--text-soft); }
 .steer-text { font-size:10.5px; line-height:1.5; color:var(--muted); overflow-wrap:anywhere; }
 .steer-legend { display:flex; flex-wrap:wrap; gap:10px; margin-top:8px; font-size:10px; color:var(--muted); }
 .steer-legend span::before { content:""; display:inline-block; width:8px; height:8px; margin-right:4px; border-radius:2px; vertical-align:middle; background:var(--legend); }
