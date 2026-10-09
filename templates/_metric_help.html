@@ -1,0 +1,4 @@
+{% macro metric_help(key, label, explanation) -%}
+<button type="button" class="metric-help" title="{{ explanation }}" aria-label="Explain {{ label }}" popovertarget="help-{{ key }}">ⓘ</button>
+<div popover id="help-{{ key }}" class="metric-help-panel"><strong>{{ label }}</strong><p>{{ explanation }}</p><button type="button" class="btn btn-sm" popovertarget="help-{{ key }}" popovertargetaction="hide">Close</button></div>
+{%- endmacro %}

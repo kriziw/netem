@@ -726,3 +726,33 @@ pre {
 .simulator-dialog-feedback { min-height:24px; margin-bottom:8px; }
 #traffic-simulator-dialog .card { margin:0; }
 @media(max-width:600px) { #traffic-simulator-dialog { padding:12px; } #traffic-simulator-dialog .grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+
+/* Overview throughput charts keep units and time visible at card size. */
+.chart-axis-title, .chart-time-title, .wan-rate-caption { color:var(--muted); font-size:10px; }
+.chart-axis-title { margin:10px 0 4px; }
+.chart-time-title { margin-top:4px; text-align:right; }
+.wan-rate-caption { margin-top:2px; }
+.wan-live-card { text-align:left; }
+.wan-chart-frame { grid-template-columns:38px minmax(0,1fr); grid-template-rows:92px 18px; }
+.wan-chart-frame .chart { height:92px; }
+.wan-chart-frame .chart-y-axis { font-size:10px; }
+.chart-legend strong { font-weight:600; font-variant-numeric:tabular-nums; }
+
+.dem-users { color:var(--muted); font-size:11px; margin-bottom:8px; }
+.dem-indicator { display:flex; gap:10px; align-items:flex-start; padding:10px 0; border-bottom:1px solid var(--border); --dem-color:var(--muted); }
+.dem-indicator.good { --dem-color:var(--success); }
+.dem-indicator.warn { --dem-color:var(--warning); }
+.dem-indicator.bad { --dem-color:var(--danger); }
+.dem-signal { display:grid; place-items:center; flex:0 0 32px; width:32px; height:32px; border:3px solid var(--dem-color); border-radius:50%; color:var(--dem-color); font-size:19px; font-weight:700; }
+.dem-detail { flex:1; min-width:0; }
+.dem-heading { display:flex; justify-content:space-between; gap:8px; flex-wrap:wrap; font-size:11px; color:var(--text); }
+.dem-heading [data-dem-status] { color:var(--dem-color); font-weight:650; }
+.dem-value { display:block; margin-top:3px; font-size:20px; font-variant-numeric:tabular-nums; }
+.dem-detail p, .dem-thresholds p { font-size:10px; line-height:1.5; color:var(--muted); margin:4px 0 0; }
+.dem-thresholds { margin-top:10px; font-size:10px; color:var(--muted); }
+.dem-thresholds summary { cursor:pointer; }
+
+.metric-help { border:0; background:transparent; color:var(--muted); cursor:help; padding:2px 4px; font-size:13px; font-weight:500; vertical-align:middle; }
+.metric-help:hover, .metric-help:focus-visible { color:var(--accent); }
+.metric-help-panel { box-sizing:border-box; width:min(300px,calc(100vw - 24px)); padding:14px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); box-shadow:0 12px 32px #0008; font-size:12px; font-weight:400; }
+.metric-help-panel p { color:var(--muted); line-height:1.5; margin:7px 0 10px; }

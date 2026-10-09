@@ -142,7 +142,7 @@ window.NetEmUI = (() => {
 
     if (options.axis) {
       const unit = options.unit || "";
-      const digits = options.digits ?? (max < 10 ? 1 : 0);
+      const digits = options.digits ?? (max < 1 ? Math.min(6, Math.ceil(-Math.log10(max)) + 1) : max < 10 ? 1 : 0);
       const values = [max, max * .75, max * .5, max * .25, min];
       options.axis.innerHTML = values.map(value => {
         if (options.rateAxis) return '<span>' + formatRate(value) + '</span>';
@@ -167,6 +167,43 @@ window.NetEmUI = (() => {
               ? "−" + Math.round(spanSec) + "s"
               : "Start";
       options.timeAxis.innerHTML = '<span>' + left + '</span><span>Now</span>';
+    }
+
+    if (options.hoverLabels && paths[0]?.ownerDocument) {
+      const svg = paths[0].ownerSVGElement;
+      const doc = paths[0].ownerDocument;
+      const ns = 'http://www.w3.org/2000/svg';
+      let samples = svg.querySelector('[data-sample-labels]');
+      if (!samples) {
+        samples = doc.createElementNS(ns, 'g');
+        samples.setAttribute('data-sample-labels', '');
+        svg.append(samples);
+      }
+      const slots = Math.max(options.slots || 0, ...arrays.map(values => values.length));
+      const timestamps = options.timestamps || [];
+      const points = [];
+      for (let index = 0; index < slots; index++) {
+        const values = arrays.map((series, seriesIndex) => {
+          const value = series[index - (slots - series.length)];
+          return value == null || !Number.isFinite(Number(value)) ? null
+            : options.hoverLabels[seriesIndex] + ': ' + (options.sampleUnit === 'Mbit/s' ? formatRate(value)
+              : Number(value).toFixed(2) + ' ' + (options.sampleUnit || ''));
+        }).filter(Boolean);
+        if (!values.length) continue;
+        const timestamp = timestamps[index - (slots - timestamps.length)];
+        const description = (timestamp == null ? '' : eventTime(timestamp) + ' · ') + values.join(' · ');
+        const point = doc.createElementNS(ns, 'line');
+        const x = slots > 1 ? index / (slots - 1) * 100 : 0;
+        point.setAttribute('x1', x); point.setAttribute('x2', x);
+        point.setAttribute('y1', 0); point.setAttribute('y2', 100);
+        point.setAttribute('stroke', 'transparent'); point.setAttribute('stroke-width', '6');
+        point.setAttribute('vector-effect', 'non-scaling-stroke');
+        point.setAttribute('pointer-events', 'stroke');
+        point.setAttribute('aria-label', description);
+        const title = doc.createElementNS(ns, 'title'); title.textContent = description;
+        point.append(title); points.push(point);
+      }
+      samples.replaceChildren(...points);
     }
 
     return {min, max};
@@ -285,5 +322,37 @@ window.NetEmUI = (() => {
     return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
   }
 
-  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
+  function renderDemSummary(root, dem = {}, connected = true) {
+    if (!root) return;
+    const hasData = connected && Number(dem.requests) > 0;
+    const number = (value, max = Infinity) => value != null && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= max ? Number(value) : null;
+    const score = hasData ? number(dem.experience_score, 100) : null;
+    const success = hasData ? number(dem.availability_pct, 100) : null;
+    const latency = hasData ? number(dem.p95_ms) : null;
+    const missing = connected ? 'Waiting for measured transactions.' : 'Simulator unavailable; impact cannot be measured.';
+    const rows = [
+      {key:'experience', value:score == null ? '—' : score.toFixed(0)+'/100',
+        tone:score == null ? 'unknown' : score >= 75 ? 'good' : score >= 55 ? 'warn' : 'bad',
+        explanation:score == null ? missing : score >= 75 ? 'Requests are completing with a good overall experience.' : score >= 55 ? 'Slower responses or failed requests are affecting users.' : 'Delays or failed requests are seriously affecting users.'},
+      {key:'success', value:success == null ? '—' : success.toFixed(2)+'%',
+        tone:success == null ? 'unknown' : success >= 99 ? 'good' : success >= 95 ? 'warn' : 'bad',
+        explanation:success == null ? missing : (100-success).toFixed(2)+'% of simulated transactions failed. '+(success >= 99 ? 'Few or no request failures.' : success >= 95 ? 'Some users may need to retry.' : 'Frequent failures interrupt simulated work.')},
+      {key:'response', value:latency == null ? '—' : latency.toFixed(0)+' ms',
+        tone:latency == null ? 'unknown' : latency <= 400 ? 'good' : latency <= 1800 ? 'warn' : 'bad',
+        explanation:latency == null ? (hasData ? 'No successful responses with timing data.' : missing) : '95% of successful timed transactions finished within '+latency.toFixed(0)+' ms. '+(latency <= 400 ? 'Short waits for most requests.' : latency <= 1800 ? 'Users may notice waiting.' : 'Long waits for successful requests.')}
+    ];
+    for (const row of rows) {
+      const element = root.querySelector('[data-dem-indicator="'+row.key+'"]');
+      if (!element) continue;
+      element.className = 'dem-indicator '+row.tone;
+      element.querySelector('[data-dem-symbol]').textContent = {good:'✓',warn:'!',bad:'×',unknown:'—'}[row.tone];
+      element.querySelector('[data-dem-value]').textContent = row.value;
+      element.querySelector('[data-dem-status]').textContent = {good:'Good',warn:'Degraded',bad:'Poor',unknown:'No data'}[row.tone];
+      element.querySelector('[data-dem-explanation]').textContent = row.explanation;
+    }
+    const window = root.querySelector('[data-dem-window]');
+    if (window) window.textContent = connected ? 'Last '+(number(dem.window_seconds) || 60)+' seconds · '+(number(dem.requests) || 0)+' measured transactions'+(dem.truncated ? ' · sample limit reached' : '') : 'Measurements unavailable';
+  }
+
+  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary};
 })();

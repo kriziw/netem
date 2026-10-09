@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_metric_help.html" import metric_help %}
 {% block title %}Tests · NetEm WAN Lab{% endblock %}
 {% block crumb %}Tests{% endblock %}
 
@@ -69,7 +70,7 @@
 {% elif not traffic_generator.connected %}
 <section class="card">
   <div class="card-head">
-    <div><div class="card-title">Corporate Traffic Simulator</div><div class="card-sub">Configured but unavailable</div></div>
+    <div><div class="card-title">Corporate Traffic Simulator {{ metric_help("test-simulator", "Corporate Traffic Simulator", "Creates simulated employee transactions across the appliance. Increasing users increases offered load; DEM reports measured completion success and response times.") }}</div><div class="card-sub">Configured but unavailable</div></div>
     <span class="status bad">Disconnected</span>
   </div>
   <div class="card-pad">
@@ -84,7 +85,7 @@
 <section class="card">
   <div class="card-head">
     <div>
-      <div class="card-title">Corporate Traffic Simulator</div>
+      <div class="card-title">Corporate Traffic Simulator {{ metric_help("test-simulator", "Corporate Traffic Simulator", "Creates simulated employee transactions across the appliance. Increasing users increases offered load; DEM reports measured completion success and response times.") }}</div>
       <div class="card-sub">{{ traffic_generator.integration.instance_name or traffic_generator.integration.host }} · Locust-backed synthetic employees</div>
     </div>
     <span class="status {{ 'good' if tg.status in ('starting','running') else 'info' }}" data-tg-status>{{ tg.status|upper }}</span>
