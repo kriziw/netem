@@ -65,8 +65,9 @@ class CatalogTests(unittest.TestCase):
             self.assertFalse(netem.evaluate_scenario_condition(condition, "wan1")[0])
             item["reactions"][0]["steered_after_seconds"] = 10
             self.assertTrue(netem.evaluate_scenario_condition(condition, "wan1")[0])
-            item["verdict"] = "idle"
-            self.assertFalse(netem.evaluate_scenario_condition(condition, "wan1")[0])
+            for verdict in ("idle", "unattributed", "partial"):
+                item["verdict"] = verdict
+                self.assertFalse(netem.evaluate_scenario_condition(condition, "wan1")[0])
         for within in (0, float("nan"), "wrong"):
             with self.assertRaises(ValueError):
                 netem.validate_condition(dict(condition, within=within), 1)

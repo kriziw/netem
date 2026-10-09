@@ -342,3 +342,47 @@ class SteeringTests(unittest.TestCase):
 
     def test_steering_needs_the_short_window_breakdown(self):
         self.assertIsNone(netem.assess_steering({"diagnosis": {"egress": {}}}, self.signals(), self.cfg))
+
+    def test_unknown_source_is_traffic_not_idle(self):
+        dem = {"diagnosis": {"egress_recent": {"window_seconds": 10, "egress": {
+            "unknown": {"video": {"requests": 16}}}}}}
+        item = self.realtime(netem.assess_steering(dem, self.signals(), self.cfg, now=100))
+        self.assertEqual((item["verdict"], item["requests"], item["unattributed_pct"]), ("unattributed", 16, 100.0))
+        self.assertIn("no target-reported source address", item["text"])
+        self.assertIn("Steering cannot be verified", item["text"])
+        self.assertEqual(item["reactions"], [])
+
+        finding = netem.steering_findings({"classes": [item]})[0]
+        self.assertIn("Cannot verify SD-WAN steering", finding["title"])
+        self.assertEqual(finding["unattributed"], 16)
+        self.assertEqual(finding["wans"], [])
+
+    def test_unmapped_source_explains_mapping_instead_of_missing_replies(self):
+        dem = {"diagnosis": {"egress_recent": {"egress": {
+            "10.250.2.2": {"video": {"requests": 16}}}}}}
+        item = self.realtime(netem.assess_steering(dem, self.signals(), self.cfg, now=100))
+        self.assertEqual(item["verdict"], "unattributed")
+        self.assertIn("Map observed addresses 10.250.2.2", item["text"])
+        self.assertNotIn("no target-reported source address", item["text"])
+        self.cfg["wan_links"][1]["appliance_addresses"] = ["10.250.2.2"]
+        mapped = self.realtime(netem.assess_steering(dem, self.signals(), self.cfg, now=101))
+        self.assertEqual((mapped["verdict"], mapped["unattributed"]), ("balanced", 0))
+        self.assertEqual(mapped["shares"][1]["pct"], 100.0)
+
+    def test_partial_attribution_cannot_prove_steering_or_finish_reaction(self):
+        netem.assess_steering(self.dem("wan2"), self.signals(), self.cfg, now=90)
+        netem.assess_steering(self.dem("wan2"), self.signals(False), self.cfg, now=100)
+        dem = self.dem("wan1")
+        dem["diagnosis"]["egress_recent"]["egress"]["unknown"] = {"video": {"requests": 8}}
+        item = self.realtime(netem.assess_steering(dem, self.signals(False), self.cfg, now=114))
+        self.assertEqual((item["verdict"], item["requests"], item["unattributed_pct"]), ("partial", 16, 50.0))
+        self.assertEqual(item["shares"][0]["pct"], 50.0)
+        self.assertEqual(item["reactions"], [])
+        self.assertFalse(any(entry["steered_at"] for entry in netem.STEERING_STATE["classes"].values()))
+        self.log.assert_not_called()
+
+    def test_idle_means_no_completed_transactions_in_the_window(self):
+        dem = {"diagnosis": {"egress_recent": {"egress": {}}}}
+        item = self.realtime(netem.assess_steering(dem, self.signals(), self.cfg, now=100))
+        self.assertEqual((item["verdict"], item["requests"]), ("idle", 0))
+        self.assertIsNone(item["unattributed_pct"])

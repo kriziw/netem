@@ -173,3 +173,17 @@ test('steering view colors WAN shares by health and reports reaction time', () =
   assert.match(html, /moved off WAN2 ≈14 s after it became degraded/);
   assert.match(ui.steeringHtml(null), /v0\.7 or later/);
 });
+
+test('steering distinguishes unknown and partial attribution from idle traffic', () => {
+  const unknown = ui.steeringHtml({classes:[{label:'Voice', verdict:'unattributed', severity:'warn', text:'Missing source metadata',
+    shares:[], unattributed:16, unattributed_pct:100}]});
+  assert.match(unknown, /WAN unknown/);
+  assert.match(unknown, /Unknown 100%/);
+  assert.doesNotMatch(unknown, /No traffic/);
+  const partial = ui.steeringHtml({classes:[{label:'Voice', verdict:'partial', severity:'warn', text:'Cannot verify steering',
+    shares:[{label:'WAN1', health:'healthy', pct:50}], unattributed:8, unattributed_pct:50}]});
+  assert.match(partial, /Partial attribution/);
+  assert.match(partial, /WAN1 50%/);
+  assert.match(partial, /Unknown 50%/);
+  assert.match(partial, /WAN unknown · 8 transactions/);
+});

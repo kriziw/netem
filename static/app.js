@@ -421,12 +421,13 @@ window.NetEmUI = (() => {
     if (!steering) {
       return '<div class="diag-empty">Steering is assessed once the Traffic Simulator reports per-WAN traffic (v0.7 or later with its target updated) and NetEm can map the appliance WAN addresses.</div>';
     }
-    const verdicts = {steered:'Steered away', unaffected:'Unaffected', balanced:'Healthy', stuck:'On impaired WAN', stuck_impact:'Users affected', no_healthy:'No healthy WAN', idle:'No traffic'};
+    const verdicts = {steered:'Steered away', unaffected:'Unaffected', balanced:'Healthy', stuck:'On impaired WAN', stuck_impact:'Users affected', no_healthy:'No healthy WAN', idle:'No traffic', unattributed:'WAN unknown', partial:'Partial attribution'};
     return (steering.classes || []).map(item => {
       const segments = (item.shares || []).filter(share => share.pct).map(share =>
         '<span class="steer-seg '+escapeHtml(share.health)+'" style="width:'+Number(share.pct)+'%" title="'+
         escapeHtml(share.label+' · '+formatNumber(share.pct, 0)+'% · '+share.health+(share.health_reason ? ' ('+share.health_reason+')' : ''))+'">'+
-        (share.pct >= 14 ? escapeHtml(share.label)+' '+formatNumber(share.pct, 0)+'%' : '')+'</span>').join('');
+        (share.pct >= 14 ? escapeHtml(share.label)+' '+formatNumber(share.pct, 0)+'%' : '')+'</span>').join('')+
+        (item.unattributed_pct ? '<span class="steer-seg empty" style="width:'+Number(item.unattributed_pct)+'%" title="WAN unknown · '+Number(item.unattributed || 0)+' transactions">'+(item.unattributed_pct >= 14 ? 'Unknown '+formatNumber(item.unattributed_pct, 0)+'%' : '')+'</span>' : '');
       const reactions = (item.reactions || []).filter(reaction => reaction.was_used).map(reaction =>
         reaction.steered_after_seconds != null ? 'moved off '+reaction.label+' ≈'+reaction.steered_after_seconds+' s after it became '+reaction.health
           : reaction.label+' '+reaction.health+' for '+reaction.impaired_for_seconds+' s');
