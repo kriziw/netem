@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.1](https://github.com/kriziw/netem/compare/v0.7.0...v0.7.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* preserve live charts across controls and smooth telemetry updates ([43574de](https://github.com/kriziw/netem/commit/43574de9bb9f92ad4edb21379a21f2ef4fcf7820))
+* preserve live charts across controls and smooth telemetry updates ([eec6a3b](https://github.com/kriziw/netem/commit/eec6a3bfe7326b207e1f07db9671b76b336cfd11))
+
 ## [0.7.0](https://github.com/kriziw/netem/compare/v0.6.0...v0.7.0) (2026-10-09)
 
 
