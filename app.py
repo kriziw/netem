@@ -2635,12 +2635,17 @@ def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
     classes = []
     for cls, label in STEERING_CLASSES:
         shares, unattributed = dict.fromkeys(by_link, 0), 0
+        unknown_source, unmapped_addresses = 0, set()
         for address, per_app in recent["egress"].items():
             count = sum(item.get("requests") or 0 for app, item in per_app.items() if class_of(app) == cls)
             if link_of(address) in shares:
                 shares[link_of(address)] += count
             else:
                 unattributed += count
+                if count and address == "unknown":
+                    unknown_source += count
+                elif count:
+                    unmapped_addresses.add(address)
         impact = {link_id: {"requests": 0, "failures": 0, "p95_ms": None} for link_id in by_link}
         for address, item in (diagnosis.get("egress") or {}).items():
             bucket = impact.get(link_of(address))
@@ -2652,19 +2657,29 @@ def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
                 if counts.get("p95_ms") is not None:
                     bucket["p95_ms"] = max(bucket["p95_ms"] or 0, counts["p95_ms"])
         total = sum(shares.values())
+        observed_total = total + unattributed
         for link_id, count in shares.items():
-            if total and by_link[link_id]["health"] == "healthy":
+            if total and not unattributed and by_link[link_id]["health"] == "healthy":
                 STEERING_STATE["baseline"][(cls, link_id)] = count * 100.0 / total
 
         unhealthy = [link_id for link_id in by_link if by_link[link_id]["health"] != "healthy"]
         healthy = [link_id for link_id in by_link if link_id not in unhealthy]
-        reactions = [track_steering_reaction(cls, label, by_link[link_id],
+        reactions = [] if unattributed else [track_steering_reaction(cls, label, by_link[link_id],
                                              shares[link_id] * 100.0 / total if total else None, now)
                      for link_id in unhealthy]
         names = lambda ids: ", ".join(by_link[link_id]["label"] for link_id in ids)
         split = " · ".join(f"{by_link[link_id]['label']} {count * 100.0 / total:.0f}%" for link_id, count in shares.items()) if total else ""
-        if not total:
-            verdict, severity, text = "idle", "info", f"No {label.lower()} traffic traced to a WAN in the last {window} s."
+        if unattributed:
+            verdict, severity = ("partial" if total else "unattributed"), "warn"
+            text = (f"{observed_total} {label.lower()} transactions in the last {window} s; "
+                    f"{total} mapped to a WAN, {unattributed} unattributed. Steering cannot be verified.")
+            if unknown_source:
+                text += f" {unknown_source} have no target-reported source address; check replies and target source metadata."
+            if unmapped_addresses:
+                text += (f" Map observed addresses {', '.join(sorted(unmapped_addresses))} under "
+                         "WAN links → Diagnostics → Appliance WAN addresses; verify per-WAN SNAT and upstream NAT.")
+        elif not total:
+            verdict, severity, text = "idle", "info", f"No {label.lower()} transactions in the last {window} s."
         elif not unhealthy:
             verdict, severity, text = "balanced", "good", f"All WANs healthy · {split}"
         elif not healthy:
@@ -2695,9 +2710,11 @@ def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
                 text = f"{on_bad:.0f}% still on impaired {names(unhealthy)}; no user impact measured there yet."
         classes.append({
             "class": cls, "label": label, "verdict": verdict, "severity": severity, "text": text,
-            "unattributed": unattributed, "reactions": reactions,
+            "unattributed": unattributed, "requests": observed_total,
+            "unattributed_pct": round(unattributed * 100.0 / observed_total, 1) if observed_total else None,
+            "reactions": reactions,
             "shares": [{"link_id": link_id, "label": by_link[link_id]["label"], "health": by_link[link_id]["health"],
-                        "health_reason": by_link[link_id]["health_reason"], "requests": count, "pct": round(count * 100.0 / total, 1) if total else None,
+                        "health_reason": by_link[link_id]["health_reason"], "requests": count, "pct": round(count * 100.0 / observed_total, 1) if observed_total else None,
                         "failures": impact[link_id]["failures"], "p95_ms": impact[link_id]["p95_ms"]}
                        for link_id, count in shares.items()],
         })
@@ -2709,15 +2726,17 @@ def steering_findings(steering):
     for item in (steering or {}).get("classes", []):
         if item["severity"] not in ("bad", "warn"):
             continue
-        impaired = [share for share in item["shares"] if share["health"] != "healthy" and share["requests"]]
+        attribution_missing = item["verdict"] in ("unattributed", "partial")
+        impaired = [] if attribution_missing else [share for share in item["shares"] if share["health"] != "healthy" and share["requests"]]
         findings.append({
             "source": "steering", "id": f"steering_{item['verdict']}_{item['class']}", "severity": item["severity"],
-            "title": f"SD-WAN keeps {item['label'].lower()} on an impaired WAN" if item["verdict"].startswith("stuck")
+            "title": f"Cannot verify SD-WAN steering for {item['label'].lower()}" if attribution_missing
+                     else f"SD-WAN keeps {item['label'].lower()} on an impaired WAN" if item["verdict"].startswith("stuck")
                      else f"No healthy WAN for {item['label'].lower()}",
             "detail": item["text"],
             "wans": [{"link_id": share["link_id"], "label": share["label"], "affected": share["requests"],
                       "causes": [share["health_reason"] or share["health"]]} for share in impaired],
-            "unattributed": 0, "candidates": [], "hint": None,
+            "unattributed": item.get("unattributed", 0), "candidates": [], "hint": None,
         })
     return findings
 
