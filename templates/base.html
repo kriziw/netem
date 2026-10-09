@@ -250,8 +250,14 @@
   });
 })();
 </script>
+<dialog id="traffic-simulator-dialog" aria-labelledby="traffic-simulator-dialog-title">
+  <div class="simulator-dialog-head"><h2 id="traffic-simulator-dialog-title" data-simulator-title>Traffic Simulator controls</h2><button class="btn" type="button" data-simulator-close aria-label="Close simulator controls">Close</button></div>
+  <div class="simulator-dialog-feedback" data-simulator-feedback role="status" aria-live="polite"></div>
+  <div data-simulator-content></div>
+</dialog>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='actions.js') }}"></script>
+<script src="{{ url_for('static', filename='simulator-dialog.js') }}"></script>
 <template id="page-scripts">{% block scripts %}{% endblock %}</template>
 <script>NetEmActions.mount();</script>
 </body>

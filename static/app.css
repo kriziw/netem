@@ -718,3 +718,11 @@ pre {
 .activity-state.idle, .activity-state.no-data { color:var(--muted); }
 .quick-action-feedback { min-height:2.5em; margin-top:6px; font-size:12px; color:var(--muted); }
 .quick-action-feedback.error { color:var(--danger); }
+
+#traffic-simulator-dialog { width:min(900px,calc(100vw - 32px)); max-height:85vh; padding:20px; color:var(--text); background:var(--surface); border:1px solid var(--border-strong); border-radius:14px; overflow:auto; }
+#traffic-simulator-dialog::backdrop { background:rgba(0,0,0,.65); }
+.simulator-dialog-head { display:flex; align-items:center; justify-content:space-between; gap:16px; margin-bottom:12px; }
+.simulator-dialog-head h2 { margin:0; font-size:18px; }
+.simulator-dialog-feedback { min-height:24px; margin-bottom:8px; }
+#traffic-simulator-dialog .card { margin:0; }
+@media(max-width:600px) { #traffic-simulator-dialog { padding:12px; } #traffic-simulator-dialog .grid-4 { grid-template-columns:repeat(2,minmax(0,1fr)); } }
