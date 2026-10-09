@@ -3118,8 +3118,97 @@ def analytics():
         page="analytics",
         links=build_link_states(cfg),
         sla_profile=get_sla_profile(cfg),
+        probes=probe_snapshot(cfg),
+        telemetry_retention_hours=TELEMETRY_RETENTION_HOURS,
         events=list(reversed(EVENT_LOG[-80:])),
     )
+
+
+@app.route("/probes/save", methods=["POST"])
+def probe_save():
+    cfg = load_config()
+    existing_id = (request.form.get("probe_id") or "").strip() or None
+    raw = {
+        "name": request.form.get("name"),
+        "link_id": request.form.get("link_id"),
+        "kind": request.form.get("kind"),
+        "target": request.form.get("target"),
+        "port": request.form.get("port"),
+        "resolver": request.form.get("resolver"),
+        "source_side": request.form.get("source_side"),
+        "interval_s": request.form.get("interval_s"),
+        "timeout_s": request.form.get("timeout_s"),
+        "enabled": request.form.get("enabled") == "on",
+    }
+    try:
+        probe = validate_probe_definition(raw, cfg, existing_id=existing_id)
+    except ValueError as exc:
+        flash(f"Probe configuration is invalid: {exc}", "error")
+        return redirect(url_for("analytics") + "#measurements")
+
+    probes = [
+        item for item in get_probes(cfg)
+        if item.get("id") != probe["id"]
+    ]
+    if existing_id is None and len(probes) >= MAX_PROBES:
+        flash(f"A maximum of {MAX_PROBES} active-measurement probes is supported.", "error")
+        return redirect(url_for("analytics") + "#measurements")
+    probes.append(probe)
+    cfg["probes"] = probes[-MAX_PROBES:]
+    save_config(cfg)
+    log_event(
+        "probe-config",
+        f'Saved probe "{probe["name"]}"',
+        probe_id=probe["id"],
+        link_id=probe["link_id"],
+        kind=probe["kind"],
+    )
+    flash(f'Probe "{probe["name"]}" saved.', "success")
+    return redirect(url_for("analytics") + "#measurements")
+
+
+@app.route("/probes/delete", methods=["POST"])
+def probe_delete():
+    cfg = load_config()
+    probe_id = (request.form.get("probe_id") or "").strip()
+    before = len(get_probes(cfg))
+    cfg["probes"] = [
+        item for item in get_probes(cfg)
+        if item.get("id") != probe_id
+    ]
+    if len(cfg["probes"]) != before:
+        save_config(cfg)
+        with RUNTIME_LOCK:
+            PROBE_RUNTIME.pop(probe_id, None)
+        log_event("probe-config", f"Deleted probe {probe_id}", probe_id=probe_id)
+        flash("Probe deleted.", "info")
+    return redirect(url_for("analytics") + "#measurements")
+
+
+@app.route("/probes/run", methods=["POST"])
+def probe_run():
+    cfg = load_config()
+    probe_id = (request.form.get("probe_id") or "").strip()
+    probe = next(
+        (item for item in get_probes(cfg) if item.get("id") == probe_id),
+        None,
+    )
+    if not probe:
+        flash("Unknown probe.", "error")
+        return redirect(url_for("analytics") + "#measurements")
+
+    result = run_probe_and_record(probe, cfg)
+    if result.get("success"):
+        flash(
+            f'{probe["name"]}: success in {result.get("latency_ms", 0):.1f} ms.',
+            "success",
+        )
+    else:
+        flash(
+            f'{probe["name"]}: failed — {result.get("detail") or "unknown error"}.',
+            "error",
+        )
+    return redirect(url_for("analytics") + "#measurements")
 
 
 @app.route("/integrations")
@@ -3687,6 +3776,42 @@ def api_events():
     return jsonify({"timestamp": time.time(), "events": EVENT_LOG[-limit:]})
 
 
+@app.route("/api/v1/history")
+def api_history():
+    cfg = load_config()
+    link_id = (request.args.get("link_id") or "").strip()
+    if not get_link(cfg, link_id):
+        return jsonify({"error": "Unknown WAN link."}), 404
+
+    try:
+        minutes = max(1, min(TELEMETRY_RETENTION_HOURS * 60, int(request.args.get("minutes", "60"))))
+        max_points = max(50, min(5000, int(request.args.get("max_points", "1200"))))
+    except ValueError:
+        return jsonify({"error": "minutes and max_points must be integers."}), 400
+
+    since = time.time() - minutes * 60
+    return jsonify(
+        {
+            "timestamp": time.time(),
+            "link_id": link_id,
+            "minutes": minutes,
+            "samples": query_telemetry_history(link_id, since, max_points=max_points),
+            "probes": query_probe_history(link_id=link_id, since=since, limit=max_points),
+        }
+    )
+
+
+@app.route("/api/v1/probes")
+def api_probes():
+    cfg = load_config()
+    return jsonify(
+        {
+            "timestamp": time.time(),
+            "probes": probe_snapshot(cfg),
+        }
+    )
+
+
 @app.route("/metrics")
 def prometheus_metrics():
     cfg = load_config()
@@ -4182,4 +4307,5 @@ def clear():
 
 if __name__ == "__main__":
     restore_runtime_state()
+    start_background_workers()
     app.run(host="0.0.0.0", port=8081, debug=False)
