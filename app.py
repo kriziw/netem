@@ -730,9 +730,12 @@ def validate_scenario_steps(raw_steps):
             raise ValueError(f"Step {index} must be an object.")
 
         action = str(step.get("action", "")).strip()
-        if action not in ("quality", "fault", "mtu", "wait", "assert"):
+        if action not in (
+            "quality", "fault", "mtu", "traffic_generator", "wait", "assert"
+        ):
             raise ValueError(
-                f"Step {index}: action must be quality, fault, mtu, wait or assert."
+                f"Step {index}: action must be quality, fault, mtu, "
+                "traffic_generator, wait or assert."
             )
 
         try:
@@ -774,6 +777,68 @@ def validate_scenario_steps(raw_steps):
                     f"Step {index}: MTU must be 576-9000, or 0 to restore."
                 )
             validated_step["value"] = value
+
+        elif action == "traffic_generator":
+            value = step.get("value")
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"Step {index}: traffic_generator value must be an object."
+                )
+            operation = str(value.get("operation") or "").strip().lower()
+            if operation not in ("start", "adjust", "stop"):
+                raise ValueError(
+                    f"Step {index}: traffic_generator operation must be "
+                    "start, adjust or stop."
+                )
+            cleaned = {"operation": operation}
+
+            if operation in ("start", "adjust"):
+                if "users" in value:
+                    try:
+                        cleaned["users"] = max(1, min(5000, int(value["users"])))
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"Step {index}: traffic-generator users must be an integer."
+                        )
+                if "spawn_rate" in value:
+                    try:
+                        cleaned["spawn_rate"] = max(
+                            0.1, min(1000.0, float(value["spawn_rate"]))
+                        )
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"Step {index}: traffic-generator spawn_rate must be numeric."
+                        )
+                for key in ("profile", "activity", "pattern"):
+                    if key in value:
+                        cleaned[key] = str(value[key]).strip()[:80]
+                if "target" in value:
+                    target = str(value["target"]).strip()
+                    parsed = urlsplit(target)
+                    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                        raise ValueError(
+                            f"Step {index}: traffic-generator target must be an HTTP(S) URL."
+                        )
+                    cleaned["target"] = target[:512]
+                for key in ("personas", "applications"):
+                    if key in value:
+                        if not isinstance(value[key], dict):
+                            raise ValueError(
+                                f"Step {index}: {key} must be an object."
+                            )
+                        cleaned[key] = {
+                            str(name)[:80]: max(0.0, min(100.0, float(weight)))
+                            for name, weight in list(value[key].items())[:30]
+                        }
+
+            if operation == "start":
+                cleaned.setdefault("profile", "office")
+                cleaned.setdefault("users", 50)
+                cleaned.setdefault("spawn_rate", 5.0)
+                cleaned.setdefault("activity", "normal")
+                cleaned.setdefault("pattern", "steady")
+
+            validated_step["value"] = cleaned
 
         elif action in ("wait", "assert"):
             validated_step["condition"] = validate_condition(
