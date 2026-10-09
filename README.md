@@ -38,6 +38,38 @@ The interface uses progressive disclosure so the full feature set is available w
 
 A global **Activity** rail is available from every page, and **Ctrl+K** opens a command palette for fast navigation and WAN access. The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
 
+### Showroom display
+
+Running `python app.py` serves the existing operator interface on **8081** and a
+separate, read-only showroom dashboard on **8082**. Open
+`http://<netem-host>:8082/` on a showroom screen and use the browser's full-screen
+mode (F11). No login or external assets are required on the local lab network.
+
+The dashboard shows live WAN health, measured download/upload traffic, requested
+delay/jitter/loss, model SLA and the current scenario/session. It refreshes every
+two seconds, automatically rotates pages when there are more WANs than fit, and
+shows unavailable measurements as gaps rather than zero. Connection failures
+blank live rates and label retained state as last known; reconnection is automatic.
+
+The viewer runs in the same process as the operator UI so runtime changes appear
+immediately without a second set of background workers. Its separate Flask app
+exposes only the dashboard, its two assets and a presentation-only snapshot API.
+Operator routes and configuration/secrets are not exposed on the showroom port;
+all methods other than GET/HEAD are rejected.
+
+Optional environment variables (add `Environment=...` lines to the systemd service):
+
+- `NETEM_SHOWROOM_PORT=8082` — choose a different port; `0` disables the viewer.
+- `NETEM_SHOWROOM_HOST=0.0.0.0` — choose a bind address, such as a showroom-facing IP.
+
+Allow the showroom port through the appliance firewall for the showroom network.
+The operator interface on 8081 remains fully functional and should be reachable
+only by operators through your network/firewall configuration. The read-only
+listener does not impose access restrictions on the separate operator port.
+Custom WSGI deployments must provide their own listener for `app.showroom_app`
+in the same process with the existing runtime workers; the dual listener is
+started by the documented `python app.py` entry point.
+
 ### Measurement, persistence and evidence
 
 The platform now includes a first-party measurement/evidence layer:
