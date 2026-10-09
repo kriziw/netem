@@ -7,10 +7,14 @@ import math
 import os
 import re
 import shutil
+import socket
+import sqlite3
+import ssl
 import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import (
     Flask,
@@ -33,17 +37,31 @@ CONFIG_PATH = BASE_DIR / "config.json"
 VERSION_PATH = BASE_DIR / "version.txt"
 RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
+SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
+TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
 GIT = "/usr/bin/git"
+PING = shutil.which("ping") or "/usr/bin/ping"
 UPDATE_BRANCH = "main"
+
+TELEMETRY_SAMPLE_SECONDS = 2.0
+TELEMETRY_RETENTION_HOURS = 168
+MAX_PROBES = 20
 
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
 EVENT_LOG = []
+LAB_SESSIONS = []
+ACTIVE_SESSION = {
+    "active": False,
+    "id": None,
+    "name": None,
+    "started_at": None,
+}
 SCENARIO_STOP = threading.Event()
 SCENARIO_STATE = {
     "active": False,
@@ -52,10 +70,20 @@ SCENARIO_STATE = {
     "link_id": None,
     "started_at": None,
     "step": 0,
+    "step_count": 0,
     "step_label": None,
+    "step_action": None,
+    "condition": None,
+    "result": None,
+    "error": None,
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
+BACKGROUND_STOP = threading.Event()
+TELEMETRY_THREAD = None
+PROBE_THREAD = None
+TELEMETRY_PREVIOUS = {}
+PROBE_RUNTIME = {}
 CAPTURE_STATE = {
     "active": False,
     "link_id": None,
@@ -304,7 +332,21 @@ DEFAULT_SCENARIOS = [
         "steps": [
             {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
             {"after": 10, "action": "fault", "value": "blackhole", "label": "Blackhole"},
+            {
+                "after": 0,
+                "action": "assert",
+                "condition": {"type": "sla", "state": "fail"},
+                "timeout": 5,
+                "label": "Expected SLA detects failure"
+            },
             {"after": 30, "action": "fault", "value": "normal", "label": "Connectivity restored"},
+            {
+                "after": 0,
+                "action": "assert",
+                "condition": {"type": "sla", "state": "pass"},
+                "timeout": 5,
+                "label": "Expected SLA recovers"
+            },
         ],
     },
     {
@@ -352,8 +394,90 @@ def get_scenarios(cfg: dict):
     return scenarios
 
 
+def validate_condition(raw, step_index):
+    if not isinstance(raw, dict):
+        raise ValueError(f"Step {step_index}: condition must be an object.")
+
+    condition_type = str(raw.get("type") or "").strip().lower()
+    if condition_type not in ("sla", "probe", "traffic"):
+        raise ValueError(
+            f"Step {step_index}: condition type must be sla, probe or traffic."
+        )
+
+    condition = {"type": condition_type}
+    link_id = str(raw.get("link_id") or "").strip()
+    if link_id:
+        condition["link_id"] = link_id
+
+    if condition_type == "sla":
+        state = str(raw.get("state") or "").strip().lower()
+        if state not in ("pass", "fail"):
+            raise ValueError(
+                f"Step {step_index}: SLA condition state must be pass or fail."
+            )
+        condition["state"] = state
+
+    elif condition_type == "probe":
+        probe_id = str(raw.get("probe_id") or "").strip()
+        if not probe_id:
+            raise ValueError(f"Step {step_index}: probe_id is required.")
+        field = str(raw.get("field") or "success").strip().lower()
+        if field not in ("success", "latency_ms"):
+            raise ValueError(
+                f"Step {step_index}: probe field must be success or latency_ms."
+            )
+        op = str(raw.get("op") or "==").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        value = raw.get("value")
+        if field == "success":
+            if isinstance(value, str):
+                value = value.strip().lower() in ("1", "true", "yes", "pass", "up")
+            else:
+                value = bool(value)
+            if op not in ("==", "!="):
+                raise ValueError(
+                    f"Step {step_index}: success supports only == or !=."
+                )
+        else:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Step {step_index}: probe latency comparison needs a number."
+                )
+        condition.update(
+            {
+                "probe_id": probe_id,
+                "field": field,
+                "op": op,
+                "value": value,
+            }
+        )
+
+    elif condition_type == "traffic":
+        field = str(raw.get("field") or "down_mbps").strip().lower()
+        if field not in ("down_mbps", "up_mbps", "down_pps", "up_pps"):
+            raise ValueError(
+                f"Step {step_index}: traffic field must be down_mbps, up_mbps, "
+                "down_pps or up_pps."
+            )
+        op = str(raw.get("op") or ">=").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        try:
+            value = float(raw.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Step {step_index}: traffic comparison needs a numeric value."
+            )
+        condition.update({"field": field, "op": op, "value": value})
+
+    return condition
+
+
 def validate_scenario_steps(raw_steps):
-    """Validate a compact vendor-neutral scenario definition."""
+    """Validate a vendor-neutral timed + conditional scenario definition."""
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("Scenario must contain at least one step.")
     if len(raw_steps) > 30:
@@ -365,9 +489,9 @@ def validate_scenario_steps(raw_steps):
             raise ValueError(f"Step {index} must be an object.")
 
         action = str(step.get("action", "")).strip()
-        if action not in ("quality", "fault", "mtu"):
+        if action not in ("quality", "fault", "mtu", "wait", "assert"):
             raise ValueError(
-                f"Step {index}: action must be quality, fault or mtu."
+                f"Step {index}: action must be quality, fault, mtu, wait or assert."
             )
 
         try:
@@ -375,13 +499,21 @@ def validate_scenario_steps(raw_steps):
         except (TypeError, ValueError):
             raise ValueError(f"Step {index}: after must be an integer.")
 
-        value = step.get("value")
+        validated_step = {
+            "after": after,
+            "action": action,
+            "label": str(step.get("label") or action)[:80],
+        }
+
         if action == "quality":
             try:
-                value = max(0, min(100, int(value)))
+                value = max(0, min(100, int(step.get("value"))))
             except (TypeError, ValueError):
                 raise ValueError(f"Step {index}: quality must be 0-100.")
+            validated_step["value"] = value
+
         elif action == "fault":
+            value = step.get("value")
             if value not in (
                 "normal",
                 "blackhole",
@@ -389,24 +521,44 @@ def validate_scenario_steps(raw_steps):
                 "upstream_blackhole",
             ):
                 raise ValueError(f"Step {index}: unsupported fault.")
+            validated_step["value"] = value
+
         elif action == "mtu":
             try:
-                value = int(value)
+                value = int(step.get("value"))
             except (TypeError, ValueError):
                 raise ValueError(f"Step {index}: MTU must be an integer.")
             if value != 0 and not 576 <= value <= 9000:
                 raise ValueError(
                     f"Step {index}: MTU must be 576-9000, or 0 to restore."
                 )
+            validated_step["value"] = value
 
-        validated.append(
-            {
-                "after": after,
-                "action": action,
-                "value": value,
-                "label": str(step.get("label") or action)[:80],
-            }
-        )
+        elif action in ("wait", "assert"):
+            validated_step["condition"] = validate_condition(
+                step.get("condition"), index
+            )
+            try:
+                timeout_s = max(1, min(600, int(step.get("timeout", 30))))
+                poll_s = max(0.25, min(5.0, float(step.get("poll", 0.5))))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Step {index}: timeout/poll must be numeric values."
+                )
+            on_fail = str(step.get("on_fail") or "stop").strip().lower()
+            if on_fail not in ("stop", "continue"):
+                raise ValueError(
+                    f"Step {index}: on_fail must be stop or continue."
+                )
+            validated_step.update(
+                {
+                    "timeout": timeout_s,
+                    "poll": poll_s,
+                    "on_fail": on_fail,
+                }
+            )
+
+        validated.append(validated_step)
     return validated
 
 
@@ -1080,6 +1232,10 @@ def load_event_history():
 
 
 def log_event(kind: str, message: str, **details):
+    active_session_id = ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None
+    if active_session_id and "session_id" not in details:
+        details["session_id"] = active_session_id
+
     event = {
         "timestamp": time.time(),
         "kind": kind,
@@ -1099,6 +1255,61 @@ def log_event(kind: str, message: str, **details):
 
 
 load_event_history()
+
+
+def load_session_history():
+    if not SESSIONS_PATH.exists():
+        return
+    changed = False
+    try:
+        raw = json.loads(SESSIONS_PATH.read_text())
+        if isinstance(raw, list):
+            for item in raw[-100:]:
+                # A process restart cannot safely resume an in-memory lab
+                # session. Mark any previously-active record as interrupted.
+                if item.get("status") == "active" and not item.get("ended_at"):
+                    item["status"] = "interrupted"
+                    item["ended_at"] = time.time()
+                    changed = True
+                LAB_SESSIONS.append(item)
+            if changed:
+                save_session_history()
+    except (OSError, json.JSONDecodeError):
+        pass
+
+
+def save_session_history():
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = SESSIONS_PATH.with_suffix(".tmp")
+        tmp.write_text(json.dumps(LAB_SESSIONS[-100:], indent=2))
+        tmp.replace(SESSIONS_PATH)
+    except OSError:
+        pass
+
+
+def session_snapshot():
+    with RUNTIME_LOCK:
+        return dict(ACTIVE_SESSION)
+
+
+def session_event_count(session_id: str):
+    return sum(
+        1 for event in EVENT_LOG
+        if event.get("details", {}).get("session_id") == session_id
+    )
+
+
+def session_rows():
+    rows = []
+    for item in reversed(LAB_SESSIONS[-100:]):
+        row = dict(item)
+        row["event_count"] = session_event_count(row.get("id"))
+        rows.append(row)
+    return rows
+
+
+load_session_history()
 
 
 def get_link(cfg: dict, link_id: str):
@@ -1133,6 +1344,774 @@ def interface_counters(ifname: str):
             result[key] = 0
     return result
 
+
+
+
+# ---------- Persistent telemetry / active measurement ----------
+
+def telemetry_connect():
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def init_telemetry_db():
+    with telemetry_connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS telemetry_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                link_id TEXT NOT NULL,
+                down_mbps REAL NOT NULL,
+                up_mbps REAL NOT NULL,
+                down_pps REAL NOT NULL,
+                up_pps REAL NOT NULL,
+                delay_ms REAL NOT NULL,
+                jitter_ms REAL NOT NULL,
+                loss_pct REAL NOT NULL,
+                quality REAL NOT NULL,
+                sla_pass INTEGER NOT NULL,
+                fault TEXT NOT NULL,
+                session_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_telemetry_link_time
+                ON telemetry_samples(link_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_session
+                ON telemetry_samples(session_id, timestamp);
+
+            CREATE TABLE IF NOT EXISTS probe_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                probe_id TEXT NOT NULL,
+                link_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                target TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                latency_ms REAL,
+                status TEXT,
+                detail TEXT,
+                session_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_probe_probe_time
+                ON probe_samples(probe_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_probe_link_time
+                ON probe_samples(link_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_probe_session
+                ON probe_samples(session_id, timestamp);
+            """
+        )
+
+
+def active_session_id():
+    with RUNTIME_LOCK:
+        return ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None
+
+
+def collect_telemetry_sample():
+    cfg = load_config()
+    states = {
+        item["id"]: item
+        for item in build_link_states(cfg)
+    }
+    now = time.time()
+    rows = []
+
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge")
+        state = states.get(link_id)
+        if not state:
+            continue
+
+        inner = interface_counters(link.get("inner"))
+        outer = interface_counters(link.get("outer"))
+        current = {
+            "timestamp": now,
+            "down_bytes": inner["tx_bytes"],
+            "up_bytes": outer["tx_bytes"],
+            "down_packets": inner["tx_packets"],
+            "up_packets": outer["tx_packets"],
+        }
+        previous = TELEMETRY_PREVIOUS.get(link_id)
+        down_mbps = up_mbps = down_pps = up_pps = 0.0
+        if previous:
+            dt = max(0.001, now - previous["timestamp"])
+            down_mbps = max(0, current["down_bytes"] - previous["down_bytes"]) * 8 / dt / 1_000_000
+            up_mbps = max(0, current["up_bytes"] - previous["up_bytes"]) * 8 / dt / 1_000_000
+            down_pps = max(0, current["down_packets"] - previous["down_packets"]) / dt
+            up_pps = max(0, current["up_packets"] - previous["up_packets"]) / dt
+
+        TELEMETRY_PREVIOUS[link_id] = current
+        effective = state.get("effective", {})
+        rows.append(
+            (
+                now,
+                link_id,
+                down_mbps,
+                up_mbps,
+                down_pps,
+                up_pps,
+                float(effective.get("delay_ms", 0.0)),
+                float(effective.get("jitter_ms", 0.0)),
+                float(effective.get("loss_pct", 0.0)),
+                float(state.get("runtime_quality", 100)),
+                1 if state.get("sla", {}).get("pass") else 0,
+                state.get("fault", "normal"),
+                active_session_id(),
+            )
+        )
+
+    if rows:
+        with telemetry_connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO telemetry_samples (
+                    timestamp, link_id, down_mbps, up_mbps, down_pps, up_pps,
+                    delay_ms, jitter_ms, loss_pct, quality, sla_pass, fault, session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+    return rows
+
+
+def prune_telemetry_history():
+    cutoff = time.time() - TELEMETRY_RETENTION_HOURS * 3600
+    with telemetry_connect() as conn:
+        conn.execute("DELETE FROM telemetry_samples WHERE timestamp < ?", (cutoff,))
+        conn.execute("DELETE FROM probe_samples WHERE timestamp < ?", (cutoff,))
+
+
+def telemetry_worker():
+    init_telemetry_db()
+    next_prune = time.time() + 300
+    while not BACKGROUND_STOP.is_set():
+        started = time.time()
+        try:
+            collect_telemetry_sample()
+            if started >= next_prune:
+                prune_telemetry_history()
+                next_prune = started + 300
+        except Exception as exc:
+            # Telemetry persistence must never stop the control plane.
+            log_event("telemetry", "Persistent telemetry sample failed", error=str(exc)[:240])
+        elapsed = time.time() - started
+        BACKGROUND_STOP.wait(max(0.2, TELEMETRY_SAMPLE_SECONDS - elapsed))
+
+
+def query_telemetry_history(link_id: str, since: float, max_points=1200):
+    init_telemetry_db()
+    now = time.time()
+    span = max(1.0, now - since)
+    bucket_seconds = max(TELEMETRY_SAMPLE_SECONDS, span / max(50, min(5000, max_points)))
+    with telemetry_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                AVG(timestamp) AS timestamp,
+                AVG(down_mbps) AS down_mbps,
+                AVG(up_mbps) AS up_mbps,
+                AVG(down_pps) AS down_pps,
+                AVG(up_pps) AS up_pps,
+                AVG(delay_ms) AS delay_ms,
+                AVG(jitter_ms) AS jitter_ms,
+                AVG(loss_pct) AS loss_pct,
+                AVG(quality) AS quality,
+                MIN(sla_pass) AS sla_pass
+            FROM telemetry_samples
+            WHERE link_id = ? AND timestamp >= ?
+            GROUP BY CAST((timestamp - ?) / ? AS INTEGER)
+            ORDER BY timestamp ASC
+            """,
+            (link_id, since, since, bucket_seconds),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def latest_telemetry_sample(link_id: str):
+    init_telemetry_db()
+    with telemetry_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM telemetry_samples
+            WHERE link_id = ?
+            ORDER BY timestamp DESC LIMIT 1
+            """,
+            (link_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def query_probe_history(probe_id=None, link_id=None, since=None, limit=1000):
+    init_telemetry_db()
+    clauses = []
+    values = []
+    if probe_id:
+        clauses.append("probe_id = ?")
+        values.append(probe_id)
+    if link_id:
+        clauses.append("link_id = ?")
+        values.append(link_id)
+    if since is not None:
+        clauses.append("timestamp >= ?")
+        values.append(float(since))
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    values.append(max(1, min(5000, int(limit))))
+    with telemetry_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT timestamp, probe_id, link_id, kind, target, success,
+                   latency_ms, status, detail, session_id
+            FROM probe_samples
+            {where}
+            ORDER BY timestamp DESC LIMIT ?
+            """,
+            values,
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def latest_probe_sample(probe_id: str):
+    with RUNTIME_LOCK:
+        runtime = PROBE_RUNTIME.get(probe_id)
+        if runtime:
+            return dict(runtime)
+    rows = query_probe_history(probe_id=probe_id, limit=1)
+    return rows[-1] if rows else None
+
+
+def get_probes(cfg: dict):
+    probes = cfg.get("probes", [])
+    return probes if isinstance(probes, list) else []
+
+
+def resolve_probe_interface(probe: dict, cfg: dict):
+    side = probe.get("source_side", "auto")
+    if side == "auto":
+        return None
+    link = get_link(cfg, probe.get("link_id", ""))
+    if not link:
+        return None
+    if side == "inner":
+        return link.get("inner")
+    if side == "outer":
+        return link.get("outer")
+    return None
+
+
+def validate_probe_definition(raw: dict, cfg: dict, existing_id=None):
+    link_id = str(raw.get("link_id") or "").strip()
+    if not get_link(cfg, link_id):
+        raise ValueError("Probe must reference a configured WAN.")
+
+    kind = str(raw.get("kind") or "icmp").strip().lower()
+    if kind not in ("icmp", "tcp", "http", "dns"):
+        raise ValueError("Probe type must be ICMP, TCP, HTTP or DNS.")
+
+    target = str(raw.get("target") or "").strip()
+    if not target or len(target) > 512:
+        raise ValueError("Probe target is required and must be at most 512 characters.")
+
+    source_side = str(raw.get("source_side") or "auto").strip().lower()
+    if source_side not in ("auto", "inner", "outer"):
+        raise ValueError("Probe source must be automatic, inner or outer.")
+
+    try:
+        interval_s = max(2, min(3600, int(raw.get("interval_s", 5))))
+    except (TypeError, ValueError):
+        raise ValueError("Probe interval must be an integer from 2 to 3600 seconds.")
+
+    try:
+        timeout_s = max(0.2, min(10.0, float(raw.get("timeout_s", 2.0))))
+    except (TypeError, ValueError):
+        raise ValueError("Probe timeout must be between 0.2 and 10 seconds.")
+
+    port = None
+    if kind == "tcp":
+        try:
+            port = int(raw.get("port", 443))
+        except (TypeError, ValueError):
+            raise ValueError("TCP probe port must be an integer.")
+        if not 1 <= port <= 65535:
+            raise ValueError("TCP probe port must be 1-65535.")
+
+    if kind == "http":
+        parsed = urlsplit(target)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("HTTP probe target must be an http:// or https:// URL.")
+
+    resolver = str(raw.get("resolver") or "1.1.1.1").strip()
+    if kind == "dns" and (not resolver or len(resolver) > 255):
+        raise ValueError("DNS resolver is required.")
+
+    name = str(raw.get("name") or f"{link_id} {kind.upper()}").strip()[:80]
+    probe_id = existing_id or str(raw.get("id") or "").strip()
+    if not probe_id:
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or kind
+        probe_id = f"probe-{link_id}-{slug}-{time.time_ns() % 1000000}"
+
+    return {
+        "id": probe_id[:120],
+        "name": name or f"{link_id} {kind.upper()}",
+        "link_id": link_id,
+        "kind": kind,
+        "target": target,
+        "port": port,
+        "resolver": resolver if kind == "dns" else None,
+        "source_side": source_side,
+        "interval_s": interval_s,
+        "timeout_s": timeout_s,
+        "enabled": bool(raw.get("enabled", True)),
+    }
+
+
+def bind_socket_to_interface(sock: socket.socket, ifname: str | None):
+    if not ifname:
+        return
+    option = getattr(socket, "SO_BINDTODEVICE", 25)
+    sock.setsockopt(socket.SOL_SOCKET, option, ifname.encode() + b"\0")
+
+
+def open_bound_tcp(host: str, port: int, timeout_s: float, ifname=None):
+    last_error = None
+    for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM
+    ):
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout_s)
+            bind_socket_to_interface(sock, ifname)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_error = exc
+            sock.close()
+    raise OSError(str(last_error or "Unable to connect"))
+
+
+def dns_query_packet(hostname: str, transaction_id: int):
+    labels = hostname.rstrip(".").split(".")
+    if not labels or any(not label or len(label.encode()) > 63 for label in labels):
+        raise ValueError("Invalid DNS hostname.")
+    qname = b"".join(bytes([len(label.encode())]) + label.encode() for label in labels) + b"\x00"
+    header = transaction_id.to_bytes(2, "big") + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+    return header + qname + b"\x00\x01\x00\x01"
+
+
+def execute_probe(probe: dict, cfg: dict):
+    kind = probe["kind"]
+    timeout_s = float(probe.get("timeout_s", 2.0))
+    ifname = resolve_probe_interface(probe, cfg)
+    target = probe["target"]
+    started = time.perf_counter()
+    status = None
+    detail = ""
+
+    try:
+        if kind == "icmp":
+            cmd = [PING, "-n", "-c", "1", "-W", str(max(1, math.ceil(timeout_s)))]
+            if ifname:
+                cmd += ["-I", ifname]
+            cmd.append(target)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s + 1.5,
+            )
+            if proc.returncode != 0:
+                raise OSError((proc.stderr or proc.stdout or "ICMP probe failed").strip())
+            match = re.search(r"time[=<]([0-9.]+)\s*ms", proc.stdout or "")
+            latency_ms = float(match.group(1)) if match else (time.perf_counter() - started) * 1000
+            status = "reply"
+            detail = "ICMP echo reply"
+
+        elif kind == "tcp":
+            sock = open_bound_tcp(
+                target,
+                int(probe.get("port") or 443),
+                timeout_s,
+                ifname,
+            )
+            latency_ms = (time.perf_counter() - started) * 1000
+            sock.close()
+            status = "connected"
+            detail = f'TCP/{int(probe.get("port") or 443)} connected'
+
+        elif kind == "http":
+            parsed = urlsplit(target)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            sock = open_bound_tcp(parsed.hostname, port, timeout_s, ifname)
+            if parsed.scheme == "https":
+                context = ssl.create_default_context()
+                sock = context.wrap_socket(sock, server_hostname=parsed.hostname)
+                sock.settimeout(timeout_s)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            request_bytes = (
+                f"HEAD {path} HTTP/1.1\r\n"
+                f"Host: {parsed.hostname}\r\n"
+                "User-Agent: NetEm-WAN-Lab-Probe/1\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
+            sock.sendall(request_bytes)
+            first_line = b""
+            while b"\r\n" not in first_line and len(first_line) < 4096:
+                chunk = sock.recv(512)
+                if not chunk:
+                    break
+                first_line += chunk
+            sock.close()
+            latency_ms = (time.perf_counter() - started) * 1000
+            line = first_line.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+            match = re.match(r"HTTP/\d(?:\.\d)?\s+(\d{3})", line)
+            if not match:
+                raise OSError("HTTP response did not contain a valid status line.")
+            code = int(match.group(1))
+            if code >= 500:
+                raise OSError(f"HTTP {code}")
+            status = str(code)
+            detail = line[:180]
+
+        elif kind == "dns":
+            resolver = probe.get("resolver") or "1.1.1.1"
+            addr = socket.getaddrinfo(resolver, 53, type=socket.SOCK_DGRAM)[0]
+            family, socktype, proto, _canonname, sockaddr = addr
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout_s)
+            bind_socket_to_interface(sock, ifname)
+            transaction_id = int(time.time_ns() & 0xFFFF)
+            packet = dns_query_packet(target, transaction_id)
+            sock.sendto(packet, sockaddr)
+            response, _ = sock.recvfrom(4096)
+            sock.close()
+            latency_ms = (time.perf_counter() - started) * 1000
+            if len(response) < 12 or int.from_bytes(response[:2], "big") != transaction_id:
+                raise OSError("DNS response did not match the query.")
+            rcode = response[3] & 0x0F
+            if rcode != 0:
+                raise OSError(f"DNS response code {rcode}")
+            answers = int.from_bytes(response[6:8], "big")
+            status = f"{answers} answer" + ("" if answers == 1 else "s")
+            detail = f"DNS via {resolver}"
+
+        else:
+            raise ValueError("Unsupported probe type.")
+
+        return {
+            "timestamp": time.time(),
+            "probe_id": probe["id"],
+            "link_id": probe["link_id"],
+            "kind": kind,
+            "target": target,
+            "success": True,
+            "latency_ms": round(latency_ms, 3),
+            "status": status,
+            "detail": detail,
+            "source_interface": ifname,
+        }
+    except Exception as exc:
+        return {
+            "timestamp": time.time(),
+            "probe_id": probe["id"],
+            "link_id": probe["link_id"],
+            "kind": kind,
+            "target": target,
+            "success": False,
+            "latency_ms": None,
+            "status": "failed",
+            "detail": str(exc)[:240],
+            "source_interface": ifname,
+        }
+
+
+def record_probe_result(result: dict):
+    session_id = active_session_id()
+    with telemetry_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO probe_samples (
+                timestamp, probe_id, link_id, kind, target, success,
+                latency_ms, status, detail, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result["timestamp"],
+                result["probe_id"],
+                result["link_id"],
+                result["kind"],
+                result["target"],
+                1 if result["success"] else 0,
+                result.get("latency_ms"),
+                result.get("status"),
+                result.get("detail"),
+                session_id,
+            ),
+        )
+
+    with RUNTIME_LOCK:
+        previous = PROBE_RUNTIME.get(result["probe_id"])
+        runtime = dict(result)
+        runtime["session_id"] = session_id
+        PROBE_RUNTIME[result["probe_id"]] = runtime
+
+    if previous is not None and bool(previous.get("success")) != bool(result.get("success")):
+        state = "recovered" if result.get("success") else "failed"
+        log_event(
+            "probe",
+            f'{result["probe_id"]}: probe {state}',
+            probe_id=result["probe_id"],
+            link_id=result["link_id"],
+            success=result["success"],
+            latency_ms=result.get("latency_ms"),
+        )
+
+
+def run_probe_and_record(probe: dict, cfg: dict):
+    result = execute_probe(probe, cfg)
+    record_probe_result(result)
+    return result
+
+
+def probe_snapshot(cfg: dict):
+    rows = []
+    with RUNTIME_LOCK:
+        runtime = {key: dict(value) for key, value in PROBE_RUNTIME.items()}
+    for probe in get_probes(cfg):
+        row = dict(probe)
+        row["latest"] = runtime.get(probe.get("id")) or latest_probe_sample(probe.get("id"))
+        rows.append(row)
+    return rows
+
+
+def probe_worker():
+    init_telemetry_db()
+    next_due = {}
+    while not BACKGROUND_STOP.is_set():
+        cfg = load_config()
+        probes = [item for item in get_probes(cfg) if item.get("enabled", True)]
+        active_ids = {item.get("id") for item in probes}
+        next_due = {key: value for key, value in next_due.items() if key in active_ids}
+        now = time.time()
+
+        for probe in probes:
+            probe_id = probe.get("id")
+            if not probe_id or now < next_due.get(probe_id, 0):
+                continue
+            next_due[probe_id] = now + max(2, int(probe.get("interval_s", 5)))
+            try:
+                run_probe_and_record(probe, cfg)
+            except Exception as exc:
+                log_event(
+                    "probe",
+                    f"{probe_id}: probe execution error",
+                    error=str(exc)[:240],
+                )
+        BACKGROUND_STOP.wait(0.5)
+
+
+def start_background_workers():
+    global TELEMETRY_THREAD, PROBE_THREAD
+    init_telemetry_db()
+    BACKGROUND_STOP.clear()
+    if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
+        TELEMETRY_THREAD = threading.Thread(
+            target=telemetry_worker,
+            name="netem-telemetry",
+            daemon=True,
+        )
+        TELEMETRY_THREAD.start()
+    if PROBE_THREAD is None or not PROBE_THREAD.is_alive():
+        PROBE_THREAD = threading.Thread(
+            target=probe_worker,
+            name="netem-probes",
+            daemon=True,
+        )
+        PROBE_THREAD.start()
+
+
+
+def read_session_events(session_id: str):
+    events = []
+    if EVENT_LOG_PATH.exists():
+        try:
+            for line in EVENT_LOG_PATH.read_text().splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("details", {}).get("session_id") == session_id:
+                    events.append(event)
+            return events
+        except OSError:
+            pass
+    return [
+        event for event in EVENT_LOG
+        if event.get("details", {}).get("session_id") == session_id
+    ]
+
+
+def percentile(values, pct):
+    clean = sorted(float(value) for value in values if value is not None)
+    if not clean:
+        return None
+    position = (len(clean) - 1) * float(pct)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return clean[lower]
+    fraction = position - lower
+    return clean[lower] + (clean[upper] - clean[lower]) * fraction
+
+
+def build_session_report(session_id: str, end_time=None):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        return None
+
+    started_at = float(session.get("started_at") or 0)
+    ended_at = float(end_time or session.get("ended_at") or time.time())
+    events = read_session_events(session_id)
+    assertions = []
+    tests = []
+
+    for event in events:
+        details = event.get("details", {})
+        if event.get("kind") == "assertion":
+            assertions.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "message": event.get("message"),
+                    "label": details.get("label"),
+                    "passed": bool(details.get("passed")),
+                    "condition": details.get("condition"),
+                    "observed": details.get("observed"),
+                    "detail": details.get("detail"),
+                    "elapsed_s": details.get("elapsed_s"),
+                }
+            )
+        if (
+            event.get("kind") == "scenario"
+            and details.get("result") is not None
+        ):
+            tests.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "scenario_id": details.get("scenario_id"),
+                    "message": event.get("message"),
+                    "result": details.get("result"),
+                    "duration_s": details.get("duration_s"),
+                    "error": details.get("error"),
+                }
+            )
+
+    telemetry = {}
+    probes = {}
+    init_telemetry_db()
+    with telemetry_connect() as conn:
+        telemetry_rows = conn.execute(
+            """
+            SELECT
+                link_id,
+                COUNT(*) AS samples,
+                AVG(down_mbps) AS avg_down_mbps,
+                MAX(down_mbps) AS max_down_mbps,
+                AVG(up_mbps) AS avg_up_mbps,
+                MAX(up_mbps) AS max_up_mbps,
+                AVG(delay_ms) AS avg_injected_delay_ms,
+                MAX(delay_ms) AS max_injected_delay_ms,
+                AVG(jitter_ms) AS avg_injected_jitter_ms,
+                MAX(jitter_ms) AS max_injected_jitter_ms,
+                MAX(loss_pct) AS max_injected_loss_pct,
+                MIN(quality) AS min_quality,
+                SUM(CASE WHEN sla_pass = 0 THEN 1 ELSE 0 END) AS sla_fail_samples
+            FROM telemetry_samples
+            WHERE session_id = ? AND timestamp BETWEEN ? AND ?
+            GROUP BY link_id
+            """,
+            (session_id, started_at, ended_at),
+        ).fetchall()
+        for row in telemetry_rows:
+            telemetry[row["link_id"]] = dict(row)
+
+        probe_rows = conn.execute(
+            """
+            SELECT
+                probe_id,
+                link_id,
+                kind,
+                target,
+                COUNT(*) AS samples,
+                SUM(success) AS success_samples,
+                AVG(CASE WHEN success = 1 THEN latency_ms END) AS avg_latency_ms,
+                MAX(CASE WHEN success = 1 THEN latency_ms END) AS max_latency_ms
+            FROM probe_samples
+            WHERE session_id = ? AND timestamp BETWEEN ? AND ?
+            GROUP BY probe_id, link_id, kind, target
+            """,
+            (session_id, started_at, ended_at),
+        ).fetchall()
+        for row in probe_rows:
+            item = dict(row)
+            latency_rows = conn.execute(
+                """
+                SELECT latency_ms
+                FROM probe_samples
+                WHERE session_id = ? AND probe_id = ? AND success = 1
+                  AND timestamp BETWEEN ? AND ?
+                ORDER BY latency_ms
+                """,
+                (session_id, row["probe_id"], started_at, ended_at),
+            ).fetchall()
+            values = [value["latency_ms"] for value in latency_rows]
+            item["p95_latency_ms"] = percentile(values, 0.95)
+            item["success_rate_pct"] = (
+                100.0 * float(item["success_samples"] or 0) / item["samples"]
+                if item["samples"]
+                else None
+            )
+            probes[row["probe_id"]] = item
+
+    failed_assertions = [item for item in assertions if not item["passed"]]
+    failed_tests = [item for item in tests if item.get("result") == "failed"]
+    if failed_assertions or failed_tests:
+        result = "failed"
+    elif assertions:
+        result = "passed"
+    else:
+        result = "unscored"
+
+    event_counts = {}
+    for event in events:
+        kind = event.get("kind") or "event"
+        event_counts[kind] = event_counts.get(kind, 0) + 1
+
+    return {
+        "session": {
+            "id": session_id,
+            "name": session.get("name"),
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_s": round(max(0, ended_at - started_at), 3),
+            "status": session.get("status"),
+        },
+        "generated_at": time.time(),
+        "result": result,
+        "assertions": assertions,
+        "tests": tests,
+        "telemetry": telemetry,
+        "probes": probes,
+        "event_counts": event_counts,
+        "event_count": len(events),
+        "events": events[-250:],
+    }
 
 
 def get_interface_mtu(ifname: str):
@@ -1289,54 +2268,304 @@ def scenario_snapshot():
         return dict(SCENARIO_STATE)
 
 
+def compare_condition_value(actual, operator, expected):
+    if actual is None:
+        return False
+    if operator == "==":
+        return actual == expected
+    if operator == "!=":
+        return actual != expected
+    try:
+        actual_n = float(actual)
+        expected_n = float(expected)
+    except (TypeError, ValueError):
+        return False
+    if operator == "<":
+        return actual_n < expected_n
+    if operator == "<=":
+        return actual_n <= expected_n
+    if operator == ">":
+        return actual_n > expected_n
+    if operator == ">=":
+        return actual_n >= expected_n
+    return False
+
+
+def condition_summary(condition: dict):
+    kind = condition.get("type")
+    if kind == "sla":
+        return f'expected SLA = {condition.get("state", "pass").upper()}'
+    if kind == "probe":
+        return (
+            f'{condition.get("probe_id")} {condition.get("field")} '
+            f'{condition.get("op")} {condition.get("value")}'
+        )
+    if kind == "traffic":
+        return (
+            f'{condition.get("field")} {condition.get("op")} '
+            f'{condition.get("value")}'
+        )
+    return "condition"
+
+
+def evaluate_scenario_condition(condition: dict, default_link_id: str):
+    cfg = load_config()
+    kind = condition.get("type")
+    link_id = condition.get("link_id") or default_link_id
+
+    if kind == "sla":
+        state = next(
+            (item for item in build_link_states(cfg) if item.get("id") == link_id),
+            None,
+        )
+        if not state:
+            return False, None, f"Unknown WAN {link_id}"
+        actual = bool(state.get("sla", {}).get("pass"))
+        expected = condition.get("state") == "pass"
+        return actual == expected, actual, "PASS" if actual else "FAIL"
+
+    if kind == "probe":
+        probe_id = condition.get("probe_id")
+        sample = latest_probe_sample(probe_id)
+        if not sample:
+            return False, None, "No probe sample yet"
+
+        probe_cfg = next(
+            (item for item in get_probes(cfg) if item.get("id") == probe_id),
+            None,
+        )
+        max_age = max(
+            15.0,
+            float((probe_cfg or {}).get("interval_s", 5)) * 3,
+        )
+        age = time.time() - float(sample.get("timestamp", 0))
+        if age > max_age:
+            return False, None, f"Probe sample is stale ({age:.1f}s old)"
+
+        field = condition.get("field", "success")
+        actual = (
+            bool(sample.get("success"))
+            if field == "success"
+            else sample.get("latency_ms")
+        )
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", "=="),
+            condition.get("value"),
+        )
+        return passed, actual, sample.get("detail") or sample.get("status")
+
+    if kind == "traffic":
+        sample = latest_telemetry_sample(link_id)
+        if not sample:
+            return False, None, "No telemetry sample yet"
+        field = condition.get("field", "down_mbps")
+        actual = sample.get(field)
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", ">="),
+            condition.get("value"),
+        )
+        return passed, actual, f"{field}={actual}"
+
+    return False, None, "Unsupported condition"
+
+
+def wait_for_scenario_condition(
+    condition: dict,
+    default_link_id: str,
+    timeout_s: float,
+    poll_s: float,
+):
+    started = time.time()
+    deadline = started + max(1.0, float(timeout_s))
+    last_observed = None
+    last_detail = None
+
+    with RUNTIME_LOCK:
+        SCENARIO_STATE["condition"] = {
+            "description": condition_summary(condition),
+            "started_at": started,
+            "timeout": timeout_s,
+            "observed": None,
+        }
+
+    while time.time() <= deadline:
+        if SCENARIO_STOP.is_set():
+            return False, last_observed, "stopped", time.time() - started
+
+        passed, observed, detail = evaluate_scenario_condition(
+            condition, default_link_id
+        )
+        last_observed = observed
+        last_detail = detail
+        with RUNTIME_LOCK:
+            if isinstance(SCENARIO_STATE.get("condition"), dict):
+                SCENARIO_STATE["condition"]["observed"] = observed
+                SCENARIO_STATE["condition"]["detail"] = detail
+
+        if passed:
+            return True, observed, detail, time.time() - started
+        SCENARIO_STOP.wait(max(0.25, min(5.0, float(poll_s))))
+
+    passed, observed, detail = evaluate_scenario_condition(
+        condition, default_link_id
+    )
+    return passed, observed, detail or last_detail, time.time() - started
+
+
 def run_scenario(link_id: str, scenario: dict):
     cfg = load_config()
     presets = get_presets(cfg)
     link = get_link(cfg, link_id)
     if not link:
         with RUNTIME_LOCK:
-            SCENARIO_STATE["active"] = False
+            SCENARIO_STATE.update(
+                {"active": False, "result": "failed", "error": "Unknown WAN"}
+            )
         return
 
     original = copy.deepcopy(link)
     runtime_profile = copy.deepcopy(original)
+    scenario_result = "passed"
+    scenario_error = None
+    started_at = time.time()
+
+    log_event(
+        "scenario",
+        f'{scenario["name"]} started',
+        scenario_id=scenario.get("id"),
+        link_id=link_id,
+        stage_count=len(scenario.get("steps", [])),
+    )
+
     try:
         for index, step in enumerate(scenario.get("steps", []), start=1):
             if SCENARIO_STOP.wait(max(0, int(step.get("after", 0)))):
+                scenario_result = "stopped"
                 break
 
-            with RUNTIME_LOCK:
-                SCENARIO_STATE["step"] = index
-                SCENARIO_STATE["step_label"] = step.get("label") or step.get("action")
-
             action = step.get("action")
+            label = step.get("label") or action
+            with RUNTIME_LOCK:
+                SCENARIO_STATE.update(
+                    {
+                        "step": index,
+                        "step_label": label,
+                        "step_action": action,
+                        "condition": None,
+                    }
+                )
+
             if action == "quality":
                 runtime_profile = copy.deepcopy(original)
                 runtime_profile["mode"] = "quality"
                 runtime_profile["quality"] = int(step.get("value", 100))
                 runtime_profile.pop("custom_profile", None)
-                apply_selected_profile(runtime_profile, presets)
+                ok, msg, _effective = apply_selected_profile(
+                    runtime_profile, presets
+                )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
                 ACTIVE_FAULTS.pop(link_id, None)
                 log_event(
                     "scenario",
-                    f'{scenario["name"]}: {step.get("label", "quality")}',
+                    f'{scenario["name"]}: {label}',
+                    scenario_id=scenario.get("id"),
                     link_id=link_id,
                     quality=runtime_profile["quality"],
                 )
+
             elif action == "fault":
-                apply_runtime_fault(
+                ok, msg = apply_runtime_fault(
                     runtime_profile,
                     step.get("value", "normal"),
                     presets,
                 )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
+
             elif action == "mtu":
-                apply_mtu_limit(runtime_profile, int(step.get("value", 0)))
+                ok, msg = apply_mtu_limit(
+                    runtime_profile, int(step.get("value", 0))
+                )
+                if not ok:
+                    scenario_result = "failed"
+                    scenario_error = msg
+                    break
+
+            elif action in ("wait", "assert"):
+                condition = step.get("condition") or {}
+                passed, observed, detail, elapsed = wait_for_scenario_condition(
+                    condition,
+                    link_id,
+                    step.get("timeout", 30),
+                    step.get("poll", 0.5),
+                )
+                if SCENARIO_STOP.is_set():
+                    scenario_result = "stopped"
+                    break
+
+                details = {
+                    "scenario_id": scenario.get("id"),
+                    "link_id": link_id,
+                    "label": label,
+                    "passed": bool(passed),
+                    "condition": condition,
+                    "observed": observed,
+                    "detail": detail,
+                    "elapsed_s": round(elapsed, 3),
+                }
+
+                if action == "assert":
+                    log_event(
+                        "assertion",
+                        f'{scenario["name"]}: {label} — '
+                        + ("PASS" if passed else "FAIL"),
+                        **details,
+                    )
+                else:
+                    log_event(
+                        "condition",
+                        f'{scenario["name"]}: {label} — '
+                        + ("satisfied" if passed else "timeout"),
+                        **details,
+                    )
+
+                if not passed:
+                    scenario_result = "failed"
+                    scenario_error = (
+                        f'{label}: condition not satisfied within '
+                        f'{step.get("timeout", 30)}s'
+                    )
+                    if step.get("on_fail", "stop") == "stop":
+                        break
+
+        if SCENARIO_STOP.is_set() and scenario_result == "passed":
+            scenario_result = "stopped"
+
+    except Exception as exc:
+        scenario_result = "failed"
+        scenario_error = str(exc)[:240]
 
     finally:
         apply_mtu_limit(original, 0)
         apply_selected_profile(original, presets)
         ACTIVE_FAULTS.pop(link_id, None)
-        log_event("scenario", f'{scenario["name"]} finished', link_id=link_id)
+        duration_s = round(time.time() - started_at, 3)
+        log_event(
+            "scenario",
+            f'{scenario["name"]} finished — {scenario_result.upper()}',
+            scenario_id=scenario.get("id"),
+            link_id=link_id,
+            result=scenario_result,
+            error=scenario_error,
+            duration_s=duration_s,
+        )
         with RUNTIME_LOCK:
             SCENARIO_STATE.update(
                 {
@@ -1346,7 +2575,12 @@ def run_scenario(link_id: str, scenario: dict):
                     "link_id": None,
                     "started_at": None,
                     "step": 0,
+                    "step_count": 0,
                     "step_label": None,
+                    "step_action": None,
+                    "condition": None,
+                    "result": scenario_result,
+                    "error": scenario_error,
                 }
             )
         SCENARIO_STOP.clear()
@@ -1465,6 +2699,8 @@ def redirect_after(default_endpoint):
         "presets",
         "updates",
         "documentation",
+        "tests",
+        "sessions",
     }
     endpoint = requested if requested in allowed else default_endpoint
     return redirect(url_for(endpoint))
@@ -1473,11 +2709,12 @@ def redirect_after(default_endpoint):
 DOC_HELP_BY_ENDPOINT = {
     "overview": "overview",
     "index": "overview",
-    "wan_links": "wan-links",
-    "scenarios": "scenarios",
-    "lab_tools": "scenarios",
-    "traffic_security": "traffic-security",
+    "tests": "tests",
+    "scenarios": "tests",
+    "lab_tools": "tests",
+    "traffic_security": "tests",
     "analytics": "analytics-sla",
+    "sessions": "sessions",
     "integrations": "integrations-api",
     "settings": "topology-profiles",
     "setup": "topology-profiles",
@@ -1499,39 +2736,28 @@ def inject_nav():
     return {
         "nav_groups": [
             {
-                "label": "Operate",
+                "label": "Lab",
                 "items": [
-                    {"id": "overview", "label": "Overview", "endpoint": "overview", "icon": "overview"},
-                    {"id": "wan", "label": "WAN Links", "endpoint": "wan_links", "icon": "wan"},
-                    {"id": "scenarios", "label": "Scenarios", "endpoint": "scenarios", "icon": "scenario"},
-                    {"id": "traffic", "label": "Traffic & Security", "endpoint": "traffic_security", "icon": "shield"},
-                ],
-            },
-            {
-                "label": "Observe",
-                "items": [
+                    {"id": "overview", "label": "Command Center", "endpoint": "overview", "icon": "overview"},
+                    {"id": "tests", "label": "Tests", "endpoint": "tests", "icon": "scenario"},
                     {"id": "analytics", "label": "Analytics", "endpoint": "analytics", "icon": "analytics"},
-                    {"id": "integrations", "label": "Integrations", "endpoint": "integrations", "icon": "plug"},
+                    {"id": "sessions", "label": "Sessions", "endpoint": "sessions", "icon": "sessions"},
                 ],
             },
             {
-                "label": "Configure",
+                "label": "System",
                 "items": [
                     {"id": "settings", "label": "Settings", "endpoint": "settings", "icon": "settings"},
-                ],
-            },
-            {
-                "label": "Reference",
-                "items": [
-                    {"id": "docs", "label": "Documentation", "endpoint": "documentation", "icon": "docs"},
                 ],
             },
         ],
         "config": cfg,
         "app_version": get_app_version(),
         "help_doc_slug": DOC_HELP_BY_ENDPOINT.get(request.endpoint),
+        "global_links": build_link_states(cfg) if cfg.get("wan_links") else [],
         "global_runtime": {
             "scenario": scenario_snapshot(),
+            "session": session_snapshot(),
             "active_fault_count": len(active_fault_labels),
             "active_fault_labels": active_fault_labels,
             "capture": capture_snapshot(),
@@ -1558,11 +2784,27 @@ DOCS_PAGES = [
     },
     {
         "slug": "overview",
-        "title": "Overview dashboard",
+        "title": "Command Center",
         "category": "Operate",
-        "summary": "Read live path health, topology, throughput, scenario state and event activity.",
+        "summary": "Operate the lab from one live view with clickable WAN controls, flow state, sparklines and quick actions.",
         "template": "docs/articles/overview.html",
-        "keywords": "dashboard live topology throughput events health status",
+        "keywords": "command center dashboard live topology throughput events health status quick actions",
+    },
+    {
+        "slug": "tests",
+        "title": "Tests",
+        "category": "Operate",
+        "summary": "Run guided brownout, failover, unstable-link, security and packet-capture workflows.",
+        "template": "docs/articles/tests.html",
+        "keywords": "tests scenarios brownout failover flaky link eicar beacon capture guided workflow",
+    },
+    {
+        "slug": "sessions",
+        "title": "Lab sessions",
+        "category": "Operate",
+        "summary": "Group tests and runtime events into one named validation run.",
+        "template": "docs/articles/sessions.html",
+        "keywords": "session lab run validation evidence event group result history",
     },
     {
         "slug": "wan-links",
@@ -1629,6 +2871,14 @@ DOCS_PAGES = [
         "keywords": "debug troubleshoot telemetry zero throughput permission qdisc tbf tcpdump cap_net_raw service",
     },
     {
+        "slug": "roadmap",
+        "title": "Product roadmap",
+        "category": "Reference",
+        "summary": "Prioritized next capabilities for measurement, evidence, vendor correlation, orchestration and scale.",
+        "template": "docs/articles/roadmap.html",
+        "keywords": "roadmap future active probes sqlite reports adapter assertions conditional traffic generator scale",
+    },
+    {
         "slug": "reference",
         "title": "Reference & limits",
         "category": "Reference",
@@ -1665,6 +2915,9 @@ def overview():
         events=list(reversed(EVENT_LOG[-12:])),
         scenario_state=scenario_snapshot(),
         capture_state=capture_snapshot(),
+        session_state=session_snapshot(),
+        presets=get_presets(cfg),
+        quality_curves=QUALITY_CURVES,
     )
 
 
@@ -1689,40 +2942,173 @@ def wan_links():
 
 @app.route("/lab")
 def lab_tools():
-    return redirect(url_for("scenarios"))
+    return redirect(url_for("tests"))
 
 
-@app.route("/scenarios")
-def scenarios():
+@app.route("/tests")
+def tests():
     cfg = load_config()
+    scenario_id = request.args.get("scenario")
     return render_template(
-        "scenarios.html",
-        page="scenarios",
+        "tests.html",
+        page="tests",
         links=build_link_states(cfg),
         scenarios=get_scenarios(cfg),
         custom_scenarios=cfg.get("custom_scenarios", []),
         scenario_state=scenario_snapshot(),
+        capture_state=capture_snapshot(),
+        tcpdump_available=bool(shutil.which("tcpdump")),
+        selected_scenario=scenario_id,
         events=list(reversed([
             event for event in EVENT_LOG
-            if event.get("kind") in ("scenario", "scenario-config", "fault", "mtu")
-        ][-30:])),
+            if event.get("kind") in (
+                "scenario", "scenario-config", "fault", "mtu",
+                "capture", "security-test"
+            )
+        ][-40:])),
     )
+
+
+@app.route("/sessions")
+def sessions():
+    active = session_snapshot()
+    active_events = []
+    if active.get("active"):
+        active_events = list(reversed([
+            event for event in EVENT_LOG
+            if event.get("details", {}).get("session_id") == active.get("id")
+        ][-30:]))
+    return render_template(
+        "sessions.html",
+        page="sessions",
+        active_session=active,
+        active_events=active_events,
+        sessions=session_rows(),
+    )
+
+
+@app.route("/sessions/start", methods=["POST"])
+def session_start():
+    name = (request.form.get("name") or "Lab session").strip()[:100]
+    with RUNTIME_LOCK:
+        if ACTIVE_SESSION["active"]:
+            flash("A lab session is already active.", "error")
+            return redirect_after("sessions")
+
+        session_id = f"session-{time.time_ns()}"
+        ACTIVE_SESSION.update(
+            {
+                "active": True,
+                "id": session_id,
+                "name": name or "Lab session",
+                "started_at": time.time(),
+            }
+        )
+        LAB_SESSIONS.append(
+            {
+                "id": session_id,
+                "name": ACTIVE_SESSION["name"],
+                "started_at": ACTIVE_SESSION["started_at"],
+                "ended_at": None,
+                "status": "active",
+            }
+        )
+        del LAB_SESSIONS[:-100]
+        save_session_history()
+
+    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]}')
+    flash(f'Lab session "{ACTIVE_SESSION["name"]}" started.', "success")
+    return redirect_after("sessions")
+
+
+@app.route("/sessions/stop", methods=["POST"])
+def session_stop():
+    with RUNTIME_LOCK:
+        if not ACTIVE_SESSION["active"]:
+            flash("No lab session is active.", "info")
+            return redirect_after("sessions")
+        session_id = ACTIVE_SESSION["id"]
+        session_name = ACTIVE_SESSION["name"]
+
+    log_event("session", f"Lab session completed: {session_name}")
+
+    ended_at = time.time()
+    with RUNTIME_LOCK:
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["ended_at"] = ended_at
+                item["status"] = "completed"
+                break
+
+    report = build_session_report(session_id, end_time=ended_at)
+
+    with RUNTIME_LOCK:
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["report"] = report
+                break
+        ACTIVE_SESSION.update(
+            {
+                "active": False,
+                "id": None,
+                "name": None,
+                "started_at": None,
+            }
+        )
+        save_session_history()
+
+    flash(
+        f'Lab session "{session_name}" completed'
+        + (
+            f' · result {report["result"].upper()}.'
+            if report
+            else "."
+        ),
+        "success",
+    )
+    return redirect_after("sessions")
+
+
+@app.route("/sessions/<session_id>/report")
+def session_report(session_id):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        abort(404)
+    report = session.get("report") or build_session_report(session_id)
+    if not report:
+        abort(404)
+    return render_template(
+        "session_report.html",
+        page="sessions",
+        report=report,
+    )
+
+
+@app.route("/sessions/<session_id>/report.json")
+def session_report_json(session_id):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        abort(404)
+    report = session.get("report") or build_session_report(session_id)
+    if not report:
+        abort(404)
+    return jsonify(report)
+
+
+@app.route("/scenarios")
+def scenarios():
+    return redirect(url_for("tests"))
 
 
 @app.route("/traffic-security")
 def traffic_security():
-    cfg = load_config()
-    return render_template(
-        "traffic_security.html",
-        page="traffic",
-        links=build_link_states(cfg),
-        capture_state=capture_snapshot(),
-        tcpdump_available=bool(shutil.which("tcpdump")),
-        events=list(reversed([
-            event for event in EVENT_LOG
-            if event.get("kind") in ("capture", "security-test")
-        ][-25:])),
-    )
+    return redirect(url_for("tests"))
 
 
 @app.route("/analytics")
@@ -1733,8 +3119,97 @@ def analytics():
         page="analytics",
         links=build_link_states(cfg),
         sla_profile=get_sla_profile(cfg),
+        probes=probe_snapshot(cfg),
+        telemetry_retention_hours=TELEMETRY_RETENTION_HOURS,
         events=list(reversed(EVENT_LOG[-80:])),
     )
+
+
+@app.route("/probes/save", methods=["POST"])
+def probe_save():
+    cfg = load_config()
+    existing_id = (request.form.get("probe_id") or "").strip() or None
+    raw = {
+        "name": request.form.get("name"),
+        "link_id": request.form.get("link_id"),
+        "kind": request.form.get("kind"),
+        "target": request.form.get("target"),
+        "port": request.form.get("port"),
+        "resolver": request.form.get("resolver"),
+        "source_side": request.form.get("source_side"),
+        "interval_s": request.form.get("interval_s"),
+        "timeout_s": request.form.get("timeout_s"),
+        "enabled": request.form.get("enabled") == "on",
+    }
+    try:
+        probe = validate_probe_definition(raw, cfg, existing_id=existing_id)
+    except ValueError as exc:
+        flash(f"Probe configuration is invalid: {exc}", "error")
+        return redirect(url_for("analytics") + "#measurements")
+
+    probes = [
+        item for item in get_probes(cfg)
+        if item.get("id") != probe["id"]
+    ]
+    if existing_id is None and len(probes) >= MAX_PROBES:
+        flash(f"A maximum of {MAX_PROBES} active-measurement probes is supported.", "error")
+        return redirect(url_for("analytics") + "#measurements")
+    probes.append(probe)
+    cfg["probes"] = probes[-MAX_PROBES:]
+    save_config(cfg)
+    log_event(
+        "probe-config",
+        f'Saved probe "{probe["name"]}"',
+        probe_id=probe["id"],
+        link_id=probe["link_id"],
+        kind=probe["kind"],
+    )
+    flash(f'Probe "{probe["name"]}" saved.', "success")
+    return redirect(url_for("analytics") + "#measurements")
+
+
+@app.route("/probes/delete", methods=["POST"])
+def probe_delete():
+    cfg = load_config()
+    probe_id = (request.form.get("probe_id") or "").strip()
+    before = len(get_probes(cfg))
+    cfg["probes"] = [
+        item for item in get_probes(cfg)
+        if item.get("id") != probe_id
+    ]
+    if len(cfg["probes"]) != before:
+        save_config(cfg)
+        with RUNTIME_LOCK:
+            PROBE_RUNTIME.pop(probe_id, None)
+        log_event("probe-config", f"Deleted probe {probe_id}", probe_id=probe_id)
+        flash("Probe deleted.", "info")
+    return redirect(url_for("analytics") + "#measurements")
+
+
+@app.route("/probes/run", methods=["POST"])
+def probe_run():
+    cfg = load_config()
+    probe_id = (request.form.get("probe_id") or "").strip()
+    probe = next(
+        (item for item in get_probes(cfg) if item.get("id") == probe_id),
+        None,
+    )
+    if not probe:
+        flash("Unknown probe.", "error")
+        return redirect(url_for("analytics") + "#measurements")
+
+    result = run_probe_and_record(probe, cfg)
+    if result.get("success"):
+        flash(
+            f'{probe["name"]}: success in {result.get("latency_ms", 0):.1f} ms.',
+            "success",
+        )
+    else:
+        flash(
+            f'{probe["name"]}: failed — {result.get("detail") or "unknown error"}.',
+            "error",
+        )
+    return redirect(url_for("analytics") + "#measurements")
 
 
 @app.route("/integrations")
@@ -1785,6 +3260,107 @@ def documentation_page(slug):
         previous_doc=previous_doc,
         next_doc=next_doc,
     )
+
+
+@app.route("/wan/quick", methods=["POST"])
+def quick_wan_action():
+    cfg = load_config()
+    presets = get_presets(cfg)
+    link_id = request.form.get("link_id") or ""
+    action = request.form.get("action") or ""
+    link = get_link(cfg, link_id)
+
+    if not link:
+        flash("Unknown WAN link.", "error")
+        return redirect_after("overview")
+
+    if scenario_snapshot().get("active"):
+        flash("Stop the active scenario before changing the WAN manually.", "error")
+        return redirect_after("overview")
+
+    if action == "quality":
+        try:
+            quality = max(0, min(100, int(request.form.get("quality", "100"))))
+        except ValueError:
+            quality = 100
+        link["quality"] = quality
+        link["mode"] = "quality"
+        link.pop("custom_profile", None)
+        ok, msg, _effective = apply_selected_profile(link, presets)
+        if ok:
+            save_config(cfg)
+            log_event(
+                "quality",
+                f'{link.get("name", link_id)} quality set to {quality}%',
+                link_id=link_id,
+                quality=quality,
+            )
+            flash(
+                f'{link.get("name", "WAN")} set to {quality}% ({quality_status(quality)}).',
+                "success",
+            )
+        else:
+            flash("Failed to apply WAN quality: " + msg, "error")
+
+    elif action in (
+        "normal", "blackhole", "downstream_blackhole", "upstream_blackhole"
+    ):
+        ok, msg = apply_runtime_fault(link, action, presets)
+        if ok:
+            flash(
+                "WAN restored." if action == "normal"
+                else f'{link.get("name", "WAN")}: {action.replace("_", " ")} applied.',
+                "success",
+            )
+        else:
+            flash("Failed to apply runtime fault: " + msg, "error")
+
+    elif action == "bandwidth":
+        try:
+            download = max(1, min(100000, int(request.form.get("download_mbit", "1"))))
+            upload = max(1, min(100000, int(request.form.get("upload_mbit", "1"))))
+        except ValueError:
+            flash("Bandwidth values must be whole-number Mbit/s values.", "error")
+            return redirect_after("overview")
+
+        link["bandwidth_download_mbit"] = download
+        link["bandwidth_upload_mbit"] = upload
+        ok, msg, _effective = apply_selected_profile(link, presets)
+        if ok:
+            save_config(cfg)
+            log_event(
+                "bandwidth",
+                f'{link.get("name", link_id)} line rate set to {download}/{upload} Mbit/s',
+                link_id=link_id,
+                download_mbit=download,
+                upload_mbit=upload,
+            )
+            flash(
+                f'{link.get("name", "WAN")} nominal rate set to {download}/{upload} Mbit/s.',
+                "success",
+            )
+        else:
+            flash("Failed to apply bandwidth limit: " + msg, "error")
+
+    elif action == "mtu":
+        try:
+            mtu = int(request.form.get("mtu", "0"))
+        except ValueError:
+            mtu = 0
+        ok, msg = apply_mtu_limit(link, mtu)
+        if ok:
+            flash(
+                "Path MTU restored." if mtu == 0
+                else f"Path MTU limited to {mtu} bytes.",
+                "success",
+            )
+        else:
+            flash("Failed to change path MTU: " + msg, "error")
+
+    else:
+        flash("Unknown quick action.", "error")
+
+    return redirect_after("overview")
 
 
 @app.route("/lab/fault", methods=["POST"])
@@ -1838,7 +3414,12 @@ def lab_scenario_start():
                 "link_id": link_id,
                 "started_at": time.time(),
                 "step": 0,
+                "step_count": len(scenario.get("steps", [])),
                 "step_label": "Starting",
+                "step_action": None,
+                "condition": None,
+                "result": None,
+                "error": None,
             }
         )
 
@@ -2129,7 +3710,9 @@ def api_state():
             "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
+            "session": session_snapshot(),
             "capture": capture_snapshot(),
+            "probes": probe_snapshot(cfg),
             "sla_profile": get_sla_profile(cfg),
             "events": EVENT_LOG[-20:],
         }
@@ -2198,6 +3781,42 @@ def api_events():
     except ValueError:
         limit = 100
     return jsonify({"timestamp": time.time(), "events": EVENT_LOG[-limit:]})
+
+
+@app.route("/api/v1/history")
+def api_history():
+    cfg = load_config()
+    link_id = (request.args.get("link_id") or "").strip()
+    if not get_link(cfg, link_id):
+        return jsonify({"error": "Unknown WAN link."}), 404
+
+    try:
+        minutes = max(1, min(TELEMETRY_RETENTION_HOURS * 60, int(request.args.get("minutes", "60"))))
+        max_points = max(50, min(5000, int(request.args.get("max_points", "1200"))))
+    except ValueError:
+        return jsonify({"error": "minutes and max_points must be integers."}), 400
+
+    since = time.time() - minutes * 60
+    return jsonify(
+        {
+            "timestamp": time.time(),
+            "link_id": link_id,
+            "minutes": minutes,
+            "samples": query_telemetry_history(link_id, since, max_points=max_points),
+            "probes": query_probe_history(link_id=link_id, since=since, limit=max_points),
+        }
+    )
+
+
+@app.route("/api/v1/probes")
+def api_probes():
+    cfg = load_config()
+    return jsonify(
+        {
+            "timestamp": time.time(),
+            "probes": probe_snapshot(cfg),
+        }
+    )
 
 
 @app.route("/metrics")
@@ -2695,4 +4314,5 @@ def clear():
 
 if __name__ == "__main__":
     restore_runtime_state()
+    start_background_workers()
     app.run(host="0.0.0.0", port=8081, debug=False)

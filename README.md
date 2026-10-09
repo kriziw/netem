@@ -23,27 +23,31 @@ The current development direction is vendor-neutral: impairments are applied to 
 
 The current UI organizes these capabilities into dedicated operational workspaces rather than a single Lab Tools page. The implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the normalized API later.
 
-See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture and [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the user-interface model and roadmap.
+See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture, [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the interface model, and [docs/ROADMAP.md](docs/ROADMAP.md) for the prioritized next capabilities.
 
 ## Enterprise UI
 
-The interface is organized around **operate / observe / configure** workflows:
+The interface uses progressive disclosure so the full feature set is available without making the normal workflow feature-centric:
 
-- **Overview** — live path topology, WAN health, injected conditions, throughput and recent events.
-- **WAN Links** — compact WAN status cards with focused configuration drawers for profile, quality, advanced impairment, faults and diagnostics.
-- **Scenarios** — reusable built-in/custom scenarios and active execution state.
-- **Traffic & Security** — EICAR/beacon tests, bounded PCAP capture and reserved workflows for controlled traffic generation and replay.
+- **Command Center** — primary live workspace with clickable WAN paths, traffic-flow state, sparklines, quick quality/bandwidth/fault/MTU controls and recent activity.
+- **Tests** — guided brownout, failover, unstable-link, safe security and packet-capture workflows. Advanced scenario JSON remains available only when needed.
 - **Analytics** — rolling live throughput/PPS/impairment charts, generic SLA evaluation and persistent event history.
-- **Integrations** — REST, Prometheus and future multi-vendor SD-WAN adapters.
-- **Settings** — topology, access profiles, release/update management and other appliance-level configuration.
+- **Sessions** — named validation runs that correlate runtime events across tests and manual actions.
+- **Settings** — topology, access profiles, integrations, release/update management and other appliance-level configuration.
+- **Help & documentation** — searchable in-app wiki, moved out of primary navigation and available from the lower sidebar plus contextual Guide links.
 
-The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
+A global **Activity** rail is available from every page, and **Ctrl+K** opens a command palette for fast navigation and WAN access. The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
 
-### In-app documentation
+### Measurement, persistence and evidence
 
-The application includes a searchable **Documentation** section in the sidebar. It covers getting started, traffic direction, WAN controls, scenarios, safe security tests, packet capture, live analytics, SLA evaluation, topology, access profiles, REST/Prometheus integration, update/release management, troubleshooting and reference limits.
+The platform now includes a first-party measurement/evidence layer:
 
-Operational pages also expose a contextual **Guide** link in the top bar so the relevant documentation is one click away.
+- **Active measurements** — bounded ICMP, TCP-connect, HTTP/HTTPS and DNS probes with persisted results and failure/recovery events.
+- **Persistent telemetry** — SQLite WAN/probe time series in `runtime/telemetry.db`, sampled server-side and retained for seven days by default.
+- **Conditional scenarios** — `wait` and `assert` stages can react to expected SLA state, active-probe results or measured traffic.
+- **Session reports** — completed Lab Sessions produce PASS/FAIL/UNSCORED evidence with assertions, test results, WAN statistics, probe success/latency percentiles and JSON/printable report output.
+
+Active probes are honest about topology scope: automatic-source probes follow the NetEm host routing table. On a fully transparent WAN with unnumbered bridge members this does not by itself prove that the selected WAN path was crossed; interface binding requires a usable L3 source/route.
 
 ---
 
@@ -156,9 +160,9 @@ Debian 12 is the recommended base.
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git
+sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git iputils-ping
 
-# Optional: enables bounded PCAP capture from Traffic & Security
+# Optional: enables bounded PCAP capture from Tests
 sudo apt install -y tcpdump
 ```
 
@@ -277,7 +281,7 @@ Recommended for repeatable labs. When enabled, each WAN's persisted access prese
 
 ## WAN presets
 
-The Dashboard includes representative presets:
+The built-in access-profile set includes representative presets:
 
 | Profile | Nominal delay | Nominal jitter | Nominal loss | Download | Upload |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -294,7 +298,7 @@ For example, a GEO satellite profile will generally need far more delay than LEO
 
 ### Quality model
 
-The preset table defines the **100% / nominal** state. The Dashboard stores one quality value per WAN:
+The preset table defines the **100% / nominal** state. Each configured WAN stores one quality value:
 
 | Quality | Status |
 | ---: | --- |
@@ -315,7 +319,7 @@ The model deliberately avoids changing every metric at the same time or by the s
 - 4G/5G capacity and jitter typically move earlier as RF conditions or congestion worsen; sustained loss becomes prominent later.
 - Satellite degradation emphasizes latency variation/jitter first, then capacity, with sharper loss at poor quality.
 
-These are lab-oriented heuristics, not carrier SLAs or standards-defined mappings. The Presets menu lets you change both the 100% baseline values and the degradation behaviour used by a preset.
+These are lab-oriented heuristics, not carrier SLAs or standards-defined mappings. Settings → Access Profiles lets you change both the 100% baseline values and the degradation behaviour used by a preset.
 
 ---
 
@@ -340,7 +344,7 @@ tc qdisc add dev <outer-nic> root netem
 tc qdisc add dev <outer-nic> parent ... tbf rate <upload>
 ```
 
-The Dashboard exposes:
+The Command Center and advanced WAN controls expose:
 
 - Access preset
 - Independent nominal download/upload bandwidth selectors
@@ -354,7 +358,7 @@ The nominal bandwidth selectors are deliberately separate from Custom mode. For 
 
 For example, a WAN can remain on the 5G preset at 100% quality, then have only jitter manually increased. The WAN becomes Custom while the remaining values stay at their current derived values. Moving the quality slider again deliberately discards those custom values and recalculates the full profile from the selected preset and quality.
 
-The Presets menu exposes the editable nominal values for each access technology. WAN aliases, selected preset, per-WAN nominal bandwidth overrides, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
+Settings → Access Profiles exposes the editable nominal values for each access technology. WAN aliases, selected preset, per-WAN nominal bandwidth overrides, quality level, mode, and any active custom overrides are stored in `config.json`. When startup profile restoration is enabled, that state is reapplied after restart.
 
 ---
 

@@ -43,6 +43,11 @@ jobs:
               "overview",
               "index",
               "wan_links",
+              "tests",
+              "sessions",
+              "session_start",
+              "session_stop",
+              "quick_wan_action",
               "scenarios",
               "traffic_security",
               "analytics",
@@ -54,6 +59,13 @@ jobs:
               "api_state",
               "api_telemetry",
               "api_events",
+              "api_history",
+              "api_probes",
+              "probe_save",
+              "probe_delete",
+              "probe_run",
+              "session_report",
+              "session_report_json",
               "documentation",
               "documentation_page",
           }
@@ -92,6 +104,8 @@ jobs:
                   "/",
                   "/dashboard",
                   "/wan",
+                  "/tests",
+                  "/sessions",
                   "/scenarios",
                   "/traffic-security",
                   "/analytics",
@@ -105,6 +119,8 @@ jobs:
                   "/docs/getting-started",
                   "/docs/architecture",
                   "/docs/overview",
+                  "/docs/tests",
+                  "/docs/sessions",
                   "/docs/wan-links",
                   "/docs/scenarios",
                   "/docs/traffic-security",
@@ -113,6 +129,7 @@ jobs:
                   "/docs/topology-profiles",
                   "/docs/updates-releases",
                   "/docs/troubleshooting",
+                  "/docs/roadmap",
                   "/docs/reference",
               ]
               for path in pages:
@@ -120,9 +137,111 @@ jobs:
                   if response.status_code != 200:
                       raise SystemExit(f"{path} returned HTTP {response.status_code}")
                   print(f"PASS {path}")
+
+              response = client.post(
+                  "/sessions/start",
+                  data={"name": "CI validation session", "return_to": "sessions"},
+                  follow_redirects=True,
+              )
+              if response.status_code != 200:
+                  raise SystemExit("Session start failed")
+              state = client.get("/api/v1/state").get_json()
+              if not state.get("session", {}).get("active"):
+                  raise SystemExit("Session did not become active")
+
+              response = client.post(
+                  "/sessions/stop",
+                  data={"return_to": "sessions"},
+                  follow_redirects=True,
+              )
+              if response.status_code != 200:
+                  raise SystemExit("Session stop failed")
+              state = client.get("/api/v1/state").get_json()
+              if state.get("session", {}).get("active"):
+                  raise SystemExit("Session remained active after stop")
+              print("PASS session lifecycle")
+
+              from app import (
+                  LAB_SESSIONS,
+                  init_telemetry_db,
+                  telemetry_connect,
+                  validate_probe_definition,
+                  validate_scenario_steps,
+              )
+
+              session_id = LAB_SESSIONS[-1]["id"]
+              response = client.get(f"/sessions/{session_id}/report")
+              if response.status_code != 200:
+                  raise SystemExit("Session report failed")
+              response = client.get(f"/sessions/{session_id}/report.json")
+              if response.status_code != 200:
+                  raise SystemExit("Session report JSON failed")
+              print("PASS session reports")
+
+              steps = validate_scenario_steps([
+                  {
+                      "after": 0,
+                      "action": "assert",
+                      "condition": {"type": "sla", "state": "pass"},
+                      "timeout": 5,
+                  },
+                  {
+                      "after": 0,
+                      "action": "wait",
+                      "condition": {
+                          "type": "traffic",
+                          "field": "down_mbps",
+                          "op": ">=",
+                          "value": 1,
+                      },
+                      "timeout": 5,
+                  },
+              ])
+              if len(steps) != 2:
+                  raise SystemExit("Conditional scenario validation failed")
+              print("PASS conditional scenarios")
+
+              probe = validate_probe_definition(
+                  {
+                      "name": "CI ICMP",
+                      "link_id": "wan1",
+                      "kind": "icmp",
+                      "target": "127.0.0.1",
+                      "source_side": "auto",
+                      "interval_s": 5,
+                      "timeout_s": 1,
+                      "enabled": True,
+                  },
+                  json.loads(CONFIG_PATH.read_text()),
+              )
+              if probe["kind"] != "icmp":
+                  raise SystemExit("Probe validation failed")
+              print("PASS active probe validation")
+
+              init_telemetry_db()
+              with telemetry_connect() as conn:
+                  tables = {
+                      row[0]
+                      for row in conn.execute(
+                          "SELECT name FROM sqlite_master WHERE type='table'"
+                      ).fetchall()
+                  }
+              if not {"telemetry_samples", "probe_samples"} <= tables:
+                  raise SystemExit("Telemetry schema missing")
+              print("PASS persistent telemetry schema")
           finally:
               if CONFIG_PATH.exists():
                   CONFIG_PATH.unlink()
+              from app import SESSIONS_PATH, TELEMETRY_DB_PATH
+              if SESSIONS_PATH.exists():
+                  SESSIONS_PATH.unlink()
+              for path in (
+                  TELEMETRY_DB_PATH,
+                  TELEMETRY_DB_PATH.with_name(TELEMETRY_DB_PATH.name + "-wal"),
+                  TELEMETRY_DB_PATH.with_name(TELEMETRY_DB_PATH.name + "-shm"),
+              ):
+                  if path.exists():
+                      path.unlink()
           PY
 
       - name: Validate release configuration

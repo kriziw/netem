@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}Session Report · NetEm WAN Lab{% endblock %}
+{% block crumb %}Sessions / Report{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Validation evidence</div>
+    <h1>{{ report.session.name }}</h1>
+    <p class="page-description">Session {{ report.session.id }} · generated from persisted telemetry, probes, runtime events and scenario assertions.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('session_report_json', session_id=report.session.id) }}">Export JSON</a>
+    <button class="btn" type="button" onclick="window.print()">Print / save PDF</button>
+    <a class="btn btn-primary" href="{{ url_for('sessions') }}">Back to sessions</a>
+  </div>
+</div>
+
+<div class="grid grid-4" style="margin-bottom:14px">
+  <div class="stat">
+    <div class="stat-label">Result</div>
+    <div class="stat-value {{ 'good' if report.result == 'passed' else ('bad' if report.result == 'failed' else 'warn') }}">{{ report.result|upper }}</div>
+    <div class="stat-sub">{{ report.assertions|length }} assertion{{ '' if report.assertions|length == 1 else 's' }}</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Duration</div>
+    <div class="stat-value" data-duration="{{ report.session.duration_s }}">—</div>
+    <div class="stat-sub">session wall-clock duration</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Tests</div>
+    <div class="stat-value">{{ report.tests|length }}</div>
+    <div class="stat-sub">completed scenario runs</div>
+  </div>
+  <div class="stat">
+    <div class="stat-label">Events</div>
+    <div class="stat-value">{{ report.event_count }}</div>
+    <div class="stat-sub">correlated runtime events</div>
+  </div>
+</div>
+
+{% if report.assertions %}
+<section class="card" style="margin-bottom:14px">
+  <div class="card-head">
+    <div><div class="card-title">Assertions</div><div class="card-sub">Pass/fail requirements evaluated during conditional scenarios</div></div>
+  </div>
+  <div class="card-pad">
+    <table>
+      <thead><tr><th>Assertion</th><th>Condition</th><th>Observed</th><th>Time</th><th>Result</th></tr></thead>
+      <tbody>
+      {% for item in report.assertions %}
+        <tr>
+          <td>{{ item.label or item.message }}</td>
+          <td class="mono">{{ item.condition }}</td>
+          <td>{{ item.observed if item.observed is not none else '—' }}</td>
+          <td>{{ "%.3f"|format(item.elapsed_s or 0) }}s</td>
+          <td><span class="status {{ 'good' if item.passed else 'bad' }}">{{ "PASS" if item.passed else "FAIL" }}</span></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</section>
+{% else %}
+<div class="docs-note"><strong>Unscored session:</strong> no assertion stages ran during this session. Telemetry and event evidence is still retained, but the report cannot claim PASS/FAIL without an explicit requirement.</div>
+{% endif %}
+
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Tests run</div><div class="card-sub">Scenario completion results</div></div></div>
+    <div class="card-pad">
+      {% if report.tests %}
+      <div class="session-list">
+        {% for test in report.tests %}
+        <div class="session-row" style="grid-template-columns:minmax(170px,1fr) 90px 90px">
+          <div><div class="session-name">{{ test.message }}</div><div class="session-meta">{{ test.scenario_id or 'scenario' }}</div></div>
+          <div><span class="status {{ 'good' if test.result == 'passed' else ('warn' if test.result == 'stopped' else 'bad') }}">{{ test.result|upper }}</span></div>
+          <div class="session-meta">{{ "%.2f"|format(test.duration_s or 0) }}s</div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="empty-state"><strong>No completed scenario runs</strong>This session may contain only manual WAN actions or measurements.</div>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Event summary</div><div class="card-sub">Runtime event categories captured in this session</div></div></div>
+    <div class="card-pad">
+      <div class="kv">
+        {% for kind,count in report.event_counts.items() %}
+        <div class="k">{{ kind|replace('-',' ')|title }}</div><div class="v">{{ count }}</div>
+        {% endfor %}
+      </div>
+    </div>
+  </section>
+</div>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head"><div><div class="card-title">WAN telemetry summary</div><div class="card-sub">Server-side SQLite samples collected during the session</div></div></div>
+  <div class="card-pad">
+    {% if report.telemetry %}
+    <table>
+      <thead>
+        <tr><th>WAN</th><th>Samples</th><th>Peak down</th><th>Peak up</th><th>Max injected latency</th><th>Max loss</th><th>Min quality</th><th>SLA-fail samples</th></tr>
+      </thead>
+      <tbody>
+      {% for link_id,item in report.telemetry.items() %}
+        <tr>
+          <td>{{ link_id }}</td>
+          <td>{{ item.samples }}</td>
+          <td>{{ "%.2f"|format(item.max_down_mbps or 0) }} Mbit/s</td>
+          <td>{{ "%.2f"|format(item.max_up_mbps or 0) }} Mbit/s</td>
+          <td>{{ "%.1f"|format(item.max_injected_delay_ms or 0) }} ms</td>
+          <td>{{ "%.2f"|format(item.max_injected_loss_pct or 0) }}%</td>
+          <td>{{ "%.0f"|format(item.min_quality or 0) }}%</td>
+          <td>{{ item.sla_fail_samples or 0 }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><strong>No persisted telemetry samples</strong>The session may predate the SQLite telemetry worker or have been too short to collect a sample.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head"><div><div class="card-title">Active measurement summary</div><div class="card-sub">Probe success rate and measured transaction/response latency</div></div></div>
+  <div class="card-pad">
+    {% if report.probes %}
+    <table>
+      <thead><tr><th>Probe</th><th>WAN</th><th>Type</th><th>Target</th><th>Samples</th><th>Success</th><th>Average</th><th>P95</th><th>Max</th></tr></thead>
+      <tbody>
+      {% for probe_id,item in report.probes.items() %}
+        <tr>
+          <td class="mono">{{ probe_id }}</td>
+          <td>{{ item.link_id }}</td>
+          <td>{{ item.kind|upper }}</td>
+          <td>{{ item.target }}</td>
+          <td>{{ item.samples }}</td>
+          <td>{{ "%.1f"|format(item.success_rate_pct or 0) }}%</td>
+          <td>{{ "%.1f"|format(item.avg_latency_ms or 0) }} ms</td>
+          <td>{{ "%.1f"|format(item.p95_latency_ms or 0) }} ms</td>
+          <td>{{ "%.1f"|format(item.max_latency_ms or 0) }} ms</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state"><strong>No probe samples associated with this session</strong>Configure active measurements in Analytics before the next run.</div>
+    {% endif %}
+  </div>
+</section>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head"><div><div class="card-title">Evidence timeline</div><div class="card-sub">Last {{ report.events|length }} correlated events included in this report</div></div></div>
+  <div class="card-pad">
+    <div class="timeline">
+      {% for event in report.events|reverse %}
+      <div class="timeline-item">
+        <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+        <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+        <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent=NetEmUI.eventTime(el.dataset.ts));
+document.querySelectorAll("[data-duration]").forEach(el => {
+  let s=Number(el.dataset.duration||0);
+  const h=Math.floor(s/3600); s-=h*3600;
+  const m=Math.floor(s/60); const sec=Math.round(s-m*60);
+  el.textContent=(h?h+"h ":"")+(m?m+"m ":"")+sec+"s";
+});
+</script>
+{% endblock %}

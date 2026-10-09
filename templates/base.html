@@ -38,6 +38,8 @@
                 <svg viewBox="0 0 24 24"><path d="M8 12h8M9 8V4m6 4V4m-7 4h8v4a4 4 0 0 1-4 4v4"/></svg>
               {% elif item.icon == 'docs' %}
                 <svg viewBox="0 0 24 24"><path d="M5 4h10a4 4 0 0 1 4 4v12H9a4 4 0 0 0-4 0z"/><path d="M9 20V8a4 4 0 0 0-4-4"/></svg>
+              {% elif item.icon == 'sessions' %}
+                <svg viewBox="0 0 24 24"><path d="M5 5h14v14H5z"/><path d="M8 9h8M8 13h5M8 17h3"/></svg>
               {% else %}
                 <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1A7 7 0 0 0 15 6l-.3-2.6h-4L10.4 6a7 7 0 0 0-1.5.9l-2.4-1-2 3.4 2 1.5a7 7 0 0 0 0 2.2l-2 1.5 2 3.4 2.4-1a7 7 0 0 0 1.5.9l.3 2.6h4l.3-2.6a7 7 0 0 0 1.5-.9l2.4 1 2-3.4-2-1.5a7 7 0 0 0 .1-1z"/></svg>
               {% endif %}
@@ -49,6 +51,12 @@
     {% endfor %}
 
     <div class="sidebar-bottom">
+      <a class="nav-link help-link {% if page == 'docs' %}active{% endif %}" href="{{ url_for('documentation') }}">
+        <span class="nav-icon">
+          <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M9.8 9a2.4 2.4 0 1 1 3.3 2.2c-.8.4-1.1.8-1.1 1.8M12 17h.01"/></svg>
+        </span>
+        <span class="nav-label">Help &amp; documentation</span>
+      </a>
       <div class="lab-only">Lab use only</div>
       <div class="credit">Fork maintained &amp; extended by <strong>Kristofer Wohlgang</strong><br>Foundation: Techkarma NetEm</div>
       <div class="version">v{{ app_version }} · Linux tc/netem</div>
@@ -62,6 +70,9 @@
         <div class="breadcrumb"><span>NetEm</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
+        {% if global_runtime.session.active %}
+          <a class="top-pill scenario" href="{{ url_for('sessions') }}">Session · {{ global_runtime.session.name }}</a>
+        {% endif %}
         {% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
         {% endif %}
@@ -71,6 +82,8 @@
         {% if global_runtime.active_fault_count %}
           <span class="top-pill alert">{{ global_runtime.active_fault_count }} active impairment{{ '' if global_runtime.active_fault_count == 1 else 's' }}</span>
         {% endif %}
+        <button class="top-pill top-action-button" type="button" id="activity-toggle">Activity</button>
+        <button class="top-pill top-action-button" type="button" id="command-toggle" title="Quick actions (Ctrl+K)">Ctrl+K</button>
         <span class="live-pill"><span class="live-dot"></span>Live</span>
       </div>
     </header>
@@ -79,7 +92,7 @@
       <div class="global-alert">
         <strong>Active runtime impairment</strong>
         <span class="grow">{{ global_runtime.active_fault_labels|join(' · ') }}</span>
-        <a class="btn btn-sm btn-danger" href="{{ url_for('wan_links') }}#faults">Review</a>
+        <a class="btn btn-sm btn-danger" href="{{ url_for('overview') }}">Review</a>
       </div>
     {% endif %}
 
@@ -100,6 +113,41 @@
 
 <div class="drawer-backdrop" id="drawer-backdrop"></div>
 
+<aside class="activity-rail" id="activity-rail" aria-hidden="true">
+  <div class="activity-rail-head">
+    <div>
+      <div class="card-title">Live activity</div>
+      <div class="card-sub">Runtime changes across the lab</div>
+    </div>
+    <button class="drawer-close" type="button" id="activity-close">×</button>
+  </div>
+  <div class="activity-rail-body" id="global-activity">
+    <div class="empty-state"><strong>Loading activity…</strong></div>
+  </div>
+</aside>
+
+<div class="command-backdrop" id="command-backdrop"></div>
+<div class="command-palette" id="command-palette" role="dialog" aria-modal="true" aria-hidden="true">
+  <div class="command-search-row">
+    <span class="command-search-icon">⌕</span>
+    <input id="command-search" type="text" placeholder="Go to or find an action…" autocomplete="off">
+    <span class="docs-kbd">Esc</span>
+  </div>
+  <div class="command-results" id="command-results">
+    <a class="command-item" data-command-search="command center live overview dashboard" href="{{ url_for('overview') }}"><span>Command Center</span><small>Live lab control</small></a>
+    <a class="command-item" data-command-search="tests scenarios brownout failover security capture" href="{{ url_for('tests') }}"><span>Tests</span><small>Run repeatable tests</small></a>
+    <a class="command-item" data-command-search="analytics charts throughput sla" href="{{ url_for('analytics') }}"><span>Analytics</span><small>Inspect live data</small></a>
+    <a class="command-item" data-command-search="sessions lab session history results" href="{{ url_for('sessions') }}"><span>Sessions</span><small>Track a lab run</small></a>
+    {% for link in global_links %}
+    <a class="command-item" data-command-search="{{ link.label|lower }} wan controls degrade blackhole mtu restore" href="{{ url_for('overview') }}?wan={{ link.id }}">
+      <span>Open {{ link.label }} controls</span><small>{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</small>
+    </a>
+    {% endfor %}
+    <a class="command-item" data-command-search="settings topology profiles updates integrations" href="{{ url_for('settings') }}"><span>Settings</span><small>System configuration</small></a>
+    <a class="command-item" data-command-search="help docs documentation guide troubleshooting" href="{{ url_for('documentation') }}"><span>Help &amp; documentation</span><small>Search the in-app wiki</small></a>
+  </div>
+</div>
+
 <script>
 (() => {
   const menu = document.getElementById("mobile-menu");
@@ -111,6 +159,95 @@
       if (!sidebar.contains(event.target) && event.target !== menu) sidebar.classList.remove("mobile-open");
     });
   }
+
+  const activityRail = document.getElementById("activity-rail");
+  const activityToggle = document.getElementById("activity-toggle");
+  const activityClose = document.getElementById("activity-close");
+  const activityBody = document.getElementById("global-activity");
+  let activityTimer = null;
+
+  function formatEventTime(ts) {
+    return new Date(Number(ts) * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+  }
+
+  async function refreshActivity() {
+    try {
+      const response = await fetch("/api/v1/events?limit=30", {cache:"no-store"});
+      if (!response.ok) return;
+      const payload = await response.json();
+      const events = [...(payload.events || [])].reverse();
+      if (!events.length) {
+        activityBody.innerHTML = '<div class="empty-state"><strong>No runtime events yet</strong>Actions and tests will appear here.</div>';
+        return;
+      }
+      activityBody.innerHTML = events.map(event =>
+        '<div class="activity-item">' +
+          '<div class="activity-time">' + formatEventTime(event.timestamp) + '</div>' +
+          '<div class="activity-content"><strong>' + escapeHtml(event.message || event.kind || "Event") + '</strong>' +
+          '<span>' + escapeHtml((event.kind || "event").replaceAll("-", " ")) + '</span></div>' +
+        '</div>'
+      ).join("");
+    } catch (_) {}
+  }
+
+  function escapeHtml(value) {
+    return String(value).replace(/[&<>"']/g, ch => ({
+      "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"
+    }[ch]));
+  }
+
+  function openActivity() {
+    activityRail.classList.add("open");
+    activityRail.setAttribute("aria-hidden","false");
+    refreshActivity();
+    clearInterval(activityTimer);
+    activityTimer = setInterval(refreshActivity, 2500);
+  }
+  function closeActivity() {
+    activityRail.classList.remove("open");
+    activityRail.setAttribute("aria-hidden","true");
+    clearInterval(activityTimer);
+  }
+  activityToggle?.addEventListener("click", () => activityRail.classList.contains("open") ? closeActivity() : openActivity());
+  activityClose?.addEventListener("click", closeActivity);
+
+  const commandPalette = document.getElementById("command-palette");
+  const commandBackdrop = document.getElementById("command-backdrop");
+  const commandToggle = document.getElementById("command-toggle");
+  const commandSearch = document.getElementById("command-search");
+  const commandItems = [...document.querySelectorAll(".command-item")];
+
+  function filterCommands() {
+    const query = commandSearch.value.trim().toLowerCase();
+    commandItems.forEach(item => {
+      item.style.display = !query || item.dataset.commandSearch.includes(query) ? "" : "none";
+    });
+  }
+  function openCommands() {
+    commandPalette.classList.add("open");
+    commandBackdrop.classList.add("open");
+    commandPalette.setAttribute("aria-hidden","false");
+    commandSearch.value = "";
+    filterCommands();
+    setTimeout(() => commandSearch.focus(), 20);
+  }
+  function closeCommands() {
+    commandPalette.classList.remove("open");
+    commandBackdrop.classList.remove("open");
+    commandPalette.setAttribute("aria-hidden","true");
+  }
+  commandToggle?.addEventListener("click", openCommands);
+  commandBackdrop.addEventListener("click", closeCommands);
+  commandSearch.addEventListener("input", filterCommands);
+  document.addEventListener("keydown", event => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      commandPalette.classList.contains("open") ? closeCommands() : openCommands();
+    } else if (event.key === "Escape") {
+      closeCommands();
+      closeActivity();
+    }
+  });
 })();
 </script>
 {% block scripts %}{% endblock %}

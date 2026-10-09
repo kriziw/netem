@@ -1,0 +1,30 @@
+<h2 id="purpose">What a Lab Session is</h2>
+<p>A session is the evidence container for one validation objective. Tests describe the impairment; the session records what happened, what was measured and whether explicit assertions passed.</p>
+
+<h2 id="start">Start a session</h2>
+<ol><li>Open <strong>Sessions</strong>.</li><li>Name the objective.</li><li>Start the session.</li><li>Operate normally from Command Center, Tests and Analytics.</li><li>Complete the session when the validation is finished.</li></ol>
+<p>The active session ID is attached to runtime events, SQLite WAN telemetry and active-probe samples.</p>
+
+<h2 id="report">Completed session report</h2>
+<p>Completing a session generates and persists a report snapshot. The report includes:</p>
+<ul>
+<li>overall result: PASS, FAIL or UNSCORED;</li>
+<li>scenario runs and their completion status;</li>
+<li>every conditional assertion and observed value;</li>
+<li>WAN telemetry statistics such as peak throughput, worst injected latency/loss, minimum quality and expected-SLA-fail sample count;</li>
+<li>active-probe sample count, success rate, average/P95/max response time;</li>
+<li>event-category summary and an evidence timeline.</li>
+</ul>
+<p>The HTML report can be printed/saved as PDF by the browser and has a JSON export route for automation.</p>
+
+<h2 id="scoring">How PASS/FAIL is determined</h2>
+<p>If any assertion fails or a scenario ends in <code>failed</code>, the report result is FAIL. If at least one assertion ran and all assertions/tests passed, the result is PASS. A session with no assertions is UNSCORED rather than being incorrectly labelled successful.</p>
+
+<h2 id="persistence">Storage</h2>
+<p>Up to 100 session records are kept in <code>runtime/sessions.json</code>. WAN/probe samples live in <code>runtime/telemetry.db</code>. The report snapshot itself is stored with the completed session record so the evidence summary does not change later when retention windows roll forward.</p>
+
+<h2 id="restart">Service restart behavior</h2>
+<p>An in-progress session is marked <strong>interrupted</strong> after process restart rather than being silently resumed. This avoids claiming continuity when scenario/probe runtime context may have been lost.</p>
+
+<h2 id="next">Still planned</h2>
+<p>Capture-file attachment, vendor-observed SD-WAN events and side-by-side session comparison are still future capabilities. The reporting and assertion model is already structured to receive them.</p>

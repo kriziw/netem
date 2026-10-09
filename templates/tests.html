@@ -1,0 +1,220 @@
+{% extends "base.html" %}
+{% block title %}Tests · NetEm WAN Lab{% endblock %}
+{% block crumb %}Tests{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Guided testing</div>
+    <h1>Tests</h1>
+    <p class="page-description">Choose the outcome you want to validate. Tests can combine timed impairments with state-driven waits and pass/fail assertions while advanced packet primitives remain available only when needed.</p>
+  </div>
+  <div class="page-actions">
+    <a class="btn" href="{{ url_for('sessions') }}">Lab sessions</a>
+    <a class="btn" href="{{ url_for('analytics') }}">Watch analytics</a>
+  </div>
+</div>
+
+{% if scenario_state.active %}
+<section class="running-test-bar">
+  <div class="running-test-line">
+    <div>
+      <div class="eyebrow" style="margin:0 0 3px">Running now</div>
+      <strong>{{ scenario_state.scenario_name }}</strong>
+      <span class="card-sub"> · {{ scenario_state.link_id }} · <span data-active-step>{{ scenario_state.step_label }}</span></span>
+      <div class="field-help" data-active-condition>{% if scenario_state.condition %}Waiting for {{ scenario_state.condition.description }}{% endif %}</div>
+    </div>
+    <form method="post" action="{{ url_for('lab_scenario_stop') }}">
+      <input type="hidden" name="return_to" value="tests">
+      <button class="btn btn-danger" type="submit">Stop &amp; restore</button>
+    </form>
+  </div>
+  <div class="running-test-progress"><span data-test-progress style="width:12%"></span></div>
+</section>
+{% endif %}
+
+<div class="section-title">Quick network tests</div>
+<div class="test-grid">
+  {% for scenario in scenarios if not scenario.id.startswith('custom_') %}
+  <section class="test-card {% if selected_scenario == scenario.id %}selected{% endif %}" id="test-{{ scenario.id }}">
+    <span class="status info test-badge">{{ scenario.steps|length }} stages</span>
+    <div class="test-card-title">{{ scenario.name }}</div>
+    <div class="test-card-desc">{{ scenario.description }}</div>
+    <div class="test-card-meta">
+      {% set ns = namespace(total=0) %}
+      {% for step in scenario.steps %}{% set ns.total = ns.total + step.after %}{% endfor %}
+      ~{{ ns.total }} sec · restores baseline when complete
+    </div>
+    <form method="post" action="{{ url_for('lab_scenario_start') }}" class="test-card-actions">
+      <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+      <input type="hidden" name="return_to" value="tests">
+      <select name="link_id" required>
+        {% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}
+      </select>
+      <button class="btn btn-primary" type="submit" {% if scenario_state.active %}disabled{% endif %}>Run</button>
+    </form>
+  </section>
+  {% endfor %}
+</div>
+
+<div class="section-title">Security &amp; diagnostics</div>
+<div class="test-grid">
+  <section class="test-card">
+    <span class="status good test-badge">Safe</span>
+    <div class="test-card-title">Anti-malware validation</div>
+    <div class="test-card-desc">Serve the standard harmless EICAR test artifact to validate AV/security-policy detection.</div>
+    <div class="test-card-actions"><a class="btn btn-primary" href="{{ url_for('security_eicar') }}">Download EICAR</a></div>
+  </section>
+
+  <section class="test-card">
+    <span class="status good test-badge">Safe</span>
+    <div class="test-card-title">Benign beacon</div>
+    <div class="test-card-desc">Use a no-command HTTP callback endpoint to validate telemetry and policy visibility.</div>
+    <div class="test-card-meta mono" id="beacon-url">{{ request.url_root.rstrip('/') }}{{ url_for('security_beacon') }}</div>
+    <div class="test-card-actions"><button class="btn" type="button" id="copy-beacon">Copy endpoint</button></div>
+  </section>
+
+  <section class="test-card" id="capture">
+    <span class="status {{ 'good' if tcpdump_available else 'warn' }} test-badge">{{ "Ready" if tcpdump_available else "Unavailable" }}</span>
+    <div class="test-card-title">Packet capture</div>
+    <div class="test-card-desc">Bounded tcpdump capture on a configured WAN interface: 120s max, 20k packets, 256-byte snap length.</div>
+    {% if tcpdump_available and not capture_state.active %}
+    <form method="post" action="{{ url_for('lab_capture_start') }}" class="test-card-actions" style="flex-wrap:wrap">
+      <input type="hidden" name="return_to" value="tests">
+      <select name="link_id" required>{% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}</select>
+      <select name="side"><option value="inner">Inner</option><option value="outer">Outer</option></select>
+      <select name="duration"><option value="15">15s</option><option value="30" selected>30s</option><option value="60">60s</option><option value="120">120s</option></select>
+      <button class="btn btn-primary" type="submit">Start</button>
+      {% if capture_state.download_ready %}<a class="btn" href="{{ url_for('lab_capture_download') }}">Last PCAP</a>{% endif %}
+    </form>
+    {% elif capture_state.active %}
+    <form method="post" action="{{ url_for('lab_capture_stop') }}" class="test-card-actions">
+      <input type="hidden" name="return_to" value="tests">
+      <button class="btn btn-danger" type="submit">Stop capture on {{ capture_state.interface }}</button>
+    </form>
+    {% else %}
+    <div class="test-card-meta">Install tcpdump and grant CAP_NET_RAW to enable capture.</div>
+    {% endif %}
+  </section>
+</div>
+
+<div class="section-title">Custom tests</div>
+<div class="grid grid-2">
+  {% for scenario in scenarios if scenario.id.startswith('custom_') %}
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">{{ scenario.name }}</div><div class="card-sub">{{ scenario.description }}</div></div>
+      <span class="status info">Custom</span>
+    </div>
+    <div class="card-pad">
+      <div class="scenario-strip">
+        {% set ns = namespace(elapsed=0) %}
+        {% for step in scenario.steps %}
+        {% set ns.elapsed = ns.elapsed + step.after %}
+        <div class="step"><div class="step-time">+{{ ns.elapsed }}s</div><div class="step-label">{{ step.label }}</div><div class="step-action">{{ step.action }} · {{ step.value }}</div></div>
+        {% endfor %}
+      </div>
+      <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:12px;display:flex;gap:8px">
+        <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+        <input type="hidden" name="return_to" value="tests">
+        <select name="link_id" required>{% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}</select>
+        <button class="btn btn-primary" type="submit" {% if scenario_state.active %}disabled{% endif %}>Run</button>
+      </form>
+    </div>
+  </section>
+  {% else %}
+  <section class="card"><div class="empty-state"><strong>No custom tests yet</strong>Use the advanced builder below when the built-in tests are not enough.</div></section>
+  {% endfor %}
+</div>
+
+<details style="margin-top:14px">
+  <summary>Advanced · build or edit a scenario definition</summary>
+  <div class="details-body">
+    <form method="post" action="{{ url_for('lab_scenario_save') }}">
+      <input type="hidden" name="return_to" value="tests">
+      <div class="form-grid">
+        <div><label>Name</label><input type="text" name="name" placeholder="Branch brownout + MTU fault" required></div>
+        <div><label>Description</label><input type="text" name="description" placeholder="Optional test objective"></div>
+      </div>
+      <label>Scenario stages</label>
+      <textarea name="steps_json" class="mono" style="min-height:320px" required>[
+  {"after": 0, "action": "quality", "value": 100, "label": "Baseline"},
+  {"after": 10, "action": "fault", "value": "blackhole", "label": "Inject outage"},
+  {"after": 0, "action": "assert", "condition": {"type": "sla", "state": "fail"}, "timeout": 5, "label": "Expected SLA detects failure"},
+  {"after": 20, "action": "fault", "value": "normal", "label": "Restore path"},
+  {"after": 0, "action": "wait", "condition": {"type": "sla", "state": "pass"}, "timeout": 10, "label": "Wait for expected SLA recovery"}
+]</textarea>
+      <div class="field-help">Actions: quality, fault, mtu, wait, assert · conditions: expected SLA, active probe or measured traffic · max 30 stages · timeout up to 600 seconds.</div>
+      <div class="docs-note"><strong>Conditional examples:</strong> <code>{"type":"probe","probe_id":"probe-wan1-internet","field":"success","op":"==","value":false}</code> waits/asserts on reachability. Traffic conditions support <code>down_mbps</code>, <code>up_mbps</code>, <code>down_pps</code> and <code>up_pps</code>. Failed assertions are included in the active Lab Session report.</div>
+      <button class="btn btn-primary" type="submit" style="margin-top:10px">Save custom test</button>
+    </form>
+  </div>
+</details>
+
+<section class="card" style="margin-top:14px">
+  <div class="card-head">
+    <div><div class="card-title">Test activity</div><div class="card-sub">Recent scenario, fault, MTU, capture and security events</div></div>
+    <button class="btn btn-sm" type="button" onclick="document.getElementById('activity-toggle').click()">Open live activity</button>
+  </div>
+  <div class="card-pad">
+    <div class="timeline">
+      {% if events %}
+      {% for event in events[:16] %}
+      <div class="timeline-item">
+        <div class="timeline-time" data-ts="{{ event.timestamp }}"></div>
+        <div class="timeline-rail"><span class="timeline-dot {{ event.kind }}"></span></div>
+        <div><div class="timeline-title">{{ event.message }}</div><div class="timeline-kind">{{ event.kind }}</div></div>
+      </div>
+      {% endfor %}
+      {% else %}
+      <div class="empty-state"><strong>No test activity yet</strong>Run a quick network test or diagnostic.</div>
+      {% endif %}
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="{{ url_for('static', filename='app.js') }}"></script>
+<script>
+document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
+
+const copy = document.getElementById("copy-beacon");
+if (copy) copy.addEventListener("click", async () => {
+  try {
+    await navigator.clipboard.writeText(document.getElementById("beacon-url").textContent.trim());
+    copy.textContent = "Copied";
+    setTimeout(() => copy.textContent = "Copy endpoint", 1200);
+  } catch (_) {}
+});
+
+{% if selected_scenario %}
+const selected = document.getElementById("test-{{ selected_scenario }}");
+if (selected) setTimeout(() => selected.scrollIntoView({behavior:"smooth", block:"center"}), 80);
+{% endif %}
+
+{% if scenario_state.active %}
+NetEmUI.createLiveClient({
+  interval:1000,
+  maxPoints:20,
+  onSample({state}) {
+    const scenario=state.scenario || {};
+    if (!scenario.active) { window.location.reload(); return; }
+    const stage=document.querySelector("[data-active-step]");
+    if(stage) stage.textContent=scenario.step_label || "running";
+    const condition=document.querySelector("[data-active-condition]");
+    if(condition) condition.textContent=scenario.condition?.description ? "Waiting for " + scenario.condition.description + (scenario.condition.observed != null ? " · observed " + scenario.condition.observed : "") : "";
+    const progress=document.querySelector("[data-test-progress]");
+    if(progress) {
+      const total=Math.max(1,Number(scenario.step_count||1));
+      progress.style.width=Math.min(100, Math.max(4, Number(scenario.step||0)/total*100)) + "%";
+    }
+  }
+});
+{% endif %}
+
+{% if capture_state.active %}
+setTimeout(() => window.location.reload(), 3500);
+{% endif %}
+</script>
+{% endblock %}

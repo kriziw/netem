@@ -1,238 +1,214 @@
 # Resilience Lab Architecture
 
-NetEm WAN Lab is evolving from a WAN impairment frontend into a vendor-neutral SD-WAN resilience test platform.
+NetEm WAN Lab is a vendor-neutral WAN resilience validation platform built on transparent Linux bridging and traffic control.
 
-The design principle is simple: **the network path should create the condition; the SD-WAN appliance should react to it using its own health checks, policies and analytics.** This keeps the lab equally useful for Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud and other implementations.
+The design principle remains:
 
-## Top 5 feature areas
+> the network path creates a controlled condition; the appliance under test reacts using its own health checks, routing/policy logic and analytics.
 
-### 1. Scenario engine
+## Current capability layers
 
-Current MVP:
-- progressive brownout
-- SLA failover / data-plane blackhole
-- flaky one-way underlay
-- availability-stress / DDoS-impact simulation
-- automatic restoration of the persisted WAN profile when the scenario finishes or is stopped
+### 1. Impairment engine
 
-The scenario engine is intentionally transient. It does not overwrite the saved WAN profile.
+Linux tc/netem provides latency, jitter, random/correlated loss, duplication, corruption, reordering and asymmetric bandwidth shaping.
 
-Future:
-- user-editable scenario builder
-- arbitrary stage durations
-- parallel actions across WAN1/WAN2
-- scheduled runs
-- pass/fail assertions
-- import/export of scenario JSON
+Runtime faults add bidirectional blackhole, downstream-only blackhole, upstream-only blackhole and normal restore. Blackholes preserve carrier state so SLA/health logic must detect a failed data plane rather than relying on interface-down state.
 
-### 2. Runtime fault injection
+### 2. Path MTU testing
 
-Current MVP:
-- bidirectional blackhole
-- downstream-only blackhole
-- upstream-only blackhole
-- restore normal configured profile
+NetEm can temporarily constrain MTU on the WAN bridge plus inner/outer members and restore the original values later.
 
-Blackholes leave the virtual link up. This is useful for validating that an SD-WAN implementation detects a failed data plane using SLA/health probes rather than relying only on interface carrier state.
+This is path-MTU constriction, not a full PMTUD-blackhole implementation that selectively suppresses ICMP/ICMPv6 feedback.
 
-Future:
-- physical-link down/up
-- intermittent flap profiles
-- MTU/PMTUD blackholes
-- DNS-only failure
-- gateway-selective blackhole
+### 3. Guided and custom tests
 
-### 3. Advanced packet impairments
+Built-in tests include Progressive brownout, SLA failover, Flaky underlay and Availability stress / DDoS-impact simulation.
 
-Current MVP uses native Linux `tc/netem` for:
-- latency
-- jitter
-- random packet loss
-- correlated loss
-- packet duplication
-- packet corruption
-- packet reordering
-- asymmetric bandwidth shaping
+Custom scenarios are persisted in config.json.
 
-Advanced packet impairments are manual overrides and therefore switch a WAN to Custom mode.
+Supported actions:
 
-Future:
-- Gilbert-Elliott / burst-loss presets
-- queue-size / bufferbloat controls
-- ECN/queue behavior
-- direction-specific latency/loss/jitter
-- reusable impairment templates
+- quality
+- fault
+- mtu
+- wait
+- assert
 
-### 4. Live observability and vendor-neutral integration
+A scenario is limited to 30 stages. Timed delays are 0–3600 seconds.
 
-Current MVP:
-- browser-polled interface byte and packet counters
-- live downstream/upstream throughput calculation
-- live PPS
-- runtime event history
-- `GET /api/v1/state`
-- `GET /api/v1/telemetry`
-- `GET /metrics` in Prometheus exposition format
+Conditional stages can wait/assert on expected SLA state, active-probe success, active-probe latency, measured downstream/upstream Mbit/s and measured downstream/upstream PPS.
 
-The core API is intentionally read-only at this stage. This keeps it safe to expose inside a lab while creating a stable integration point.
+Conditional timeout is limited to 1–600 seconds and polling to 0.25–5 seconds. Failure behavior can stop execution or continue while retaining a failed final result.
 
-Future vendor adapters can consume vendor APIs and place observed SD-WAN state alongside injected NetEm state, for example:
+### 4. Generic SLA model
 
-```text
-Injected by NetEm          Observed by SD-WAN
-------------------         ------------------
-Latency 80 ms              SLA latency 83 ms
-Loss 3%                    SLA loss 3.2%
-WAN1 blackhole             Member unhealthy
-Scenario stage 4           Traffic moved to WAN2
-```
+A persisted vendor-neutral SLA profile defines maximum injected latency, jitter and packet loss.
 
-The adapter layer should remain optional so the core product does not become Fortinet-, Cisco-, Palo Alto- or Juniper-specific.
+NetEm evaluates the current effective impairment and runtime fault against that profile.
 
-### 5. Safe security and traffic events
+This remains an expected/injected SLA result, not the appliance's own observed SLA.
 
-Current MVP:
-- standard harmless EICAR anti-malware test artifact
-- benign HTTP callback sink for C2/beacon visibility tests
-- availability-stress scenario that emulates the WAN impact of a DDoS/saturation event without transmitting attack traffic
+### 5. Active measurement engine
 
-The project deliberately does **not** embed malware or expose an unrestricted packet-flood launcher.
+Independent bounded measurements support ICMP echo, TCP connect, HTTP/HTTPS response and DNS A-query response.
 
-Future:
-- bounded lab-only traffic generator
-- explicit target allowlists
-- RFC1918/lab-subnet restriction by default
-- hard PPS/Mbit/s caps
-- hard duration limits
-- emergency stop
-- connection-pressure profiles
-- DNS anomaly generator
-- sanitized PCAP replay
-- IDS/IPS-safe signature test library
+Probe guardrails:
 
-## Feature areas 6-10
+- maximum 20 configured probes
+- 2–3600 second interval
+- 0.2–10 second timeout
+- optional inner/outer interface binding
+- persisted results
+- failure/recovery transition events
+- Lab Session association
 
-### 6. Custom scenario builder
+#### Transparent-path scope
 
-User-defined scenarios are stored in `config.json` and use the same transient runtime engine as built-ins. The MVP accepts validated JSON steps with three actions:
+A normal NetEm WAN bridge is intentionally unnumbered. Automatic-source probes therefore follow the NetEm host routing table.
 
-- `quality` — 0-100%
-- `fault` — normal, bidirectional blackhole, downstream blackhole or upstream blackhole
-- `mtu` — 576-9000 bytes, or 0 to restore
+They are useful independent service measurements and can be associated with a WAN for correlation, but they are not represented as proof that the selected transparent path was traversed.
 
-A scenario is limited to 30 steps and each individual wait is capped at one hour.
+Inner/outer interface binding is available when the interface has usable Layer-3 routing/source addressing. A future remote probe agent is the preferred method for true appliance-side independent path measurement.
 
-### 7. Path MTU testing
+### 6. Persistent telemetry
 
-The current implementation can temporarily lower the MTU of the WAN bridge and its inner/outer member interfaces. The original MTUs are retained in memory and restored when requested or when a scenario finishes.
+SQLite storage lives in runtime/telemetry.db.
 
-This is intentionally described as **path MTU constriction**, not yet as a full PMTUD blackhole. A future implementation can use nftables to drop oversized IPv4/IPv6 packets and selectively suppress ICMP/ICMPv6 feedback for more exact PMTUD failure testing.
+Approximately every two seconds the server records per WAN:
 
-### 8. Generic SLA evaluator
+- downstream Mbit/s
+- upstream Mbit/s
+- downstream PPS
+- upstream PPS
+- injected latency
+- injected jitter
+- injected packet loss
+- quality
+- expected SLA pass/fail
+- runtime fault
+- active Lab Session ID
 
-A persisted vendor-neutral SLA profile defines maximum:
+Active-probe results are stored in the same database.
 
-- latency
-- jitter
-- packet loss
+Default retention is 168 hours.
 
-NetEm compares these limits with the effective impairment it is injecting. Any active runtime fault also fails the generic data-plane check.
+Analytics can query 15-minute, 1-hour, 6-hour, 24-hour and 7-day ranges. The history API bucket-aggregates long time ranges to keep responses bounded.
 
-This is an **expected/injected SLA state**, not measured vendor telemetry. Future vendor adapters should display the appliance's measured SLA alongside NetEm's expected result.
+### 7. Lab Sessions and evidence
 
-### 9. Persistent history and export
+A Lab Session groups one validation objective.
 
-Runtime events are appended to `runtime/events.jsonl` and reloaded when the application starts. The Lab Tools UI can export recent history as:
+While active, the session ID is associated with runtime events, WAN telemetry, probe samples, scenario runs and assertion events.
 
-- JSON
-- CSV
+Completing a session generates a report snapshot containing:
 
-History includes scenario activity, faults, MTU changes, SLA changes, captures and safe security-test events. The runtime directory is excluded from Git.
+- PASS / FAIL / UNSCORED result
+- scenario completion status
+- assertion outcomes and observed values
+- WAN telemetry summary
+- expected-SLA-fail sample count
+- probe success rate
+- average/P95/max probe response time
+- event summary and evidence timeline
 
-### 10. Bounded packet capture
+The HTML report is printable and the same evidence is available as JSON.
 
-When `tcpdump` is installed, Lab Tools can capture on the configured inner or outer WAN interface.
+An interrupted service restart marks the in-progress session as interrupted instead of pretending it resumed cleanly.
 
-Guardrails in the MVP:
+### 8. Safe security and diagnostics
+
+Current safe capabilities include the standard harmless EICAR artifact, benign HTTP callback sink, availability-stress scenario without transmitting attack traffic, and bounded tcpdump capture.
+
+Packet capture guardrails:
 
 - configured WAN interfaces only
-- maximum 120-second duration
+- one capture at a time
+- maximum 120 seconds
 - maximum 20,000 packets
 - 256-byte snap length
-- one capture at a time
-- explicit stop
-- download of the resulting PCAP
+- explicit stop/download
 
-The service needs `CAP_NET_RAW` in addition to `CAP_NET_ADMIN` for this optional feature.
+CAP_NET_RAW is required for packet capture and may also be required by the OS for explicit interface-bound probe sockets.
 
-## Release management
+## Current API surface
 
-The repository uses Release Please with the `simple` release strategy.
+Read-oriented integration endpoints include:
 
-Release state is source controlled in:
+- /api/v1/state
+- /api/v1/telemetry
+- /api/v1/history
+- /api/v1/probes
+- /api/v1/events
+- /metrics
+- completed Lab Session report JSON
 
-- `version.txt`
-- `.release-please-manifest.json`
-- `release-please-config.json`
-- `CHANGELOG.md`
+The API model is vendor-neutral.
 
-The GitHub Actions workflow runs against `main`. Release Please collects Conventional Commits, opens/updates a release PR, updates the version/changelog in that PR, and creates the GitHub tag/release when the release PR is merged.
+## Injected, measured and observed
 
-The NetEm updater independently treats `origin/main` as the stable appliance update channel. This means a VM originally installed from an old feature branch can still fast-forward to the stable mainline after that feature branch is merged or deleted.
+The platform separates three states:
 
----
+    Injected by NetEm      Measured independently      Observed by appliance
+    -----------------      ----------------------      ---------------------
+    80 ms delay            HTTP response 96 ms         future vendor SLA 84 ms
+    3% loss                probe reachability          future vendor loss 3.2%
+    expected SLA FAIL      measurement failed          future member unhealthy
 
-## External projects and dependencies
+The third column is the next major integration milestone.
 
-The current MVP does not vendor another GitHub project because the implemented functions map directly to Linux `tc/netem`, Linux interface counters and Flask.
+## Multi-vendor adapter principle
 
-Where an existing mature tool is clearly better than reimplementing functionality, the preferred integration model is to **wrap an installed tool rather than copy its code into this repository**. Likely candidates for later phases include:
+Vendor integrations should be adapters, not dependencies of the impairment engine.
 
-- `iperf3` for controlled throughput/load generation
-- `tcpreplay` for sanitized PCAP replay
-- a dedicated packet generator for bounded PPS testing
+A normalized adapter should expose member/link health, observed latency/jitter/loss, appliance SLA state, selected path and transition timestamps.
 
-Any traffic-generation integration should remain opt-in and constrained to explicitly configured lab targets.
+Fortinet is the recommended first adapter for the current lab. Cisco, Palo Alto, Juniper, VMware/VeloCloud, Versa and others should map into the same common model.
 
 ## Persistence model
 
-Persisted:
+Persisted configuration:
+
 - WAN topology
-- selected access profile
-- nominal bandwidth override
-- quality
-- manual Custom impairment state
-- editable presets
+- access profiles
+- line-rate overrides
+- quality/custom impairment state
+- custom scenarios
+- active-measurement definitions
+- generic SLA profile
+
+Persisted runtime evidence:
+
+- runtime/events.jsonl
+- runtime/sessions.json
+- runtime/telemetry.db
+- runtime/captures/
 
 Transient by design:
-- runtime faults
-- scenario execution state
-- runtime event history
-- browser telemetry history
-- security-test requests
 
-This prevents a temporary destructive lab condition from unexpectedly returning after an application or VM restart.
+- active blackholes
+- temporary MTU changes
+- active scenario execution
+- active packet-capture process
+- active Lab Session process state
 
-## Multi-vendor principle
+Destructive transient conditions are not restored automatically after an application restart.
 
-Vendor integrations should be implemented as adapters, not as dependencies of the impairment engine.
+## Release management
 
-A future adapter interface should expose a small common model:
+Release Please manages semantic release state through version.txt, CHANGELOG.md, release-please-config.json and .release-please-manifest.json.
 
-```json
-{
-  "vendor": "example",
-  "members": [
-    {
-      "name": "WAN1",
-      "health": "up",
-      "latency_ms": 22,
-      "jitter_ms": 4,
-      "loss_pct": 0.2,
-      "selected": true
-    }
-  ]
-}
-```
+The appliance updater independently treats origin/main as the stable update channel and only installs fast-forward updates.
 
-That allows the UI to compare injected vs observed behavior without assuming a particular vendor schema.
+## Next architecture milestones
+
+See docs/ROADMAP.md.
+
+Current priorities are:
+
+1. vendor adapter framework, Fortinet first;
+2. parallel multi-WAN scenarios;
+3. bounded traffic generation;
+4. session comparison analytics;
+5. qdisc/update preflight and self-verification;
+6. remote probe agent;
+7. shared-lab authentication and broader scale.

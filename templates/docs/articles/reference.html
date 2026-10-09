@@ -1,100 +1,46 @@
-
 <h2 id="quality-labels">Quality labels</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Quality</th><th>Label</th></tr></thead>
-<tbody>
-<tr><td>90–100</td><td>Excellent</td></tr>
-<tr><td>75–89</td><td>Good</td></tr>
-<tr><td>50–74</td><td>Fair</td></tr>
-<tr><td>25–49</td><td>Poor</td></tr>
-<tr><td>1–24</td><td>Critical</td></tr>
-<tr><td>0</td><td>Down</td></tr>
+<div class="docs-table"><table><thead><tr><th>Quality</th><th>Label</th></tr></thead><tbody>
+<tr><td>90–100</td><td>Excellent</td></tr><tr><td>75–89</td><td>Good</td></tr><tr><td>50–74</td><td>Fair</td></tr><tr><td>25–49</td><td>Poor</td></tr><tr><td>1–24</td><td>Critical</td></tr><tr><td>0</td><td>Down</td></tr>
 </tbody></table></div>
 
-<h2 id="scenario-limits">Scenario limits</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Item</th><th>Limit</th></tr></thead>
-<tbody>
-<tr><td>Stages per scenario</td><td>1–30</td></tr>
-<tr><td>Wait per stage</td><td>0–3600 seconds</td></tr>
-<tr><td>Quality value</td><td>0–100</td></tr>
-<tr><td>MTU value</td><td>576–9000 bytes, or 0 to restore</td></tr>
-<tr><td>Custom scenarios retained</td><td>20</td></tr>
-<tr><td>Scenario label</td><td>80 characters</td></tr>
+<h2 id="scenario-limits">Scenario and conditional limits</h2>
+<div class="docs-table"><table><thead><tr><th>Item</th><th>Limit</th></tr></thead><tbody>
+<tr><td>Stages per scenario</td><td>1–30</td></tr><tr><td>Timed <code>after</code> delay</td><td>0–3600 seconds</td></tr><tr><td>Conditional timeout</td><td>1–600 seconds</td></tr><tr><td>Condition poll interval</td><td>0.25–5 seconds</td></tr><tr><td>Quality</td><td>0–100</td></tr><tr><td>MTU</td><td>576–9000, or 0 restore</td></tr><tr><td>Custom scenarios</td><td>20</td></tr>
 </tbody></table></div>
 
-<h2 id="fault-values">Runtime fault values</h2>
+<h2 id="probe-limits">Active measurement limits</h2>
+<div class="docs-table"><table><thead><tr><th>Item</th><th>Limit</th></tr></thead><tbody>
+<tr><td>Probe types</td><td>ICMP, TCP, HTTP/HTTPS, DNS</td></tr><tr><td>Configured probes</td><td>20</td></tr><tr><td>Interval</td><td>2–3600 seconds</td></tr><tr><td>Timeout</td><td>0.2–10 seconds</td></tr><tr><td>Source modes</td><td>Automatic host routing, inner interface binding, outer interface binding</td></tr>
+</tbody></table></div>
+
+<h2 id="capture-limits">Packet capture limits</h2>
+<p>One configured-WAN capture at a time; 5–120 seconds; 20,000 packets; 256-byte snap length; name resolution disabled.</p>
+
+<h2 id="storage">Persistent storage</h2>
+<div class="docs-table"><table><thead><tr><th>Path</th><th>Contents</th></tr></thead><tbody>
+<tr><td><code>config.json</code></td><td>WANs, access profiles, custom scenarios, probes and SLA profile</td></tr>
+<tr><td><code>runtime/events.jsonl</code></td><td>Runtime event stream</td></tr>
+<tr><td><code>runtime/sessions.json</code></td><td>Up to 100 lab-session records and completed report snapshots</td></tr>
+<tr><td><code>runtime/telemetry.db</code></td><td>SQLite WAN telemetry and active-probe samples</td></tr>
+<tr><td><code>runtime/captures/</code></td><td>Bounded PCAP files</td></tr>
+</tbody></table></div>
+<p>SQLite time-series retention is currently 168 hours. WAN samples are collected approximately every two seconds while the service is running.</p>
+
+<h2 id="current-boundaries">Current boundaries</h2>
 <ul>
-  <li><code>normal</code> — restore normal forwarding and saved profile.</li>
-  <li><code>blackhole</code> — bidirectional data-plane blackhole.</li>
-  <li><code>downstream_blackhole</code> — block the direction toward the appliance.</li>
-  <li><code>upstream_blackhole</code> — block the direction toward the upstream network.</li>
+<li>The UI currently supports two WAN links.</li>
+<li>Active probe Automatic source follows the NetEm host route; transparent WAN ports without L3 addressing cannot independently prove appliance-side path behavior.</li>
+<li>Vendor-observed SLA/path-selection integration is not yet implemented.</li>
+<li>PMTUD blackhole simulation, bounded traffic generation and PCAP replay remain roadmap items.</li>
+<li>Built-in authentication is not yet provided.</li>
 </ul>
-
-<h2 id="capture-limits">Packet-capture limits</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Item</th><th>Value</th></tr></thead>
-<tbody>
-<tr><td>Duration accepted by backend</td><td>5–120 seconds</td></tr>
-<tr><td>UI duration choices</td><td>15, 30, 60, 120 seconds</td></tr>
-<tr><td>Packet limit</td><td>20,000</td></tr>
-<tr><td>Snap length</td><td>256 bytes</td></tr>
-<tr><td>Concurrent captures</td><td>1</td></tr>
-<tr><td>Selectable interface</td><td>Configured WAN inner or outer only</td></tr>
-</tbody></table></div>
-
-<h2 id="event-history">Event history</h2>
-<p>At startup, NetEm loads up to the last 500 JSONL events from <code>runtime/events.jsonl</code>. In-memory history is also capped at 500 events. Persistence failures are intentionally non-fatal so inability to write history does not break the lab control path.</p>
-
-<h2 id="storage">Storage locations</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Path</th><th>Contents</th></tr></thead>
-<tbody>
-<tr><td><code>config.json</code></td><td>WAN mappings, profile edits, per-WAN state, custom scenarios, SLA profile</td></tr>
-<tr><td><code>version.txt</code></td><td>Application semantic version</td></tr>
-<tr><td><code>runtime/events.jsonl</code></td><td>Persistent events</td></tr>
-<tr><td><code>runtime/captures/</code></td><td>Packet captures</td></tr>
-<tr><td><code>CHANGELOG.md</code></td><td>Release history generated/maintained through Release Please workflow</td></tr>
-</tbody></table></div>
-
-<h2 id="terminology">Terminology</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Term</th><th>Definition</th></tr></thead>
-<tbody>
-<tr><td>Baseline/profile</td><td>The nominal characteristics of an access technology at 100% quality.</td></tr>
-<tr><td>Quality mode</td><td>Effective values are calculated from the selected access model and quality percentage.</td></tr>
-<tr><td>Custom mode</td><td>Effective impairment values are explicitly specified and persisted.</td></tr>
-<tr><td>Effective</td><td>The values NetEm currently intends to apply after resolving profile/quality/custom state.</td></tr>
-<tr><td>Runtime fault</td><td>Temporary forwarding failure such as a blackhole that does not replace saved profile state.</td></tr>
-<tr><td>Expected SLA</td><td>Pass/fail computed from injected state and generic thresholds.</td></tr>
-<tr><td>Observed SLA</td><td>Future vendor-adapter data reported by the appliance under test.</td></tr>
-<tr><td>Inner</td><td>WAN interface facing the appliance.</td></tr>
-<tr><td>Outer</td><td>WAN interface facing the upstream router/network.</td></tr>
-</tbody></table></div>
-
-<h2 id="current-boundaries">Current product boundaries</h2>
-<ul>
-  <li>The UI currently supports two configured WAN links.</li>
-  <li>Live chart history is browser-resident and resets on reload; event history is persistent.</li>
-  <li>Latency/jitter/loss charts show injected state, not active probe measurements.</li>
-  <li>Vendor-specific observed SLA/path-selection integrations are roadmap items.</li>
-  <li>Path MTU constriction is available, but a full PMTUD blackhole mode is not yet implemented.</li>
-  <li>Traffic generation and PCAP replay are reserved/planned functions, not currently active.</li>
-  <li>The application has no built-in user authentication layer; deploy access controls appropriate to the lab environment/reverse proxy.</li>
-</ul>
-
-<h2 id="service-capabilities">Linux capabilities</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Capability</th><th>Used for</th></tr></thead>
-<tbody>
-<tr><td><code>CAP_NET_ADMIN</code></td><td>Bridges, interface MTU and traffic-control/qdisc changes.</td></tr>
-<tr><td><code>CAP_NET_RAW</code></td><td>Packet capture with tcpdump.</td></tr>
-</tbody></table></div>
 
 <h2 id="api-routes">Read-only API routes</h2>
 <ul>
-  <li><code>/api/v1/state</code> — normalized current lab state.</li>
-  <li><code>/api/v1/telemetry</code> — raw + directional cumulative interface counters.</li>
-  <li><code>/api/v1/events?limit=N</code> — runtime event history.</li>
-  <li><code>/metrics</code> — Prometheus exposition.</li>
+<li><code>/api/v1/state</code> — normalized current state including scenario/session/probe state.</li>
+<li><code>/api/v1/telemetry</code> — raw/directional cumulative counters.</li>
+<li><code>/api/v1/history?link_id=wan1&amp;minutes=60</code> — aggregated SQLite history + probe samples.</li>
+<li><code>/api/v1/probes</code> — configured probes and latest results.</li>
+<li><code>/api/v1/events?limit=N</code> — runtime events.</li>
+<li><code>/metrics</code> — Prometheus exposition.</li>
 </ul>
