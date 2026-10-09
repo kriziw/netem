@@ -25,6 +25,7 @@
       <div class="eyebrow" style="margin:0 0 3px">Running test</div>
       <strong id="running-test-name">{{ scenario_state.scenario_name }}</strong>
       <span class="card-sub"> · {{ scenario_state.link_id }} · <span id="running-test-stage">{{ scenario_state.step_label }}</span></span>
+      <div class="field-help" id="running-test-condition">{% if scenario_state.condition %}Waiting for {{ scenario_state.condition.description }}{% endif %}</div>
     </div>
     <form method="post" action="{{ url_for('lab_scenario_stop') }}">
       <input type="hidden" name="return_to" value="overview">
@@ -467,8 +468,13 @@ NetEmUI.createLiveClient({
     if (state.scenario?.active) {
       const stage=document.getElementById("running-test-stage");
       if(stage) stage.textContent=state.scenario.step_label || "running";
+      const condition=document.getElementById("running-test-condition");
+      if(condition) condition.textContent=state.scenario.condition?.description ? "Waiting for " + state.scenario.condition.description + (state.scenario.condition.observed != null ? " · observed " + state.scenario.condition.observed : "") : "";
       const progress=document.getElementById("running-test-progress");
-      if(progress) progress.style.width=Math.min(96,12 + Number(state.scenario.step||0)*14) + "%";
+      if(progress) {
+        const total=Math.max(1,Number(state.scenario.step_count||1));
+        progress.style.width=Math.min(100,Math.max(4,Number(state.scenario.step||0)/total*100)) + "%";
+      }
     }
   }
 });
