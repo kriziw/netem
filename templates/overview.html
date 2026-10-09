@@ -7,7 +7,7 @@
   <div>
     <div class="eyebrow">Live lab operations</div>
     <h1>Command Center</h1>
-    <p class="page-description">See the current paths, change a WAN in one click and watch the result without leaving the operational view.</p>
+    <p class="page-description">See the current paths, change a WAN in one click and watch the result without leaving the operational view. Traffic rates are measured; delay, jitter, loss, quality and model SLA describe NetEm’s requested impairments. Use active probes in Analytics for measured response times.</p>
   </div>
   <div class="page-actions">
     {% if not session_state.active %}
@@ -62,13 +62,13 @@
                 <div class="live-path-sub">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
               </div>
               <div class="live-path-metrics">
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms latency</span></div>
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong><span>% loss</span></div>
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</strong><span>quality</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms injected delay</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong><span>% injected loss</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</strong><span>model quality</span></div>
               </div>
               <div class="live-path-right">
                 <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
-                  {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("SLA fail" if not link.sla.pass else link.quality_status) }}
+                  {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("Model SLA fail" if not link.sla.pass else "Model SLA pass") }}
                 </span>
                 <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
                 <div class="live-activity-line">
@@ -106,7 +106,7 @@
                 <div class="card-title">{{ link.label }}</div>
                 <div class="card-sub">{{ link.preset_name }}</div>
               </div>
-              <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "SLA FAIL" if not link.sla.pass else "SLA PASS" }}</span>
+              <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "MODEL FAIL" if not link.sla.pass else "MODEL PASS" }}</span>
             </div>
             <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
             <div class="wan-live-delta" data-live="{{ link.id }}-delta">waiting for live sample</div>
@@ -120,8 +120,8 @@
             </div>
             <div class="metric-row" style="margin-top:8px">
               <div class="metric-box"><div class="metric-label">Up</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
-              <div class="metric-box"><div class="metric-label">Latency</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
-              <div class="metric-box"><div class="metric-label">Loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
+              <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
+              <div class="metric-box"><div class="metric-label">Injected loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
             </div>
           </button>
           {% endfor %}
@@ -165,7 +165,7 @@
       </div>
       <div class="card-pad">
         <div class="grid grid-2">
-          <div class="metric-box"><div class="metric-label">Healthy WANs</div><div class="metric-value" id="overview-health">{{ healthy_links }}/{{ links|length }}</div></div>
+          <div class="metric-box"><div class="metric-label">Model SLA passes</div><div class="metric-value" id="overview-health">{{ healthy_links }}/{{ links|length }}</div></div>
           <div class="metric-box"><div class="metric-label">Faults</div><div class="metric-value" id="overview-faults">{{ global_runtime.active_fault_count }}</div></div>
           <div class="metric-box"><div class="metric-label">Scenario</div><div class="metric-value" style="font-size:11px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div></div>
           <div class="metric-box"><div class="metric-label">Capture</div><div class="metric-value" style="font-size:11px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div></div>
@@ -272,9 +272,9 @@
   <div class="drawer-body">
     <div class="section-title" style="margin-top:0">Live state</div>
     <div class="metric-row">
-      <div class="metric-box"><div class="metric-label">Latency</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-latency">{{ link.effective.delay_ms }}</span> <span class="metric-unit">ms</span></div></div>
-      <div class="metric-box"><div class="metric-label">Jitter</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-jitter">{{ link.effective.jitter_ms }}</span> <span class="metric-unit">ms</span></div></div>
-      <div class="metric-box"><div class="metric-label">Loss</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-loss">{{ link.effective.loss_pct }}</span><span class="metric-unit">%</span></div></div>
+      <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-latency">{{ link.effective.delay_ms }}</span> <span class="metric-unit">ms</span></div></div>
+      <div class="metric-box"><div class="metric-label">Injected jitter</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-jitter">{{ link.effective.jitter_ms }}</span> <span class="metric-unit">ms</span></div></div>
+      <div class="metric-box"><div class="metric-label">Injected loss</div><div class="metric-value"><span data-live="{{ link.id }}-drawer-loss">{{ link.effective.loss_pct }}</span><span class="metric-unit">%</span></div></div>
     </div>
 
     <div class="section-title">Degrade link</div>
@@ -459,15 +459,15 @@ NetEmUI.createLiveClient({
 
       const h = history[link.id];
       const i = h?.down?.length ? h.down.length - 1 : -1;
-      const down = i >= 0 ? h.down[i] : 0;
-      const up = i >= 0 ? h.up[i] : 0;
-      const downPps = i >= 0 ? Number(h.rxpps[i] || 0) : 0;
-      const upPps = i >= 0 ? Number(h.txpps[i] || 0) : 0;
-      const totalPps = downPps + upPps;
-      const totalRate = down + up;
+      const down = i >= 0 ? h.down[i] : null;
+      const up = i >= 0 ? h.up[i] : null;
+      const downPps = i >= 0 ? h.rxpps[i] : null;
+      const upPps = i >= 0 ? h.txpps[i] : null;
+      const totalPps = downPps == null || upPps == null ? null : downPps + upPps;
+      const totalRate = down == null || up == null ? null : down + up;
       const telemetryLink = (telemetry.links || []).find(item => item.id === link.id);
       const interfaceAvailable = Boolean(telemetryLink?.inner?.available && telemetryLink?.outer?.available);
-      const hasRateSample = Boolean(h && h.timestamps && h.timestamps.length >= 2);
+      const hasRateSample = down != null && up != null;
 
       if (hasRateSample && (totalPps > 0 || totalRate > 0)) {
         lastTrafficSeen[link.id] = Number(telemetry.timestamp || Date.now()/1000);
@@ -475,7 +475,7 @@ NetEmUI.createLiveClient({
 
       let activity = "IDLE";
       let activityClass = "idle";
-      if (link.fault !== "normal" || !link.sla?.pass) {
+      if (link.fault !== "normal" || telemetryLink?.inner?.carrier === false || telemetryLink?.outer?.carrier === false) {
         activity = "FAILED";
         activityClass = "failed";
       } else if (!interfaceAvailable || !hasRateSample) {
@@ -506,11 +506,11 @@ NetEmUI.createLiveClient({
 
       document.querySelectorAll('[data-live="' + link.id + '-status"]').forEach(status => {
         status.className = "status " + NetEmUI.statusClass(link);
-        status.textContent = link.fault !== "normal" ? link.fault.replaceAll("_"," ") : (link.sla?.pass ? "Healthy" : "SLA fail");
+        status.textContent = link.fault !== "normal" ? link.fault.replaceAll("_"," ") : (link.sla?.pass ? "Model SLA pass" : "Model SLA fail");
       });
       document.querySelectorAll('[data-live="' + link.id + '-sla"]').forEach(status => {
         status.className = "status " + (link.sla?.pass ? "good" : "bad");
-        status.textContent = link.sla?.pass ? "SLA PASS" : "SLA FAIL";
+        status.textContent = link.sla?.pass ? "MODEL PASS" : "MODEL FAIL";
       });
 
       document.querySelectorAll(
@@ -534,10 +534,13 @@ NetEmUI.createLiveClient({
       const delta = document.querySelector('[data-live="' + link.id + '-delta"]');
       if (delta) {
         const prev = previousRates[link.id];
-        if (prev != null && i >= 0) {
+        if (prev != null && down != null) {
           const diff = down - prev;
           delta.className = "wan-live-delta " + (diff > .1 ? "up" : diff < -.1 ? "down" : "");
           delta.textContent = Math.abs(diff) < .1 ? "stable" : (diff > 0 ? "↑ +" : "↓ −") + NetEmUI.formatRate(Math.abs(diff)) + " since previous sample";
+        } else {
+          delta.className = "wan-live-delta";
+          delta.textContent = "waiting for comparable samples";
         }
         previousRates[link.id] = down;
       }

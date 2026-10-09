@@ -491,3 +491,36 @@ Custom scenarios execute `traffic_generator` actions (`start`, `adjust`, `stop`)
 For the dual-NIC simulator, controlled target routing, FortiGate policy/SNAT and verification steps, see the [Traffic Simulator deployment guide](https://github.com/kriziw/netem-traffic-simulator#installation--controlled-target). Simulator API keys are stored separately from `config.json`; the browser controls require session form tokens. NetEm remains a management-network lab application and has no general user authentication layer.
 
 Run regression coverage with `python -m unittest discover -s tests -v`.
+
+### Telemetry accuracy and measurement scope
+
+- Download = inner-port TX; upload = outer-port TX. Rates use counter deltas
+  over monotonic elapsed time, in decimal Mbit/s and packets/s. They represent
+  traffic transmitted by the bridge ports, including background/control traffic,
+  rather than a capacity speed test or application goodput. Driver counters and
+  offloads can affect packet granularity; Ethernet FCS and physical-layer overhead
+  are not part of the standard byte counters.
+- The first observation, failed reads, counter resets, interface replacement or
+  remapping, and service restarts establish a baseline. They show missing rates
+  rather than artificial zero traffic or recovery spikes. Idle is a valid zero
+  delta; carrier-down is displayed as failed. Historical averages and session
+  summaries exclude newly recorded invalid rate intervals.
+- `/api/v1/telemetry` includes a process `sampler_id`, per-link monotonic timestamps,
+  interface indices and `counters_valid`. Unreadable raw counters are JSON `null`;
+  Prometheus omits unavailable byte counters. `/api/v1/history` returns `null`
+  rates for buckets without valid measurements. Existing database history is
+  retained, but validity cannot be recovered retrospectively for older samples.
+- Delay, jitter, loss, quality and model SLA are requested impairment-model
+  values, not measured path health and not proof that the kernel applied the
+  configuration. The Command Center labels these explicitly. The tc view reports
+  installed qdisc parameters; active probes report measured response times.
+- ICMP measures echo round-trip time. TCP measures resolution plus connection;
+  HTTP includes resolution, connection, TLS (for HTTPS) and the response status
+  line; DNS measures a resolver transaction. These have different meanings and
+  should not be combined into one latency metric. Automatic probes follow the
+  NetEm host routing table and can use management routing: assigning a WAN ID
+  does not establish that a probe crossed that transparent WAN. Verify the path
+  or use an endpoint behind the SD-WAN appliance for end-user measurements.
+
+Counter semantics: [Linux interface statistics](https://www.kernel.org/doc/html/latest/networking/statistics.html).
+ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping.8.html).

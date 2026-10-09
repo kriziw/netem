@@ -19,7 +19,7 @@
   {% for link in links %}
   <div class="stat">
     <div class="stat-label">{{ link.label }} · expected SLA</div>
-    <div class="stat-value {{ 'good' if link.sla.pass else 'bad' }}" data-summary-sla="{{ link.id }}">{{ "PASS" if link.sla.pass else "FAIL" }}</div>
+    <div class="stat-value {{ 'good' if link.sla.pass else 'bad' }}" data-summary-sla="{{ link.id }}">{{ "MODEL PASS" if link.sla.pass else "MODEL FAIL" }}</div>
     <div class="stat-sub">{{ link.preset_name }} · quality <span data-summary-quality="{{ link.id }}">{{ link.runtime_quality }}%</span></div>
   </div>
   {% endfor %}
@@ -306,10 +306,10 @@ function historyFromSamples(samples) {
     latency:[], jitter:[], loss:[], quality:[], timestamps:[]
   };
   (samples || []).forEach(sample => {
-    h.down.push(Number(sample.down_mbps || 0));
-    h.up.push(Number(sample.up_mbps || 0));
-    h.rxpps.push(Number(sample.down_pps || 0));
-    h.txpps.push(Number(sample.up_pps || 0));
+    h.down.push(sample.down_mbps == null ? null : Number(sample.down_mbps));
+    h.up.push(sample.up_mbps == null ? null : Number(sample.up_mbps));
+    h.rxpps.push(sample.down_pps == null ? null : Number(sample.down_pps));
+    h.txpps.push(sample.up_pps == null ? null : Number(sample.up_pps));
     h.latency.push(Number(sample.delay_ms || 0));
     h.jitter.push(Number(sample.jitter_ms || 0));
     h.loss.push(Number(sample.loss_pct || 0));
@@ -331,7 +331,7 @@ function mergeHistory(base, live) {
     if (!source?.timestamps) return;
     source.timestamps.forEach((ts,index) => {
       const row = {timestamp:Number(ts)};
-      keys.forEach(key => row[key]=Number(source[key]?.[index] ?? 0));
+      keys.forEach(key => row[key]=source[key]?.[index] == null ? null : Number(source[key][index]));
       points.push(row);
     });
   }
@@ -441,7 +441,7 @@ function render(history,state) {
   const i=h.down.length-1;
   if(i>=0){
     document.getElementById("live-throughput-value").textContent=NetEmUI.formatRate(h.down[i])+" ↓ · "+NetEmUI.formatRate(h.up[i])+" ↑";
-    document.getElementById("live-pps-value").textContent=Math.round(h.rxpps[i])+" down · "+Math.round(h.txpps[i])+" up";
+    document.getElementById("live-pps-value").textContent=NetEmUI.formatPps(h.rxpps[i])+" down · "+NetEmUI.formatPps(h.txpps[i])+" up";
     document.getElementById("live-delay-value").textContent=NetEmUI.formatNumber(h.latency[i],1)+" ms · "+NetEmUI.formatNumber(h.jitter[i],1)+" ms";
     document.getElementById("live-loss-value").textContent=NetEmUI.formatNumber(h.loss[i],2)+"% · "+Math.round(h.quality[i])+"% quality";
     document.querySelectorAll("[data-chart-empty]").forEach(el => el.style.display=h.down.length>1?"none":"grid");
@@ -450,7 +450,7 @@ function render(history,state) {
   document.getElementById("compare-latency").textContent=NetEmUI.formatNumber(link.effective?.delay_ms||0,1)+" ms";
   document.getElementById("compare-jitter").textContent=NetEmUI.formatNumber(link.effective?.jitter_ms||0,1)+" ms";
   document.getElementById("compare-loss").textContent=NetEmUI.formatNumber(link.effective?.loss_pct||0,2)+"%";
-  document.getElementById("compare-sla").textContent=link.sla?.pass?"PASS":"FAIL";
+  document.getElementById("compare-sla").textContent=link.sla?.pass?"MODEL PASS":"MODEL FAIL";
   renderProbeState(state,id);
 }
 
@@ -468,7 +468,7 @@ const client=NetEmUI.createLiveClient({
       const sla=document.querySelector('[data-summary-sla="'+link.id+'"]');
       const quality=document.querySelector('[data-summary-quality="'+link.id+'"]');
       if(sla){
-        sla.textContent=link.sla?.pass?"PASS":"FAIL";
+        sla.textContent=link.sla?.pass?"MODEL PASS":"MODEL FAIL";
         sla.className="stat-value "+(link.sla?.pass?"good":"bad");
       }
       if(quality) quality.textContent=Number(link.quality??100)+"%";

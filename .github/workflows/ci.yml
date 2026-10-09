@@ -244,8 +244,14 @@ jobs:
                       path.unlink()
           PY
 
-      - name: Traffic Simulator regression tests
-        run: python -m unittest discover -s tests -v
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate telemetry and Traffic Simulator regressions
+        run: |
+          python -m unittest discover -s tests -v
+          node --test tests/telemetry.test.js
 
       - name: Validate release configuration
         run: |
