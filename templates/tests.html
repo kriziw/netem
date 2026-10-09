@@ -63,7 +63,7 @@
   <div class="empty-state">
     <strong>Corporate Traffic Simulator is not connected</strong>
     Connect it under Settings → Integrations. NetEm can automatically detect simulators on the management network or use a manually entered IP/API key.
-    <div style="margin-top:10px"><a class="btn btn-primary" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Configure Traffic Simulator</a></div>
+    <div style="margin-top:10px"><a class="btn btn-primary" data-simulator-modal="integration" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Configure Traffic Simulator</a></div>
   </div>
 </section>
 {% elif not traffic_generator.connected %}
@@ -74,7 +74,7 @@
   </div>
   <div class="card-pad">
     <div class="docs-warning"><strong>API connection failed:</strong> {{ traffic_generator.error or "Unknown error" }}</div>
-    <a class="btn" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
+    <a class="btn" data-simulator-modal="integration" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
   </div>
 </section>
 {% else %}

@@ -5,3 +5,5 @@ config.json
 .env
 .venv/
 runtime/
+
+node_modules/

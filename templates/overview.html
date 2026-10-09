@@ -206,7 +206,7 @@
             <div class="k">Availability</div><div class="v" data-tg-availability>{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
           </div>
           <div class="actions" style="margin-top:10px">
-            <a class="btn btn-sm" href="{{ url_for('tests') }}#corporate-traffic">Control</a>
+            <a class="btn btn-sm" data-simulator-modal="workload" href="{{ url_for('tests') }}#corporate-traffic">Control</a>
             {% if traffic_generator.status.status in ('starting','running') %}
             <form method="post" action="{{ url_for('traffic_generator_stop') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
               <input type="hidden" name="return_to" value="overview">
@@ -216,10 +216,10 @@
           </div>
         {% elif traffic_generator.configured %}
           <div class="empty-state"><strong>Simulator unavailable</strong>{{ traffic_generator.error or "Check the integration settings." }}</div>
-          <a class="btn btn-sm" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
+          <a class="btn btn-sm" data-simulator-modal="integration" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
         {% else %}
           <div class="empty-state"><strong>No simulator connected</strong>Connect a Corporate Traffic Simulator to see employee experience during WAN tests.</div>
-          <a class="btn btn-sm" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Detect simulator</a>
+          <a class="btn btn-sm" data-simulator-modal="integration" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Detect simulator</a>
         {% endif %}
       </div>
     </section>

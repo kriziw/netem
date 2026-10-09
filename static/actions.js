@@ -82,7 +82,7 @@ window.NetEmActions = (() => {
   }
   document.addEventListener('submit', async event => {
     const form = event.target;
-    if (event.defaultPrevented || !(form instanceof HTMLFormElement) || form.method.toLowerCase() !== 'post') return;
+    if (event.defaultPrevented || form.closest?.('#traffic-simulator-dialog') || !(form instanceof HTMLFormElement) || form.method.toLowerCase() !== 'post') return;
     const action = new URL(form.getAttribute('action') || location.href, location.href);
     if (action.origin !== location.origin || form.target === '_blank') return;
     event.preventDefault();

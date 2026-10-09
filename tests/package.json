@@ -1,0 +1,7 @@
+{
+  "name": "netem-ui-tests",
+  "private": true,
+  "devDependencies": {
+    "jsdom": "26.1.0"
+  }
+}

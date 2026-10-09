@@ -252,6 +252,9 @@ jobs:
         run: |
           python -m unittest discover -s tests -v
           node --test tests/telemetry.test.js
+          npm ci --prefix tests
+          node --test tests/modal.test.js
+          node --check static/simulator-dialog.js
 
       - name: Validate release configuration
         run: |
