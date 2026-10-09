@@ -93,7 +93,8 @@
       <p class="page-description" style="margin-top:0">A session answers “what were we validating?” while tests answer “what impairment did we run?”. This is the foundation for future automatic pass/fail reports, vendor-response timing and downloadable test evidence.</p>
       <div class="kv" style="margin-top:13px">
         <div class="k">Current</div><div class="v">named run · start/end time · associated event count</div>
-        <div class="k">Next</div><div class="v">baseline snapshot · test results · captures · vendor observations · report export</div>
+        <div class="k">Now</div><div class="v">test results · conditional assertions · persisted WAN telemetry · active-probe statistics · printable/JSON report</div>
+        <div class="k">Next</div><div class="v">capture attachment · vendor observations · cross-session comparison</div>
       </div>
     </div>
   </section>
@@ -108,7 +109,7 @@
     {% if sessions %}
     <div class="session-list">
       {% for item in sessions %}
-      <div class="session-row">
+      <div class="session-row" style="grid-template-columns:minmax(180px,1.4fr) 120px 100px 70px 120px">
         <div>
           <div class="session-name">{{ item.name }}</div>
           <div class="session-meta mono">{{ item.id }}</div>
@@ -116,6 +117,16 @@
         <div><div class="metric-label">Started</div><div class="session-meta" data-ts-full="{{ item.started_at }}"></div></div>
         <div><div class="metric-label">Duration</div><div class="session-meta" data-duration-start="{{ item.started_at }}" data-duration-end="{{ item.ended_at or '' }}">{{ "Active" if not item.ended_at else "—" }}</div></div>
         <div><div class="metric-label">Events</div><div class="session-name">{{ item.event_count }}</div></div>
+        <div>
+          {% if item.report %}
+            <div class="metric-label">Result</div>
+            <a class="status {{ 'good' if item.report.result == 'passed' else ('bad' if item.report.result == 'failed' else 'warn') }}" href="{{ url_for('session_report', session_id=item.id) }}">{{ item.report.result|upper }} · report</a>
+          {% elif item.status == 'active' %}
+            <span class="status info">ACTIVE</span>
+          {% else %}
+            <a class="btn btn-sm" href="{{ url_for('session_report', session_id=item.id) }}">Report</a>
+          {% endif %}
+        </div>
       </div>
       {% endfor %}
     </div>
