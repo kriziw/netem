@@ -57,6 +57,130 @@
   {% endfor %}
 </div>
 
+<div class="section-title" id="corporate-traffic">Corporate traffic &amp; endpoint experience</div>
+{% if not traffic_generator.configured %}
+<section class="card">
+  <div class="empty-state">
+    <strong>Corporate Traffic Simulator is not connected</strong>
+    Connect it under Settings → Integrations. NetEm can automatically detect simulators on the management network or use a manually entered IP/API key.
+    <div style="margin-top:10px"><a class="btn btn-primary" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Configure Traffic Simulator</a></div>
+  </div>
+</section>
+{% elif not traffic_generator.connected %}
+<section class="card">
+  <div class="card-head">
+    <div><div class="card-title">Corporate Traffic Simulator</div><div class="card-sub">Configured but unavailable</div></div>
+    <span class="status bad">Disconnected</span>
+  </div>
+  <div class="card-pad">
+    <div class="docs-warning"><strong>API connection failed:</strong> {{ traffic_generator.error or "Unknown error" }}</div>
+    <a class="btn" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
+  </div>
+</section>
+{% else %}
+{% set tg = traffic_generator.status %}
+{% set tg_dem = tg.dem or {} %}
+{% set catalog = traffic_generator.catalog or {} %}
+<section class="card">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Corporate Traffic Simulator</div>
+      <div class="card-sub">{{ traffic_generator.integration.instance_name or traffic_generator.integration.host }} · Locust-backed synthetic employees</div>
+    </div>
+    <span class="status {{ 'good' if tg.status in ('starting','running') else 'info' }}" data-tg-status>{{ tg.status|upper }}</span>
+  </div>
+  <div class="card-pad">
+    <div class="grid grid-4">
+      <div class="metric-box">
+        <div class="metric-label">Virtual users</div>
+        <div class="metric-value" data-tg-users>{{ tg.users }}</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">DEM score</div>
+        <div class="metric-value" data-tg-score>{{ tg_dem.experience_score if tg_dem.experience_score is not none else "—" }}</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">Availability</div>
+        <div class="metric-value" style="font-size:13px" data-tg-availability>{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
+      </div>
+      <div class="metric-box">
+        <div class="metric-label">P95 endpoint response</div>
+        <div class="metric-value" style="font-size:13px" data-tg-p95>{{ "%.0f"|format(tg_dem.p95_ms) ~ " ms" if tg_dem.p95_ms is not none else "—" }}</div>
+      </div>
+    </div>
+
+    {% if tg.status in ('starting','running') and tg.run %}
+    <div class="section-title">Live workload</div>
+    <div class="kv">
+      <div class="k">Run</div><div class="v mono">{{ tg.run.run_id }}</div>
+      <div class="k">Profile</div><div class="v">{{ tg.run.profile }}</div>
+      <div class="k">Pattern</div><div class="v">{{ tg.run.pattern }}</div>
+      <div class="k">Activity</div><div class="v">{{ tg.run.activity }}</div>
+      <div class="k">Target</div><div class="v mono">{{ tg.run.target }}</div>
+    </div>
+    <form method="post" action="{{ url_for('traffic_generator_adjust') }}" style="margin-top:12px">
+      <input type="hidden" name="return_to" value="tests">
+      <div class="form-grid">
+        <div><label>Target users</label><input type="number" name="users" min="1" max="5000" value="{{ tg.run.target_users }}"></div>
+        <div><label>Spawn rate · users/s</label><input type="number" name="spawn_rate" min="0.1" max="1000" step="0.1" value="{{ tg.run.spawn_rate }}"></div>
+        <div><label>Activity</label>
+          <select name="activity">
+          {% for key,item in (catalog.activity_levels or {}).items() %}
+            <option value="{{ key }}" {% if key == tg.run.activity %}selected{% endif %}>{{ key|title }}</option>
+          {% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="actions">
+        <button class="btn" type="submit">Adjust live workload</button>
+      </div>
+    </form>
+    <form method="post" action="{{ url_for('traffic_generator_stop') }}" style="margin-top:8px" onsubmit="return confirm('Stop the corporate workload?');">
+      <input type="hidden" name="return_to" value="tests">
+      <button class="btn btn-danger" type="submit">Stop workload</button>
+    </form>
+    {% else %}
+    <div class="section-title">Start workload</div>
+    <form method="post" action="{{ url_for('traffic_generator_start') }}">
+      <input type="hidden" name="return_to" value="tests">
+      <div class="form-grid">
+        <div>
+          <label>Corporate profile</label>
+          <select name="profile">
+          {% for key,item in (catalog.profiles or {}).items() %}
+            <option value="{{ key }}">{{ item.label }}</option>
+          {% endfor %}
+          </select>
+        </div>
+        <div><label>Virtual users</label><input type="number" name="users" min="1" max="5000" value="50"></div>
+        <div><label>Spawn rate · users/s</label><input type="number" name="spawn_rate" min="0.1" max="1000" step="0.1" value="5"></div>
+        <div>
+          <label>Activity</label>
+          <select name="activity">
+          {% for key,item in (catalog.activity_levels or {}).items() %}
+            <option value="{{ key }}" {% if key == 'normal' %}selected{% endif %}>{{ key|title }}</option>
+          {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label>Traffic pattern</label>
+          <select name="pattern">
+          {% for key,item in (catalog.patterns or {}).items() %}
+            <option value="{{ key }}">{{ item.label }}</option>
+          {% endfor %}
+          </select>
+        </div>
+        <div><label>Target override · optional</label><input type="url" name="target" placeholder="Use simulator default target"></div>
+      </div>
+      <button class="btn btn-primary" type="submit">Start corporate simulation</button>
+    </form>
+    {% endif %}
+
+    <div class="field-help" style="margin-top:12px">Endpoint experience is calculated by the Traffic Simulator from the transactions seen by individual synthetic users. NetEm receives the result through the authenticated DEM API; it is not inferred from WAN utilization.</div>
+  </div>
+</section>
+{% endif %}
+
 <div class="section-title">Security &amp; diagnostics</div>
 <div class="test-grid">
   <section class="test-card">
@@ -215,6 +339,29 @@ NetEmUI.createLiveClient({
 
 {% if capture_state.active %}
 setTimeout(() => window.location.reload(), 3500);
+{% endif %}
+
+{% if traffic_generator.configured %}
+async function refreshTrafficGenerator() {
+  try {
+    const response=await fetch("{{ url_for('api_traffic_generator') }}",{cache:"no-store"});
+    if(!response.ok) return;
+    const snapshot=await response.json();
+    if(!snapshot.connected || !snapshot.status) return;
+    const status=snapshot.status;
+    const dem=status.dem || {};
+    document.querySelectorAll("[data-tg-status]").forEach(el=>{
+      el.textContent=String(status.status||"unknown").toUpperCase();
+      el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
+    });
+    document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
+    document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
+    document.querySelectorAll("[data-tg-availability]").forEach(el=>el.textContent=dem.availability_pct==null?"—":Number(dem.availability_pct).toFixed(2)+"%");
+    document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=dem.p95_ms==null?"—":Number(dem.p95_ms).toFixed(0)+" ms");
+  } catch (_) {}
+}
+refreshTrafficGenerator();
+setInterval(refreshTrafficGenerator,2500);
 {% endif %}
 </script>
 {% endblock %}

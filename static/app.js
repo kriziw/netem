@@ -1,10 +1,34 @@
 window.NetEmUI = (() => {
   function formatRate(mbps) {
-    if (!Number.isFinite(mbps)) return "—";
-    if (mbps >= 1000) return (mbps / 1000).toFixed(2) + " Gbit/s";
-    if (mbps >= 100) return mbps.toFixed(0) + " Mbit/s";
-    if (mbps >= 10) return mbps.toFixed(1) + " Mbit/s";
-    return mbps.toFixed(2) + " Mbit/s";
+    const value = Number(mbps);
+    if (!Number.isFinite(value)) return "—";
+    if (value <= 0) return "0 bit/s";
+    if (value >= 1000) return (value / 1000).toFixed(value >= 10000 ? 1 : 2) + " Gbit/s";
+    if (value >= 1) return value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2) + " Mbit/s";
+
+    const kbit = value * 1000;
+    if (kbit >= 1) return kbit.toFixed(kbit >= 100 ? 0 : kbit >= 10 ? 1 : 2) + " Kbit/s";
+
+    const bit = value * 1000000;
+    return bit.toFixed(bit >= 100 ? 0 : bit >= 10 ? 1 : 2) + " bit/s";
+  }
+
+  function formatPps(pps) {
+    const value = Number(pps);
+    if (!Number.isFinite(value)) return "—";
+    if (value <= 0) return "0 pps";
+    if (value >= 1000000) return (value / 1000000).toFixed(value >= 10000000 ? 1 : 2) + " Mpps";
+    if (value >= 1000) return (value / 1000).toFixed(value >= 100000 ? 0 : value >= 10000 ? 1 : 2) + " kpps";
+    return value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2) + " pps";
+  }
+
+  function formatAge(timestamp, nowSeconds = Date.now() / 1000) {
+    if (!timestamp) return "No traffic seen";
+    const age = Math.max(0, Number(nowSeconds) - Number(timestamp));
+    if (age < 1.5) return "<1s ago";
+    if (age < 60) return Math.round(age) + "s ago";
+    if (age < 3600) return Math.round(age / 60) + "m ago";
+    return Math.round(age / 3600) + "h ago";
   }
 
   function formatNumber(value, digits = 1) {
@@ -76,9 +100,10 @@ window.NetEmUI = (() => {
       const unit = options.unit || "";
       const digits = options.digits ?? (max < 10 ? 1 : 0);
       const values = [max, max * .75, max * .5, max * .25, min];
-      options.axis.innerHTML = values.map(value =>
-        '<span>' + Number(value).toFixed(digits) + unit + '</span>'
-      ).join("");
+      options.axis.innerHTML = values.map(value => {
+        if (options.rateAxis) return '<span>' + formatRate(value) + '</span>';
+        return '<span>' + Number(value).toFixed(digits) + unit + '</span>';
+      }).join("");
     }
 
     if (options.timeAxis && Array.isArray(options.timestamps) && options.timestamps.length) {
@@ -201,5 +226,5 @@ window.NetEmUI = (() => {
     return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
   }
 
-  return {formatRate, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
+  return {formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
 })();

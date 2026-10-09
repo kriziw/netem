@@ -2,6 +2,7 @@
 import copy
 import csv
 import io
+import ipaddress
 import json
 import math
 import os
@@ -15,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from flask import (
     Flask,
@@ -39,7 +42,11 @@ RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
 SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
 TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
+SECRETS_PATH = RUNTIME_DIR / "secrets.json"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
+
+TRAFFIC_GENERATOR_DISCOVERY_PORT = 47890
+TRAFFIC_GENERATOR_DISCOVERY_MAGIC = "NETEM_TRAFFIC_SIMULATOR_DISCOVERY_V1"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
@@ -240,6 +247,208 @@ def save_config(cfg: dict):
     tmp.replace(CONFIG_PATH)
 
 
+def load_secrets():
+    if not SECRETS_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(SECRETS_PATH.read_text())
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_secrets(secrets_data):
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(secrets_data, indent=2))
+    os.chmod(tmp, 0o600)
+    tmp.replace(SECRETS_PATH)
+    try:
+        os.chmod(SECRETS_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def traffic_generator_config(cfg=None):
+    cfg = cfg or load_config()
+    raw = cfg.get("traffic_generator")
+    return raw if isinstance(raw, dict) else {}
+
+
+def traffic_generator_api_key():
+    return str(load_secrets().get("traffic_generator_api_key") or "").strip()
+
+
+def traffic_generator_base_url(cfg=None):
+    integration = traffic_generator_config(cfg)
+    host = str(integration.get("host") or "").strip()
+    if not host:
+        return None
+    port = int(integration.get("port") or 8443)
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"https://{host}:{port}"
+
+
+def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
+    cfg = load_config()
+    base_url = traffic_generator_base_url(cfg)
+    key = traffic_generator_api_key()
+    if not base_url:
+        raise RuntimeError("Traffic Simulator is not configured.")
+    if not key:
+        raise RuntimeError("Traffic Simulator API key is not configured.")
+
+    body = None
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {key}",
+        "User-Agent": f"NetEm-WAN-Lab/{get_app_version()}",
+    }
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    integration = traffic_generator_config(cfg)
+    allow_self_signed = bool(integration.get("allow_self_signed", True))
+    context = (
+        ssl._create_unverified_context()
+        if allow_self_signed
+        else ssl.create_default_context()
+    )
+    req = urllib_request.Request(
+        base_url + path,
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=timeout, context=context) as response:
+            raw = response.read(2 * 1024 * 1024)
+            return json.loads(raw.decode("utf-8")) if raw else {}
+    except urllib_error.HTTPError as exc:
+        try:
+            detail = exc.read(8192).decode("utf-8", "replace")
+        except Exception:
+            detail = str(exc)
+        raise RuntimeError(f"Traffic Simulator returned HTTP {exc.code}: {detail[:300]}")
+    except (urllib_error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Traffic Simulator connection failed: {exc}")
+
+
+def traffic_generator_snapshot(include_catalog=False):
+    cfg = load_config()
+    integration = traffic_generator_config(cfg)
+    configured = bool(integration.get("host")) and bool(traffic_generator_api_key())
+    result = {
+        "configured": configured,
+        "connected": False,
+        "integration": {
+            "host": integration.get("host"),
+            "port": int(integration.get("port") or 8443),
+            "allow_self_signed": bool(integration.get("allow_self_signed", True)),
+            "instance_name": integration.get("instance_name"),
+            "version": integration.get("version"),
+            "tls_sha256": integration.get("tls_sha256"),
+        },
+        "status": None,
+        "catalog": None,
+        "error": None,
+    }
+    if not configured:
+        return result
+    try:
+        result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
+        result["connected"] = True
+        if include_catalog:
+            result["catalog"] = traffic_generator_request(
+                "/api/v1/catalog", timeout=2.0
+            )
+    except RuntimeError as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def _management_broadcast_addresses(cfg=None):
+    cfg = cfg or load_config()
+    addresses = {"255.255.255.255"}
+    interface = cfg.get("mgmt_interface") or guess_mgmt_interface()
+    if not interface:
+        return sorted(addresses)
+    try:
+        proc = subprocess.run(
+            [IP, "-j", "-4", "addr", "show", "dev", interface],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return sorted(addresses)
+        data = json.loads(proc.stdout or "[]")
+        for device in data:
+            for addr in device.get("addr_info", []):
+                if addr.get("family") != "inet":
+                    continue
+                local = addr.get("local")
+                prefix = addr.get("prefixlen")
+                if local and prefix is not None:
+                    network = ipaddress.ip_network(f"{local}/{prefix}", strict=False)
+                    addresses.add(str(network.broadcast_address))
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        pass
+    return sorted(addresses)
+
+
+def discover_traffic_generators(timeout=1.25):
+    nonce = str(time.time_ns())
+    request_payload = json.dumps(
+        {
+            "protocol": TRAFFIC_GENERATOR_DISCOVERY_MAGIC,
+            "nonce": nonce,
+        }
+    ).encode("utf-8")
+    found = {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.2)
+        sock.bind(("", 0))
+        for address in _management_broadcast_addresses():
+            try:
+                sock.sendto(
+                    request_payload,
+                    (address, TRAFFIC_GENERATOR_DISCOVERY_PORT),
+                )
+            except OSError:
+                continue
+
+        deadline = time.time() + max(0.25, min(3.0, float(timeout)))
+        while time.time() < deadline:
+            try:
+                data, peer = sock.recvfrom(8192)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                payload = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if payload.get("service") != "netem-traffic-simulator":
+                continue
+            if payload.get("protocol") != TRAFFIC_GENERATOR_DISCOVERY_MAGIC:
+                continue
+            if payload.get("nonce") != nonce:
+                continue
+            payload["detected_address"] = peer[0]
+            key = f'{peer[0]}:{payload.get("api_port", 8443)}'
+            found[key] = payload
+    finally:
+        sock.close()
+    return list(found.values())
+
+
 DEFAULT_PRESETS = {
     "dia": {
         "name": "DIA",
@@ -399,9 +608,9 @@ def validate_condition(raw, step_index):
         raise ValueError(f"Step {step_index}: condition must be an object.")
 
     condition_type = str(raw.get("type") or "").strip().lower()
-    if condition_type not in ("sla", "probe", "traffic"):
+    if condition_type not in ("sla", "probe", "traffic", "dem"):
         raise ValueError(
-            f"Step {step_index}: condition type must be sla, probe or traffic."
+            f"Step {step_index}: condition type must be sla, probe, traffic or dem."
         )
 
     condition = {"type": condition_type}
@@ -473,6 +682,38 @@ def validate_condition(raw, step_index):
             )
         condition.update({"field": field, "op": op, "value": value})
 
+    elif condition_type == "dem":
+        field = str(raw.get("field") or "experience_score").strip().lower()
+        if field not in (
+            "experience_score",
+            "availability_pct",
+            "p50_ms",
+            "p95_ms",
+            "requests_per_second",
+            "failures_per_second",
+            "active_users",
+        ):
+            raise ValueError(
+                f"Step {step_index}: unsupported DEM field."
+            )
+        op = str(raw.get("op") or ">=").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        try:
+            value = float(raw.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Step {step_index}: DEM comparison needs a numeric value."
+            )
+        condition.update(
+            {
+                "field": field,
+                "op": op,
+                "value": value,
+                "window": max(10, min(3600, int(raw.get("window", 60)))),
+            }
+        )
+
     return condition
 
 
@@ -489,9 +730,12 @@ def validate_scenario_steps(raw_steps):
             raise ValueError(f"Step {index} must be an object.")
 
         action = str(step.get("action", "")).strip()
-        if action not in ("quality", "fault", "mtu", "wait", "assert"):
+        if action not in (
+            "quality", "fault", "mtu", "traffic_generator", "wait", "assert"
+        ):
             raise ValueError(
-                f"Step {index}: action must be quality, fault, mtu, wait or assert."
+                f"Step {index}: action must be quality, fault, mtu, "
+                "traffic_generator, wait or assert."
             )
 
         try:
@@ -533,6 +777,68 @@ def validate_scenario_steps(raw_steps):
                     f"Step {index}: MTU must be 576-9000, or 0 to restore."
                 )
             validated_step["value"] = value
+
+        elif action == "traffic_generator":
+            value = step.get("value")
+            if not isinstance(value, dict):
+                raise ValueError(
+                    f"Step {index}: traffic_generator value must be an object."
+                )
+            operation = str(value.get("operation") or "").strip().lower()
+            if operation not in ("start", "adjust", "stop"):
+                raise ValueError(
+                    f"Step {index}: traffic_generator operation must be "
+                    "start, adjust or stop."
+                )
+            cleaned = {"operation": operation}
+
+            if operation in ("start", "adjust"):
+                if "users" in value:
+                    try:
+                        cleaned["users"] = max(1, min(5000, int(value["users"])))
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"Step {index}: traffic-generator users must be an integer."
+                        )
+                if "spawn_rate" in value:
+                    try:
+                        cleaned["spawn_rate"] = max(
+                            0.1, min(1000.0, float(value["spawn_rate"]))
+                        )
+                    except (TypeError, ValueError):
+                        raise ValueError(
+                            f"Step {index}: traffic-generator spawn_rate must be numeric."
+                        )
+                for key in ("profile", "activity", "pattern"):
+                    if key in value:
+                        cleaned[key] = str(value[key]).strip()[:80]
+                if "target" in value:
+                    target = str(value["target"]).strip()
+                    parsed = urlsplit(target)
+                    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+                        raise ValueError(
+                            f"Step {index}: traffic-generator target must be an HTTP(S) URL."
+                        )
+                    cleaned["target"] = target[:512]
+                for key in ("personas", "applications"):
+                    if key in value:
+                        if not isinstance(value[key], dict):
+                            raise ValueError(
+                                f"Step {index}: {key} must be an object."
+                            )
+                        cleaned[key] = {
+                            str(name)[:80]: max(0.0, min(100.0, float(weight)))
+                            for name, weight in list(value[key].items())[:30]
+                        }
+
+            if operation == "start":
+                cleaned.setdefault("profile", "office")
+                cleaned.setdefault("users", 50)
+                cleaned.setdefault("spawn_rate", 5.0)
+                cleaned.setdefault("activity", "normal")
+                cleaned.setdefault("pattern", "steady")
+
+            validated_step["value"] = cleaned
 
         elif action in ("wait", "assert"):
             validated_step["condition"] = validate_condition(
@@ -1343,6 +1649,36 @@ def interface_counters(ifname: str):
         except (OSError, ValueError):
             result[key] = 0
     return result
+
+
+def interface_runtime_status(ifname: str):
+    if not ifname:
+        return {
+            "available": False,
+            "operstate": "unknown",
+            "carrier": None,
+        }
+
+    base = Path("/sys/class/net") / ifname
+    available = base.exists()
+    operstate = "unknown"
+    carrier = None
+
+    if available:
+        try:
+            operstate = (base / "operstate").read_text().strip() or "unknown"
+        except OSError:
+            pass
+        try:
+            carrier = (base / "carrier").read_text().strip() == "1"
+        except OSError:
+            carrier = None
+
+    return {
+        "available": available,
+        "operstate": operstate,
+        "carrier": carrier,
+    }
 
 
 
@@ -2305,6 +2641,11 @@ def condition_summary(condition: dict):
             f'{condition.get("field")} {condition.get("op")} '
             f'{condition.get("value")}'
         )
+    if kind == "dem":
+        return (
+            f'DEM {condition.get("field")} {condition.get("op")} '
+            f'{condition.get("value")}'
+        )
     return "condition"
 
 
@@ -2367,6 +2708,34 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
             condition.get("value"),
         )
         return passed, actual, f"{field}={actual}"
+
+    if kind == "dem":
+        try:
+            window = int(condition.get("window", 60))
+            payload = traffic_generator_request(
+                f"/api/v1/dem/experience?window={window}",
+                timeout=2.5,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return False, None, str(exc)
+
+        field = condition.get("field", "experience_score")
+        experience = payload.get("endpoint_experience") or {}
+        actual = (
+            payload.get("active_users")
+            if field == "active_users"
+            else experience.get(field)
+        )
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", ">="),
+            condition.get("value"),
+        )
+        detail = (
+            f'{field}={actual} · '
+            f'rating={experience.get("rating", "unknown")}'
+        )
+        return passed, actual, detail
 
     return False, None, "Unsupported condition"
 
@@ -2918,6 +3287,7 @@ def overview():
         session_state=session_snapshot(),
         presets=get_presets(cfg),
         quality_curves=QUALITY_CURVES,
+        traffic_generator=traffic_generator_snapshot(),
     )
 
 
@@ -2949,6 +3319,7 @@ def lab_tools():
 def tests():
     cfg = load_config()
     scenario_id = request.args.get("scenario")
+    traffic_generator = traffic_generator_snapshot(include_catalog=True)
     return render_template(
         "tests.html",
         page="tests",
@@ -2959,11 +3330,12 @@ def tests():
         capture_state=capture_snapshot(),
         tcpdump_available=bool(shutil.which("tcpdump")),
         selected_scenario=scenario_id,
+        traffic_generator=traffic_generator,
         events=list(reversed([
             event for event in EVENT_LOG
             if event.get("kind") in (
                 "scenario", "scenario-config", "fault", "mtu",
-                "capture", "security-test"
+                "capture", "security-test", "traffic-generator"
             )
         ][-40:])),
     )
@@ -3214,10 +3586,191 @@ def probe_run():
 
 @app.route("/integrations")
 def integrations():
+    cfg = load_config()
+    discovered = (
+        discover_traffic_generators()
+        if request.args.get("discover") == "1"
+        else []
+    )
     return render_template(
         "integrations.html",
         page="integrations",
+        traffic_generator=traffic_generator_snapshot(include_catalog=False),
+        traffic_generator_discovered=discovered,
+        traffic_generator_has_key=bool(traffic_generator_api_key()),
     )
+
+
+@app.route("/integrations/traffic-generator/save", methods=["POST"])
+def traffic_generator_save():
+    cfg = load_config()
+    selected = (request.form.get("discovered_host") or "").strip()
+    manual = (request.form.get("manual_host") or "").strip()
+    host = manual if selected in ("", "manual") else selected
+
+    if host.startswith("https://") or host.startswith("http://"):
+        parsed = urlsplit(host)
+        host = parsed.hostname or ""
+        discovered_port = parsed.port
+    else:
+        discovered_port = None
+
+    if not host or len(host) > 255 or not re.fullmatch(r"[A-Za-z0-9_.:\-]+", host):
+        flash("Enter a valid Traffic Simulator IP address or hostname.", "error")
+        return redirect(url_for("integrations") + "#traffic-simulator")
+
+    try:
+        port = int(request.form.get("port") or discovered_port or 8443)
+    except ValueError:
+        port = 8443
+    if not 1 <= port <= 65535:
+        flash("Traffic Simulator API port must be 1-65535.", "error")
+        return redirect(url_for("integrations") + "#traffic-simulator")
+
+    integration = {
+        "host": host,
+        "port": port,
+        "allow_self_signed": request.form.get("allow_self_signed") == "on",
+        "instance_name": (request.form.get("instance_name") or "").strip()[:120] or None,
+        "version": (request.form.get("version") or "").strip()[:40] or None,
+        "tls_sha256": (request.form.get("tls_sha256") or "").strip()[:128] or None,
+    }
+    cfg["traffic_generator"] = integration
+    save_config(cfg)
+
+    api_key = (request.form.get("api_key") or "").strip()
+    if api_key:
+        secrets_data = load_secrets()
+        secrets_data["traffic_generator_api_key"] = api_key
+        save_secrets(secrets_data)
+
+    if not traffic_generator_api_key():
+        flash("Traffic Simulator saved, but an API key is still required.", "warning")
+    else:
+        try:
+            status = traffic_generator_request("/api/v1/status", timeout=3.0)
+            run_state = status.get("status", "connected")
+            flash(
+                f"Traffic Simulator connected successfully · {run_state}.",
+                "success",
+            )
+        except RuntimeError as exc:
+            flash(f"Traffic Simulator saved, but connection test failed: {exc}", "warning")
+
+    return redirect(url_for("integrations") + "#traffic-simulator")
+
+
+@app.route("/integrations/traffic-generator/test", methods=["POST"])
+def traffic_generator_test():
+    try:
+        status = traffic_generator_request("/api/v1/status", timeout=3.0)
+        dem = status.get("dem") or {}
+        score = dem.get("experience_score")
+        detail = f" · DEM {score}" if score is not None else ""
+        flash(
+            f'Traffic Simulator API connected · {status.get("status", "unknown")}{detail}.',
+            "success",
+        )
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("integrations") + "#traffic-simulator")
+
+
+@app.route("/traffic-generator/start", methods=["POST"])
+def traffic_generator_start():
+    payload = {
+        "profile": request.form.get("profile") or "office",
+        "users": request.form.get("users") or 50,
+        "spawn_rate": request.form.get("spawn_rate") or 5,
+        "activity": request.form.get("activity") or "normal",
+        "pattern": request.form.get("pattern") or "steady",
+    }
+    target = (request.form.get("target") or "").strip()
+    if target:
+        payload["target"] = target
+
+    try:
+        status = traffic_generator_request(
+            "/api/v1/workloads/start",
+            method="POST",
+            payload=payload,
+            timeout=5.0,
+        )
+        run = status.get("run") or {}
+        log_event(
+            "traffic-generator",
+            f'Corporate workload started · {payload["profile"]} · {payload["users"]} users',
+            action="start",
+            run_id=run.get("run_id"),
+            profile=payload["profile"],
+            users=int(payload["users"]),
+            pattern=payload["pattern"],
+        )
+        flash("Corporate Traffic Simulator workload started.", "success")
+    except (RuntimeError, ValueError) as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/traffic-generator/adjust", methods=["POST"])
+def traffic_generator_adjust():
+    payload = {}
+    for key in ("users", "spawn_rate", "activity"):
+        value = request.form.get(key)
+        if value not in (None, ""):
+            payload[key] = value
+    try:
+        status = traffic_generator_request(
+            "/api/v1/workloads/adjust",
+            method="POST",
+            payload=payload,
+            timeout=5.0,
+        )
+        log_event(
+            "traffic-generator",
+            "Corporate workload adjusted",
+            action="adjust",
+            payload=payload,
+            users=status.get("users"),
+        )
+        flash("Corporate workload adjusted.", "success")
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/traffic-generator/stop", methods=["POST"])
+def traffic_generator_stop():
+    try:
+        status_before = traffic_generator_request("/api/v1/status", timeout=3.0)
+        traffic_generator_request(
+            "/api/v1/workloads/stop",
+            method="POST",
+            payload={},
+            timeout=5.0,
+        )
+        dem = status_before.get("dem") or {}
+        log_event(
+            "traffic-generator",
+            "Corporate workload stopped",
+            action="stop",
+            run_id=(status_before.get("run") or {}).get("run_id"),
+            users=status_before.get("users"),
+            experience_score=dem.get("experience_score"),
+            availability_pct=dem.get("availability_pct"),
+            p95_ms=dem.get("p95_ms"),
+        )
+        flash("Corporate workload stopped.", "info")
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/api/v1/traffic-generator")
+def api_traffic_generator():
+    snapshot = traffic_generator_snapshot(include_catalog=False)
+    code = 200 if snapshot.get("connected") or not snapshot.get("configured") else 503
+    return jsonify(snapshot), code
 
 
 @app.route("/settings")
@@ -3739,6 +4292,8 @@ def api_telemetry():
         outer_if = link.get("outer")
         inner = interface_counters(inner_if)
         outer = interface_counters(outer_if)
+        inner_status = interface_runtime_status(inner_if)
+        outer_status = interface_runtime_status(outer_if)
 
         links.append(
             {
@@ -3747,10 +4302,12 @@ def api_telemetry():
                 "inner": {
                     "interface": inner_if,
                     "counters": inner,
+                    **inner_status,
                 },
                 "outer": {
                     "interface": outer_if,
                     "counters": outer,
+                    **outer_status,
                 },
                 "traffic": {
                     "download": {
