@@ -683,3 +683,20 @@ pre {
   box-shadow:0 0 0 3px rgba(54,214,176,.06);
   background:linear-gradient(180deg,rgba(54,214,176,.055),rgba(13,23,38,.78));
 }
+
+
+@media print {
+  .sidebar,.topbar,.global-alert,.page-actions,.activity-rail,.command-palette,.command-backdrop,.drawer,.drawer-backdrop { display:none !important; }
+  .app-shell,.workspace { display:block !important; }
+  .workspace { margin:0 !important; }
+  .page { padding:0 !important; max-width:none !important; }
+  body { background:#fff !important; color:#111 !important; }
+  .card,.stat,.metric-box,.docs-note,.docs-warning,.docs-tip {
+    background:#fff !important; color:#111 !important; border-color:#bbb !important; box-shadow:none !important;
+    break-inside:avoid;
+  }
+  .card-title,.wan-name,.metric-value,.stat-value,.timeline-title,.session-name,h1,h2,h3 { color:#111 !important; }
+  .card-sub,.page-description,.metric-label,.stat-label,.stat-sub,.timeline-kind,.timeline-time,.session-meta,.field-help { color:#555 !important; }
+  .status { color:#111 !important; border-color:#999 !important; background:#f5f5f5 !important; }
+  a { color:#111 !important; text-decoration:none !important; }
+}
