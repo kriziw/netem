@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.7.2](https://github.com/kriziw/netem/compare/v0.7.1...v0.7.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* send WAN controls to the form URL attribute ([7f02278](https://github.com/kriziw/netem/commit/7f02278f114def46cf74bdbb823acbda092b360d))
+* send WAN controls to the form URL attribute ([392c61d](https://github.com/kriziw/netem/commit/392c61d6fb592c5cc885e11c7314b45e3ca9b169))
+
 ## [0.7.1](https://github.com/kriziw/netem/compare/v0.7.0...v0.7.1) (2026-10-09)
 
 
