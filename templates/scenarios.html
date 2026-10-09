@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Scenarios · NetEm WAN Lab{% endblock %}
+{% block title %}Scenarios · {{ branding.name }}{% endblock %}
 {% block crumb %}Scenarios{% endblock %}
 
 {% block content %}
@@ -16,7 +16,7 @@
 </div>
 
 {% if scenario_state.active %}
-<section class="card" style="margin-bottom:14px;border-color:rgba(54,214,176,.35)">
+<section class="card" style="margin-bottom:14px;border-color:var(--accent)">
   <div class="card-pad">
     <div style="display:flex;justify-content:space-between;align-items:center;gap:14px">
       <div>

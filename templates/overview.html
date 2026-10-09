@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% from "_metric_help.html" import metric_help %}
-{% block title %}Command Center · NetEm WAN Lab{% endblock %}
+{% block title %}Command Center · {{ branding.name }}{% endblock %}
 {% block crumb %}Command Center{% endblock %}
 
 {% block content %}
@@ -270,7 +270,7 @@
       </div>
       <div class="card-pad">
         <div id="steering-classes"><div class="diag-empty">Collecting measurements…</div></div>
-        <div class="steer-legend"><span style="--legend:var(--success)">Healthy</span><span style="--legend:var(--warning)">Congested</span><span style="--legend:#ff9f6b">Degraded</span><span style="--legend:var(--danger)">Failed</span></div>
+        <div class="steer-legend"><span style="--legend:var(--success)">Healthy</span><span style="--legend:var(--warning)">Congested</span><span style="--legend:var(--color-ff9f6b)">Degraded</span><span style="--legend:var(--danger)">Failed</span></div>
       </div>
     </section>
 

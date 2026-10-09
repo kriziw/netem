@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Showroom · {{ branding.name }}</title>
+  <link rel="stylesheet" href="/assets/showroom.css">
+  {% if branding_enabled %}
+  <link rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% if branding.favicon %}<link rel="icon" href="{{ url_for('branding_asset', filename=branding.favicon) }}">{% endif %}
+  {% endif %}
+  <script src="/assets/showroom.js" defer></script>
+</head>
+<body>
+  <header>
+    <div>
+      {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">{% endif %}
+      <div class="eyebrow">{{ branding.name }} · Showroom</div><h1>Network resilience, live</h1>
+    </div>
+    <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
+  </header>
+  <main>
+    <section class="summary" aria-label="Live summary">
+      <article><span>WAN paths</span><strong id="path-count">—</strong></article>
+      <article><span>Passing model SLA</span><strong id="healthy-count">—</strong></article>
+      <article><span>Measured download</span><strong id="total-down">—</strong></article>
+      <article><span>Measured upload</span><strong id="total-up">—</strong></article>
+    </section>
+    <section class="demo" aria-label="Current demonstration"><div><span class="eyebrow">Current demonstration</span><h2 id="demo-name">Waiting for live data</h2><p id="demo-stage"></p></div><span id="session-name"></span></section>
+    <div class="section-heading"><h2>Live WAN paths</h2><span id="page-number"></span></div>
+    <section id="paths" class="paths" aria-label="WAN status"><p class="empty">Waiting for the first snapshot…</p></section>
+  </main>
+  <footer><span>Read-only display · updates every 2 seconds</span><span>Traffic is measured. Delay, jitter, loss and model SLA describe requested NetEm impairments.</span></footer>
+  <template id="path-template">
+    <article class="path">
+      <div class="path-heading"><div><h3 data-field="name"></h3><span data-field="profile"></span></div><strong class="badge" data-field="health"></strong></div>
+      <div class="traffic"><div><span>Download · Mbit/s</span><strong data-field="down"></strong></div><div><span>Upload · Mbit/s</span><strong data-field="up"></strong></div></div>
+      <div class="limits" data-field="limits"></div>
+      <svg class="spark" viewBox="0 0 300 52" preserveAspectRatio="none" role="img" aria-label="Measured download and upload over the last two minutes"><path class="download"></path><path class="upload"></path></svg>
+      <div class="legend"><span>Download</span><span>Upload</span><span>Last 2 minutes · auto scale</span></div>
+      <div class="impairments"><div><span>Injected delay</span><strong data-field="delay"></strong></div><div><span>Injected jitter</span><strong data-field="jitter"></strong></div><div><span>Injected loss</span><strong data-field="loss"></strong></div><div><span>Model quality</span><strong data-field="quality"></strong></div></div>
+      <p class="sample" data-field="sample"></p>
+    </article>
+  </template>
+</body>
+</html>

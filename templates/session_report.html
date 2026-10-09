@@ -1,8 +1,12 @@
 {% extends "base.html" %}
-{% block title %}Session Report · NetEm WAN Lab{% endblock %}
+{% block title %}Session Report · {{ branding.name }}{% endblock %}
 {% block crumb %}Sessions / Report{% endblock %}
 
 {% block content %}
+<div class="report-brand">
+  {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="">{% endif %}
+  <div><strong>{{ branding.name }}</strong><br>{{ branding.subtitle }}</div>
+</div>
 <div class="page-head">
   <div>
     <div class="eyebrow">Validation evidence</div>
