@@ -2536,13 +2536,14 @@ def run_scenario(link_id: str, scenario: dict):
                         **details,
                     )
 
-                if not passed and step.get("on_fail", "stop") == "stop":
+                if not passed:
                     scenario_result = "failed"
                     scenario_error = (
                         f'{label}: condition not satisfied within '
                         f'{step.get("timeout", 30)}s'
                     )
-                    break
+                    if step.get("on_fail", "stop") == "stop":
+                        break
 
         if SCENARIO_STOP.is_set() and scenario_result == "passed":
             scenario_result = "stopped"
