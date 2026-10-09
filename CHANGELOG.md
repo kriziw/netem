@@ -1,5 +1,25 @@
 # Changelog
 
+## [0.10.0](https://github.com/kriziw/netem/compare/v0.9.0...v0.10.0) (2026-10-09)
+
+
+### Features
+
+* add industry site scenarios and experience targets ([#33](https://github.com/kriziw/netem/issues/33)) ([a28cb02](https://github.com/kriziw/netem/commit/a28cb02d30a18c6580481a8bbe0018b3fa092604))
+* show live per-WAN bottlenecks, their user impact and SD-WAN steering ([33e3117](https://github.com/kriziw/netem/commit/33e3117fd88a7d45b360f060df2f4d76476f4cc3))
+* show live per-WAN bottlenecks, user impact and SD-WAN steering ([e926dd0](https://github.com/kriziw/netem/commit/e926dd0e0b616ef86728f359498259d1115a03ed))
+
+
+### Bug Fixes
+
+* size the impairment and rate-limiter queues from the configured rate ([159db68](https://github.com/kriziw/netem/commit/159db683ef323eea7c6063e62b36bd76734a7b74))
+
+
+### Maintenance
+
+* stop tracking __pycache__ files ([98d887d](https://github.com/kriziw/netem/commit/98d887d2d2792fdfaea69bb08e688111edec13c7))
+* stop tracking __pycache__ files ([b3b001a](https://github.com/kriziw/netem/commit/b3b001ad9b30152606a6dcf3c409275d95d4e6d3))
+
 ## [0.9.0](https://github.com/kriziw/netem/compare/v0.8.0...v0.9.0) (2026-10-09)
 
 
