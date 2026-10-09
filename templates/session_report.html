@@ -103,15 +103,15 @@
     {% if report.telemetry %}
     <table>
       <thead>
-        <tr><th>WAN</th><th>Samples</th><th>Peak down</th><th>Peak up</th><th>Max injected latency</th><th>Max loss</th><th>Min quality</th><th>SLA-fail samples</th></tr>
+        <tr><th>WAN</th><th>Valid rate samples / total</th><th>Peak down</th><th>Peak up</th><th>Max injected latency</th><th>Max injected loss</th><th>Min model quality</th><th>Model SLA-fail samples</th></tr>
       </thead>
       <tbody>
       {% for link_id,item in report.telemetry.items() %}
         <tr>
           <td>{{ link_id }}</td>
-          <td>{{ item.samples }}</td>
-          <td>{{ "%.2f"|format(item.max_down_mbps or 0) }} Mbit/s</td>
-          <td>{{ "%.2f"|format(item.max_up_mbps or 0) }} Mbit/s</td>
+          <td>{{ item.valid_rate_samples }} / {{ item.samples }}</td>
+          <td>{% if item.max_down_mbps is not none %}{{ "%.2f"|format(item.max_down_mbps) }} Mbit/s{% else %}—{% endif %}</td>
+          <td>{% if item.max_up_mbps is not none %}{{ "%.2f"|format(item.max_up_mbps) }} Mbit/s{% else %}—{% endif %}</td>
           <td>{{ "%.1f"|format(item.max_injected_delay_ms or 0) }} ms</td>
           <td>{{ "%.2f"|format(item.max_injected_loss_pct or 0) }}%</td>
           <td>{{ "%.0f"|format(item.min_quality or 0) }}%</td>

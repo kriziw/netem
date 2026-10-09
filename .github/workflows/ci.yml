@@ -244,6 +244,15 @@ jobs:
                       path.unlink()
           PY
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Validate telemetry measurements
+        run: |
+          python -m unittest discover -s tests -v
+          node --test tests/telemetry.test.js
+
       - name: Validate release configuration
         run: |
           python -m json.tool release-please-config.json >/dev/null
