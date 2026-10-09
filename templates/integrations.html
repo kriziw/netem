@@ -72,6 +72,151 @@
   </section>
 </div>
 
+<div class="section-title" id="traffic-simulator">Corporate Traffic Simulator</div>
+<div class="grid grid-2">
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Traffic Simulator connection</div>
+        <div class="card-sub">Automatic discovery or manual HTTPS API configuration</div>
+      </div>
+      {% if traffic_generator.connected %}
+        <span class="status good">Connected</span>
+      {% elif traffic_generator.configured %}
+        <span class="status bad">Unavailable</span>
+      {% else %}
+        <span class="status info">Not configured</span>
+      {% endif %}
+    </div>
+    <div class="card-pad">
+      {% if traffic_generator.configured %}
+      <div class="kv" style="margin-bottom:12px">
+        <div class="k">Endpoint</div>
+        <div class="v mono">https://{{ traffic_generator.integration.host }}:{{ traffic_generator.integration.port }}</div>
+        <div class="k">API key</div>
+        <div class="v">{{ "Configured" if traffic_generator_has_key else "Missing" }}</div>
+        <div class="k">Instance</div>
+        <div class="v">{{ traffic_generator.integration.instance_name or "—" }}</div>
+        <div class="k">Version</div>
+        <div class="v">{{ traffic_generator.integration.version or "—" }}</div>
+        {% if traffic_generator.error %}
+        <div class="k">Last error</div>
+        <div class="v bad-text">{{ traffic_generator.error }}</div>
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('traffic_generator_test') }}" style="margin-bottom:12px">
+        <button class="btn" type="submit">Test API connection</button>
+      </form>
+      {% endif %}
+
+      <div class="actions" style="margin-bottom:12px">
+        <a class="btn" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Detect on management network</a>
+        {% if traffic_generator_discovered %}
+        <span class="status good">{{ traffic_generator_discovered|length }} detected</span>
+        {% endif %}
+      </div>
+
+      <form method="post" action="{{ url_for('traffic_generator_save') }}">
+        {% if traffic_generator_discovered %}
+        <label>Detected simulator</label>
+        <select name="discovered_host" id="traffic-generator-discovered">
+          <option value="manual">Manual entry</option>
+          {% for item in traffic_generator_discovered %}
+          <option value="{{ item.detected_address }}"
+                  data-port="{{ item.api_port }}"
+                  data-name="{{ item.instance_name }}"
+                  data-version="{{ item.version }}"
+                  data-fingerprint="{{ item.tls_sha256 or '' }}">
+            {{ item.instance_name }} · {{ item.detected_address }}:{{ item.api_port }} · v{{ item.version }}
+          </option>
+          {% endfor %}
+        </select>
+        {% else %}
+        <input type="hidden" name="discovered_host" value="manual">
+        {% endif %}
+
+        <div class="form-grid" style="margin-top:10px">
+          <div>
+            <label>Manual IP / hostname</label>
+            <input type="text" name="manual_host"
+                   value="{{ traffic_generator.integration.host or '' }}"
+                   placeholder="192.168.0.95">
+          </div>
+          <div>
+            <label>HTTPS API port</label>
+            <input type="number" name="port" id="traffic-generator-port"
+                   min="1" max="65535"
+                   value="{{ traffic_generator.integration.port or 8443 }}">
+          </div>
+        </div>
+
+        <label>API key</label>
+        <input type="password" name="api_key" autocomplete="new-password"
+               placeholder="{{ 'Leave blank to keep configured key' if traffic_generator_has_key else 'ntg_…' }}">
+        <div class="field-help">Copy the key from Traffic Simulator → API &amp; Integration. NetEm stores it separately from config.json with mode 0600.</div>
+
+        <label class="check-row" style="margin-top:10px">
+          <input type="checkbox" name="allow_self_signed"
+                 {% if traffic_generator.integration.allow_self_signed is not false %}checked{% endif %}>
+          Allow the Traffic Simulator's self-signed lab certificate
+        </label>
+
+        <input type="hidden" name="instance_name" id="traffic-generator-instance" value="{{ traffic_generator.integration.instance_name or '' }}">
+        <input type="hidden" name="version" id="traffic-generator-version" value="{{ traffic_generator.integration.version or '' }}">
+        <input type="hidden" name="tls_sha256" id="traffic-generator-fingerprint" value="{{ traffic_generator.integration.tls_sha256 or '' }}">
+
+        <button class="btn btn-primary" type="submit" style="margin-top:10px">Save &amp; test integration</button>
+      </form>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div>
+        <div class="card-title">Endpoint experience</div>
+        <div class="card-sub">DEM from the simulated corporate endpoints</div>
+      </div>
+      {% if traffic_generator.connected %}
+      <span class="status good">Live API</span>
+      {% else %}
+      <span class="status info">Waiting</span>
+      {% endif %}
+    </div>
+    <div class="card-pad">
+      {% if traffic_generator.connected %}
+        {% set tg_status = traffic_generator.status %}
+        {% set tg_dem = tg_status.dem or {} %}
+        <div class="metric-row">
+          <div class="metric-box">
+            <div class="metric-label">Workload</div>
+            <div class="metric-value" style="font-size:12px">{{ tg_status.status|upper }}</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">Users</div>
+            <div class="metric-value">{{ tg_status.users }}</div>
+          </div>
+          <div class="metric-box">
+            <div class="metric-label">DEM score</div>
+            <div class="metric-value">{{ tg_dem.experience_score if tg_dem.experience_score is not none else "—" }}</div>
+          </div>
+        </div>
+        <div class="kv" style="margin-top:12px">
+          <div class="k">Experience</div><div class="v">{{ tg_dem.experience or "No data" }}</div>
+          <div class="k">Availability</div><div class="v">{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
+          <div class="k">P95 response</div><div class="v">{{ "%.0f"|format(tg_dem.p95_ms) ~ " ms" if tg_dem.p95_ms is not none else "—" }}</div>
+          <div class="k">Requests/s</div><div class="v">{{ tg_dem.requests_per_second or 0 }}</div>
+        </div>
+        <a class="btn" style="margin-top:12px" href="{{ url_for('tests') }}#corporate-traffic">Control workload</a>
+      {% else %}
+        <div class="empty-state">
+          <strong>Connect a simulator to bring DEM into NetEm</strong>
+          NetEm will display user count, availability, P95 response time and synthetic endpoint-experience score alongside WAN tests.
+        </div>
+      {% endif %}
+    </div>
+  </section>
+</div>
+
 <div class="section-title">SD-WAN vendor adapters</div>
 <div class="grid grid-3">
   {% for vendor, description in [
@@ -126,4 +271,25 @@
     </div>
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(() => {
+  const select=document.getElementById("traffic-generator-discovered");
+  if(!select) return;
+  const port=document.getElementById("traffic-generator-port");
+  const name=document.getElementById("traffic-generator-instance");
+  const version=document.getElementById("traffic-generator-version");
+  const fingerprint=document.getElementById("traffic-generator-fingerprint");
+  select.addEventListener("change",()=>{
+    const option=select.selectedOptions[0];
+    if(!option || option.value==="manual") return;
+    port.value=option.dataset.port||8443;
+    name.value=option.dataset.name||"";
+    version.value=option.dataset.version||"";
+    fingerprint.value=option.dataset.fingerprint||"";
+  });
+})();
+</script>
 {% endblock %}
