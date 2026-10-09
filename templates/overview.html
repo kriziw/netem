@@ -71,6 +71,11 @@
                   {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("SLA fail" if not link.sla.pass else link.quality_status) }}
                 </span>
                 <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
+                <div class="live-activity-line">
+                  <span class="activity-state no-data" data-live="{{ link.id }}-activity-state">NO DATA</span>
+                  <span data-live="{{ link.id }}-pps">—</span>
+                  <span data-live="{{ link.id }}-last-seen">waiting…</span>
+                </div>
               </div>
               <span class="flow-track"></span>
             </button>
@@ -105,6 +110,11 @@
             </div>
             <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
             <div class="wan-live-delta" data-live="{{ link.id }}-delta">waiting for live sample</div>
+            <div class="wan-activity-line">
+              <span class="activity-state no-data" data-live="{{ link.id }}-activity-state-card">NO DATA</span>
+              <span data-live="{{ link.id }}-pps-card">—</span>
+              <span data-live="{{ link.id }}-last-seen-card">waiting…</span>
+            </div>
             <div class="sparkline">
               <svg viewBox="0 0 100 100" preserveAspectRatio="none"><path data-spark="{{ link.id }}-down"></path></svg>
             </div>
@@ -384,6 +394,7 @@ document.querySelectorAll("[data-set-quality]").forEach(btn => btn.addEventListe
 }));
 
 const previousRates = {};
+const lastTrafficSeen = {};
 NetEmUI.createLiveClient({
   interval:1500,
   maxPoints:120,
@@ -393,7 +404,7 @@ NetEmUI.createLiveClient({
     status.className = "status " + (ok ? "good" : "bad");
     status.textContent = ok ? "Streaming" : "Disconnected";
   },
-  onSample({state,history}) {
+  onSample({telemetry,state,history}) {
     let healthy = 0;
     let faults = 0;
 
@@ -405,6 +416,30 @@ NetEmUI.createLiveClient({
       const i = h?.down?.length ? h.down.length - 1 : -1;
       const down = i >= 0 ? h.down[i] : 0;
       const up = i >= 0 ? h.up[i] : 0;
+      const downPps = i >= 0 ? Number(h.rxpps[i] || 0) : 0;
+      const upPps = i >= 0 ? Number(h.txpps[i] || 0) : 0;
+      const totalPps = downPps + upPps;
+      const totalRate = down + up;
+      const telemetryLink = (telemetry.links || []).find(item => item.id === link.id);
+      const interfaceAvailable = Boolean(telemetryLink?.inner?.available && telemetryLink?.outer?.available);
+      const hasRateSample = Boolean(h && h.timestamps && h.timestamps.length >= 2);
+
+      if (hasRateSample && (totalPps > 0 || totalRate > 0)) {
+        lastTrafficSeen[link.id] = Number(telemetry.timestamp || Date.now()/1000);
+      }
+
+      let activity = "IDLE";
+      let activityClass = "idle";
+      if (link.fault !== "normal" || !link.sla?.pass) {
+        activity = "FAILED";
+        activityClass = "failed";
+      } else if (!interfaceAvailable || !hasRateSample) {
+        activity = "NO DATA";
+        activityClass = "no-data";
+      } else if (totalPps > 0 || totalRate > 0) {
+        activity = "ACTIVE";
+        activityClass = "active";
+      }
 
       const set = (key,value) => document.querySelectorAll('[data-live="' + link.id + '-' + key + '"]').forEach(el => el.textContent=value);
       set("latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
@@ -416,6 +451,10 @@ NetEmUI.createLiveClient({
       set("down", NetEmUI.formatRate(down));
       set("up", NetEmUI.formatRate(up));
       set("throughput", NetEmUI.formatRate(down) + " ↓ · " + NetEmUI.formatRate(up) + " ↑");
+      set("pps", NetEmUI.formatPps(totalPps));
+      set("pps-card", NetEmUI.formatPps(totalPps));
+      set("last-seen", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
+      set("last-seen-card", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
       set("drawer-latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
       set("drawer-jitter", NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1));
       set("drawer-loss", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
@@ -429,10 +468,17 @@ NetEmUI.createLiveClient({
         status.textContent = link.sla?.pass ? "SLA PASS" : "SLA FAIL";
       });
 
+      document.querySelectorAll(
+        '[data-live="' + link.id + '-activity-state"],[data-live="' + link.id + '-activity-state-card"]'
+      ).forEach(status => {
+        status.className = "activity-state " + activityClass;
+        status.textContent = activity;
+      });
+
       const path = document.querySelector('[data-live-path="' + link.id + '"]');
       if (path) {
-        path.classList.toggle("flow-active", (down + up) > .05);
-        path.classList.toggle("flow-fast", (down + up) > 50);
+        path.classList.toggle("flow-active", hasRateSample && (totalPps > 0 || totalRate > 0));
+        path.classList.toggle("flow-fast", totalRate > 50 || totalPps > 5000);
         path.classList.toggle("bad", link.fault !== "normal" || !link.sla?.pass);
         path.classList.toggle("warn", link.fault === "normal" && link.sla?.pass && Number(link.quality) < 75);
       }
@@ -458,7 +504,7 @@ NetEmUI.createLiveClient({
       const h=history[link.id], path=document.querySelector('[data-chart="' + link.id + '-down"]');
       if(h && path){ paths.push(path); series.push(h.down); if(h.timestamps.length>timestamps.length) timestamps=h.timestamps; }
     });
-    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,unit:" Mb/s"});
+    NetEmUI.renderSeries(paths,series,{axis:document.getElementById("overview-throughput-y"),timeAxis:document.getElementById("overview-throughput-x"),timestamps,rateAxis:true});
     document.getElementById("throughput-empty").style.display = Object.values(history).some(h => h.down.length > 1) ? "none" : "grid";
     document.getElementById("overview-health").textContent = healthy + "/" + (state.links || []).length;
     document.getElementById("overview-faults").textContent = faults;
