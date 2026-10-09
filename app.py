@@ -3157,6 +3157,7 @@ def overview():
         session_state=session_snapshot(),
         presets=get_presets(cfg),
         quality_curves=QUALITY_CURVES,
+        traffic_generator=traffic_generator_snapshot(),
     )
 
 
@@ -3188,6 +3189,7 @@ def lab_tools():
 def tests():
     cfg = load_config()
     scenario_id = request.args.get("scenario")
+    traffic_generator = traffic_generator_snapshot(include_catalog=True)
     return render_template(
         "tests.html",
         page="tests",
@@ -3198,11 +3200,12 @@ def tests():
         capture_state=capture_snapshot(),
         tcpdump_available=bool(shutil.which("tcpdump")),
         selected_scenario=scenario_id,
+        traffic_generator=traffic_generator,
         events=list(reversed([
             event for event in EVENT_LOG
             if event.get("kind") in (
                 "scenario", "scenario-config", "fault", "mtu",
-                "capture", "security-test"
+                "capture", "security-test", "traffic-generator"
             )
         ][-40:])),
     )
@@ -3453,10 +3456,191 @@ def probe_run():
 
 @app.route("/integrations")
 def integrations():
+    cfg = load_config()
+    discovered = (
+        discover_traffic_generators()
+        if request.args.get("discover") == "1"
+        else []
+    )
     return render_template(
         "integrations.html",
         page="integrations",
+        traffic_generator=traffic_generator_snapshot(include_catalog=False),
+        traffic_generator_discovered=discovered,
+        traffic_generator_has_key=bool(traffic_generator_api_key()),
     )
+
+
+@app.route("/integrations/traffic-generator/save", methods=["POST"])
+def traffic_generator_save():
+    cfg = load_config()
+    selected = (request.form.get("discovered_host") or "").strip()
+    manual = (request.form.get("manual_host") or "").strip()
+    host = manual if selected in ("", "manual") else selected
+
+    if host.startswith("https://") or host.startswith("http://"):
+        parsed = urlsplit(host)
+        host = parsed.hostname or ""
+        discovered_port = parsed.port
+    else:
+        discovered_port = None
+
+    if not host or len(host) > 255 or not re.fullmatch(r"[A-Za-z0-9_.:\-]+", host):
+        flash("Enter a valid Traffic Simulator IP address or hostname.", "error")
+        return redirect(url_for("integrations") + "#traffic-simulator")
+
+    try:
+        port = int(request.form.get("port") or discovered_port or 8443)
+    except ValueError:
+        port = 8443
+    if not 1 <= port <= 65535:
+        flash("Traffic Simulator API port must be 1-65535.", "error")
+        return redirect(url_for("integrations") + "#traffic-simulator")
+
+    integration = {
+        "host": host,
+        "port": port,
+        "allow_self_signed": request.form.get("allow_self_signed") == "on",
+        "instance_name": (request.form.get("instance_name") or "").strip()[:120] or None,
+        "version": (request.form.get("version") or "").strip()[:40] or None,
+        "tls_sha256": (request.form.get("tls_sha256") or "").strip()[:128] or None,
+    }
+    cfg["traffic_generator"] = integration
+    save_config(cfg)
+
+    api_key = (request.form.get("api_key") or "").strip()
+    if api_key:
+        secrets_data = load_secrets()
+        secrets_data["traffic_generator_api_key"] = api_key
+        save_secrets(secrets_data)
+
+    if not traffic_generator_api_key():
+        flash("Traffic Simulator saved, but an API key is still required.", "warning")
+    else:
+        try:
+            status = traffic_generator_request("/api/v1/status", timeout=3.0)
+            run_state = status.get("status", "connected")
+            flash(
+                f"Traffic Simulator connected successfully · {run_state}.",
+                "success",
+            )
+        except RuntimeError as exc:
+            flash(f"Traffic Simulator saved, but connection test failed: {exc}", "warning")
+
+    return redirect(url_for("integrations") + "#traffic-simulator")
+
+
+@app.route("/integrations/traffic-generator/test", methods=["POST"])
+def traffic_generator_test():
+    try:
+        status = traffic_generator_request("/api/v1/status", timeout=3.0)
+        dem = status.get("dem") or {}
+        score = dem.get("experience_score")
+        detail = f" · DEM {score}" if score is not None else ""
+        flash(
+            f'Traffic Simulator API connected · {status.get("status", "unknown")}{detail}.',
+            "success",
+        )
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("integrations") + "#traffic-simulator")
+
+
+@app.route("/traffic-generator/start", methods=["POST"])
+def traffic_generator_start():
+    payload = {
+        "profile": request.form.get("profile") or "office",
+        "users": request.form.get("users") or 50,
+        "spawn_rate": request.form.get("spawn_rate") or 5,
+        "activity": request.form.get("activity") or "normal",
+        "pattern": request.form.get("pattern") or "steady",
+    }
+    target = (request.form.get("target") or "").strip()
+    if target:
+        payload["target"] = target
+
+    try:
+        status = traffic_generator_request(
+            "/api/v1/workloads/start",
+            method="POST",
+            payload=payload,
+            timeout=5.0,
+        )
+        run = status.get("run") or {}
+        log_event(
+            "traffic-generator",
+            f'Corporate workload started · {payload["profile"]} · {payload["users"]} users',
+            action="start",
+            run_id=run.get("run_id"),
+            profile=payload["profile"],
+            users=int(payload["users"]),
+            pattern=payload["pattern"],
+        )
+        flash("Corporate Traffic Simulator workload started.", "success")
+    except (RuntimeError, ValueError) as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/traffic-generator/adjust", methods=["POST"])
+def traffic_generator_adjust():
+    payload = {}
+    for key in ("users", "spawn_rate", "activity"):
+        value = request.form.get(key)
+        if value not in (None, ""):
+            payload[key] = value
+    try:
+        status = traffic_generator_request(
+            "/api/v1/workloads/adjust",
+            method="POST",
+            payload=payload,
+            timeout=5.0,
+        )
+        log_event(
+            "traffic-generator",
+            "Corporate workload adjusted",
+            action="adjust",
+            payload=payload,
+            users=status.get("users"),
+        )
+        flash("Corporate workload adjusted.", "success")
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/traffic-generator/stop", methods=["POST"])
+def traffic_generator_stop():
+    try:
+        status_before = traffic_generator_request("/api/v1/status", timeout=3.0)
+        traffic_generator_request(
+            "/api/v1/workloads/stop",
+            method="POST",
+            payload={},
+            timeout=5.0,
+        )
+        dem = status_before.get("dem") or {}
+        log_event(
+            "traffic-generator",
+            "Corporate workload stopped",
+            action="stop",
+            run_id=(status_before.get("run") or {}).get("run_id"),
+            users=status_before.get("users"),
+            experience_score=dem.get("experience_score"),
+            availability_pct=dem.get("availability_pct"),
+            p95_ms=dem.get("p95_ms"),
+        )
+        flash("Corporate workload stopped.", "info")
+    except RuntimeError as exc:
+        flash(str(exc), "error")
+    return redirect_after("tests")
+
+
+@app.route("/api/v1/traffic-generator")
+def api_traffic_generator():
+    snapshot = traffic_generator_snapshot(include_catalog=False)
+    code = 200 if snapshot.get("connected") or not snapshot.get("configured") else 503
+    return jsonify(snapshot), code
 
 
 @app.route("/settings")
