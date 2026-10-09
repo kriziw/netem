@@ -299,7 +299,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 
@@ -323,7 +322,7 @@ NetEmUI.createLiveClient({
   maxPoints:20,
   onSample({state}) {
     const scenario=state.scenario || {};
-    if (!scenario.active) { window.location.reload(); return; }
+    if (!scenario.active) { window.NetEmActions.refresh(); return; }
     const stage=document.querySelector("[data-active-step]");
     if(stage) stage.textContent=scenario.step_label || "running";
     const condition=document.querySelector("[data-active-condition]");
@@ -338,7 +337,7 @@ NetEmUI.createLiveClient({
 {% endif %}
 
 {% if capture_state.active %}
-setTimeout(() => window.location.reload(), 3500);
+setTimeout(() => window.NetEmActions.refresh(), 3500);
 {% endif %}
 
 {% if traffic_generator.configured %}
@@ -352,7 +351,7 @@ async function refreshTrafficGenerator() {
       return;
     }
     const initialRunning={{ (traffic_generator.connected and traffic_generator.status.status in ('starting','running'))|tojson }};
-    if(initialRunning!==["starting","running"].includes(snapshot.status.status)) { window.location.reload(); return; }
+    if(initialRunning!==["starting","running"].includes(snapshot.status.status)) { window.NetEmActions.refresh(); return; }
     const status=snapshot.status;
     const dem=status.dem || {};
     document.querySelectorAll("[data-tg-status]").forEach(el=>{

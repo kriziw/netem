@@ -152,7 +152,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 const wasActive = {{ 'true' if scenario_state.active else 'false' }};
@@ -166,7 +165,7 @@ if (wasActive) {
       const label = document.querySelector('[data-role="scenario-label"]');
       if (step && s.active) step.textContent = s.step;
       if (label && s.active) label.textContent = s.step_label || "";
-      if (!s.active) window.location.reload();
+      if (!s.active) window.NetEmActions.refresh();
     }
   });
 }

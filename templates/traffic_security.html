@@ -179,7 +179,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 const copy = document.getElementById("copy-beacon");
@@ -192,7 +191,7 @@ if (copy) copy.addEventListener("click", async () => {
   } catch (_) {}
 });
 {% if capture_state.active %}
-setTimeout(() => window.location.reload(), 3000);
+setTimeout(() => window.NetEmActions.refresh(), 3000);
 {% endif %}
 </script>
 {% endblock %}

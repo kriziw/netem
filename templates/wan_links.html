@@ -216,7 +216,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="{{ url_for('static', filename='app.js') }}"></script>
 <script>
 const presets = {{ presets | tojson }};
 const qualityCurves = {{ quality_curves | tojson }};

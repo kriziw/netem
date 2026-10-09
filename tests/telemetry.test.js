@@ -78,3 +78,24 @@ test('live client propagates gaps and valid samples through polling', async () =
   assert.equal(client.history.wan1.down[2],null);
   client.stop();
 });
+test('chart animation reaches exact samples and preserves missing-data gaps', () => {
+  let frame;
+  const ctx={window:{requestAnimationFrame:fn=>{frame=fn;return 1;},cancelAnimationFrame:()=>{} }};
+  vm.createContext(ctx);
+  vm.runInContext(fs.readFileSync('static/app.js','utf8'),ctx);
+  const element={d:'M0,96 L100,4',getAttribute(){return this.d;},setAttribute(_,value){this.d=value;}};
+  ctx.window.NetEmUI.renderSeries([element],[[0,1]],{animate:true,fixedMax:2});
+  frame(0); frame(300);
+  assert.notEqual(element.d,'M0.00,96.00 L100.00,50.00');
+  frame(600);
+  assert.equal(element.d,'M0.00,96.00 L100.00,50.00');
+  ctx.window.NetEmUI.renderSeries([element],[[1,null,2]],{animate:true});
+  assert.equal((element.d.match(/M/g)||[]).length,2);
+});
+test('fixed slots retain a stable x step and stable scale avoids shrink jumps', () => {
+  const element={setAttribute(_,value){this.d=value;}};
+  ui.renderSeries([element],[[10,20]],{slots:5,stableScale:true});
+  assert.equal(element.d,'M75.00,50.00 L100.00,4.00');
+  ui.renderSeries([element],[[1,2]],{slots:5,stableScale:true});
+  assert.equal(element.d,'M75.00,91.40 L100.00,86.80');
+});
