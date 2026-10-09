@@ -1345,6 +1345,36 @@ def interface_counters(ifname: str):
     return result
 
 
+def interface_runtime_status(ifname: str):
+    if not ifname:
+        return {
+            "available": False,
+            "operstate": "unknown",
+            "carrier": None,
+        }
+
+    base = Path("/sys/class/net") / ifname
+    available = base.exists()
+    operstate = "unknown"
+    carrier = None
+
+    if available:
+        try:
+            operstate = (base / "operstate").read_text().strip() or "unknown"
+        except OSError:
+            pass
+        try:
+            carrier = (base / "carrier").read_text().strip() == "1"
+        except OSError:
+            carrier = None
+
+    return {
+        "available": available,
+        "operstate": operstate,
+        "carrier": carrier,
+    }
+
+
 
 
 # ---------- Persistent telemetry / active measurement ----------
@@ -3739,6 +3769,8 @@ def api_telemetry():
         outer_if = link.get("outer")
         inner = interface_counters(inner_if)
         outer = interface_counters(outer_if)
+        inner_status = interface_runtime_status(inner_if)
+        outer_status = interface_runtime_status(outer_if)
 
         links.append(
             {
@@ -3747,10 +3779,12 @@ def api_telemetry():
                 "inner": {
                     "interface": inner_if,
                     "counters": inner,
+                    **inner_status,
                 },
                 "outer": {
                     "interface": outer_if,
                     "counters": outer,
+                    **outer_status,
                 },
                 "traffic": {
                     "download": {
