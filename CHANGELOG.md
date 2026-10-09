@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.8.0](https://github.com/kriziw/netem/compare/v0.7.2...v0.8.0) (2026-10-09)
+
+
+### Features
+
+* open simulator configuration and controls in a modal ([69c24bd](https://github.com/kriziw/netem/commit/69c24bdec8e0352d47bb393a085d4799e832731c))
+* open simulator configuration and controls in a modal ([5750f24](https://github.com/kriziw/netem/commit/5750f24317ac489a8e999a6258e91edcf69bf98a))
+
 ## [0.7.2](https://github.com/kriziw/netem/compare/v0.7.1...v0.7.2) (2026-10-09)
 
 
