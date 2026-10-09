@@ -83,7 +83,8 @@ window.NetEmActions = (() => {
   document.addEventListener('submit', async event => {
     const form = event.target;
     if (event.defaultPrevented || !(form instanceof HTMLFormElement) || form.method.toLowerCase() !== 'post') return;
-    if (new URL(form.action).origin !== location.origin || form.target === '_blank') return;
+    const action = new URL(form.getAttribute('action') || location.href, location.href);
+    if (action.origin !== location.origin || form.target === '_blank') return;
     event.preventDefault();
     if (busy) return;
     busy = true;
@@ -93,7 +94,7 @@ window.NetEmActions = (() => {
     const disabled = buttons.map(button => button.disabled);
     buttons.forEach(button => button.disabled = true);
     form.setAttribute('aria-busy', 'true');
-    try { await update(await fetch(form.action, {method:'POST', body:data})); }
+    try { await update(await fetch(action.href, {method:'POST', body:data})); }
     catch (error) { displayError(error.message + ' Check live status before retrying; the action may have applied.'); }
     finally {
       buttons.forEach((button, i) => button.disabled = disabled[i]);
