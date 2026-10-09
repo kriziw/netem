@@ -1217,6 +1217,594 @@ def interface_counters(ifname: str):
 
 
 
+
+# ---------- Persistent telemetry / active measurement ----------
+
+def telemetry_connect():
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
+    return conn
+
+
+def init_telemetry_db():
+    with telemetry_connect() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS telemetry_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                link_id TEXT NOT NULL,
+                down_mbps REAL NOT NULL,
+                up_mbps REAL NOT NULL,
+                down_pps REAL NOT NULL,
+                up_pps REAL NOT NULL,
+                delay_ms REAL NOT NULL,
+                jitter_ms REAL NOT NULL,
+                loss_pct REAL NOT NULL,
+                quality REAL NOT NULL,
+                sla_pass INTEGER NOT NULL,
+                fault TEXT NOT NULL,
+                session_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_telemetry_link_time
+                ON telemetry_samples(link_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_telemetry_session
+                ON telemetry_samples(session_id, timestamp);
+
+            CREATE TABLE IF NOT EXISTS probe_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                probe_id TEXT NOT NULL,
+                link_id TEXT NOT NULL,
+                kind TEXT NOT NULL,
+                target TEXT NOT NULL,
+                success INTEGER NOT NULL,
+                latency_ms REAL,
+                status TEXT,
+                detail TEXT,
+                session_id TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_probe_probe_time
+                ON probe_samples(probe_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_probe_link_time
+                ON probe_samples(link_id, timestamp);
+            CREATE INDEX IF NOT EXISTS idx_probe_session
+                ON probe_samples(session_id, timestamp);
+            """
+        )
+
+
+def active_session_id():
+    with RUNTIME_LOCK:
+        return ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None
+
+
+def collect_telemetry_sample():
+    cfg = load_config()
+    states = {
+        item["id"]: item
+        for item in build_link_states(cfg)
+    }
+    now = time.time()
+    rows = []
+
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge")
+        state = states.get(link_id)
+        if not state:
+            continue
+
+        inner = interface_counters(link.get("inner"))
+        outer = interface_counters(link.get("outer"))
+        current = {
+            "timestamp": now,
+            "down_bytes": inner["tx_bytes"],
+            "up_bytes": outer["tx_bytes"],
+            "down_packets": inner["tx_packets"],
+            "up_packets": outer["tx_packets"],
+        }
+        previous = TELEMETRY_PREVIOUS.get(link_id)
+        down_mbps = up_mbps = down_pps = up_pps = 0.0
+        if previous:
+            dt = max(0.001, now - previous["timestamp"])
+            down_mbps = max(0, current["down_bytes"] - previous["down_bytes"]) * 8 / dt / 1_000_000
+            up_mbps = max(0, current["up_bytes"] - previous["up_bytes"]) * 8 / dt / 1_000_000
+            down_pps = max(0, current["down_packets"] - previous["down_packets"]) / dt
+            up_pps = max(0, current["up_packets"] - previous["up_packets"]) / dt
+
+        TELEMETRY_PREVIOUS[link_id] = current
+        effective = state.get("effective", {})
+        rows.append(
+            (
+                now,
+                link_id,
+                down_mbps,
+                up_mbps,
+                down_pps,
+                up_pps,
+                float(effective.get("delay_ms", 0.0)),
+                float(effective.get("jitter_ms", 0.0)),
+                float(effective.get("loss_pct", 0.0)),
+                float(state.get("runtime_quality", 100)),
+                1 if state.get("sla", {}).get("pass") else 0,
+                state.get("fault", "normal"),
+                active_session_id(),
+            )
+        )
+
+    if rows:
+        with telemetry_connect() as conn:
+            conn.executemany(
+                """
+                INSERT INTO telemetry_samples (
+                    timestamp, link_id, down_mbps, up_mbps, down_pps, up_pps,
+                    delay_ms, jitter_ms, loss_pct, quality, sla_pass, fault, session_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                rows,
+            )
+    return rows
+
+
+def prune_telemetry_history():
+    cutoff = time.time() - TELEMETRY_RETENTION_HOURS * 3600
+    with telemetry_connect() as conn:
+        conn.execute("DELETE FROM telemetry_samples WHERE timestamp < ?", (cutoff,))
+        conn.execute("DELETE FROM probe_samples WHERE timestamp < ?", (cutoff,))
+
+
+def telemetry_worker():
+    init_telemetry_db()
+    next_prune = time.time() + 300
+    while not BACKGROUND_STOP.is_set():
+        started = time.time()
+        try:
+            collect_telemetry_sample()
+            if started >= next_prune:
+                prune_telemetry_history()
+                next_prune = started + 300
+        except Exception as exc:
+            # Telemetry persistence must never stop the control plane.
+            log_event("telemetry", "Persistent telemetry sample failed", error=str(exc)[:240])
+        elapsed = time.time() - started
+        BACKGROUND_STOP.wait(max(0.2, TELEMETRY_SAMPLE_SECONDS - elapsed))
+
+
+def query_telemetry_history(link_id: str, since: float, max_points=1200):
+    init_telemetry_db()
+    now = time.time()
+    span = max(1.0, now - since)
+    bucket_seconds = max(TELEMETRY_SAMPLE_SECONDS, span / max(50, min(5000, max_points)))
+    with telemetry_connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT
+                AVG(timestamp) AS timestamp,
+                AVG(down_mbps) AS down_mbps,
+                AVG(up_mbps) AS up_mbps,
+                AVG(down_pps) AS down_pps,
+                AVG(up_pps) AS up_pps,
+                AVG(delay_ms) AS delay_ms,
+                AVG(jitter_ms) AS jitter_ms,
+                AVG(loss_pct) AS loss_pct,
+                AVG(quality) AS quality,
+                MIN(sla_pass) AS sla_pass
+            FROM telemetry_samples
+            WHERE link_id = ? AND timestamp >= ?
+            GROUP BY CAST((timestamp - ?) / ? AS INTEGER)
+            ORDER BY timestamp ASC
+            """,
+            (link_id, since, since, bucket_seconds),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def latest_telemetry_sample(link_id: str):
+    init_telemetry_db()
+    with telemetry_connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM telemetry_samples
+            WHERE link_id = ?
+            ORDER BY timestamp DESC LIMIT 1
+            """,
+            (link_id,),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def query_probe_history(probe_id=None, link_id=None, since=None, limit=1000):
+    init_telemetry_db()
+    clauses = []
+    values = []
+    if probe_id:
+        clauses.append("probe_id = ?")
+        values.append(probe_id)
+    if link_id:
+        clauses.append("link_id = ?")
+        values.append(link_id)
+    if since is not None:
+        clauses.append("timestamp >= ?")
+        values.append(float(since))
+    where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+    values.append(max(1, min(5000, int(limit))))
+    with telemetry_connect() as conn:
+        rows = conn.execute(
+            f"""
+            SELECT timestamp, probe_id, link_id, kind, target, success,
+                   latency_ms, status, detail, session_id
+            FROM probe_samples
+            {where}
+            ORDER BY timestamp DESC LIMIT ?
+            """,
+            values,
+        ).fetchall()
+    return [dict(row) for row in reversed(rows)]
+
+
+def latest_probe_sample(probe_id: str):
+    with RUNTIME_LOCK:
+        runtime = PROBE_RUNTIME.get(probe_id)
+        if runtime:
+            return dict(runtime)
+    rows = query_probe_history(probe_id=probe_id, limit=1)
+    return rows[-1] if rows else None
+
+
+def get_probes(cfg: dict):
+    probes = cfg.get("probes", [])
+    return probes if isinstance(probes, list) else []
+
+
+def resolve_probe_interface(probe: dict, cfg: dict):
+    side = probe.get("source_side", "auto")
+    if side == "auto":
+        return None
+    link = get_link(cfg, probe.get("link_id", ""))
+    if not link:
+        return None
+    if side == "inner":
+        return link.get("inner")
+    if side == "outer":
+        return link.get("outer")
+    return None
+
+
+def validate_probe_definition(raw: dict, cfg: dict, existing_id=None):
+    link_id = str(raw.get("link_id") or "").strip()
+    if not get_link(cfg, link_id):
+        raise ValueError("Probe must reference a configured WAN.")
+
+    kind = str(raw.get("kind") or "icmp").strip().lower()
+    if kind not in ("icmp", "tcp", "http", "dns"):
+        raise ValueError("Probe type must be ICMP, TCP, HTTP or DNS.")
+
+    target = str(raw.get("target") or "").strip()
+    if not target or len(target) > 512:
+        raise ValueError("Probe target is required and must be at most 512 characters.")
+
+    source_side = str(raw.get("source_side") or "auto").strip().lower()
+    if source_side not in ("auto", "inner", "outer"):
+        raise ValueError("Probe source must be automatic, inner or outer.")
+
+    try:
+        interval_s = max(2, min(3600, int(raw.get("interval_s", 5))))
+    except (TypeError, ValueError):
+        raise ValueError("Probe interval must be an integer from 2 to 3600 seconds.")
+
+    try:
+        timeout_s = max(0.2, min(10.0, float(raw.get("timeout_s", 2.0))))
+    except (TypeError, ValueError):
+        raise ValueError("Probe timeout must be between 0.2 and 10 seconds.")
+
+    port = None
+    if kind == "tcp":
+        try:
+            port = int(raw.get("port", 443))
+        except (TypeError, ValueError):
+            raise ValueError("TCP probe port must be an integer.")
+        if not 1 <= port <= 65535:
+            raise ValueError("TCP probe port must be 1-65535.")
+
+    if kind == "http":
+        parsed = urlsplit(target)
+        if parsed.scheme not in ("http", "https") or not parsed.hostname:
+            raise ValueError("HTTP probe target must be an http:// or https:// URL.")
+
+    resolver = str(raw.get("resolver") or "1.1.1.1").strip()
+    if kind == "dns" and (not resolver or len(resolver) > 255):
+        raise ValueError("DNS resolver is required.")
+
+    name = str(raw.get("name") or f"{link_id} {kind.upper()}").strip()[:80]
+    probe_id = existing_id or str(raw.get("id") or "").strip()
+    if not probe_id:
+        slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-") or kind
+        probe_id = f"probe-{link_id}-{slug}-{time.time_ns() % 1000000}"
+
+    return {
+        "id": probe_id[:120],
+        "name": name or f"{link_id} {kind.upper()}",
+        "link_id": link_id,
+        "kind": kind,
+        "target": target,
+        "port": port,
+        "resolver": resolver if kind == "dns" else None,
+        "source_side": source_side,
+        "interval_s": interval_s,
+        "timeout_s": timeout_s,
+        "enabled": bool(raw.get("enabled", True)),
+    }
+
+
+def bind_socket_to_interface(sock: socket.socket, ifname: str | None):
+    if not ifname:
+        return
+    option = getattr(socket, "SO_BINDTODEVICE", 25)
+    sock.setsockopt(socket.SOL_SOCKET, option, ifname.encode() + b"\0")
+
+
+def open_bound_tcp(host: str, port: int, timeout_s: float, ifname=None):
+    last_error = None
+    for family, socktype, proto, _canonname, sockaddr in socket.getaddrinfo(
+        host, port, type=socket.SOCK_STREAM
+    ):
+        sock = socket.socket(family, socktype, proto)
+        try:
+            sock.settimeout(timeout_s)
+            bind_socket_to_interface(sock, ifname)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as exc:
+            last_error = exc
+            sock.close()
+    raise OSError(str(last_error or "Unable to connect"))
+
+
+def dns_query_packet(hostname: str, transaction_id: int):
+    labels = hostname.rstrip(".").split(".")
+    if not labels or any(not label or len(label.encode()) > 63 for label in labels):
+        raise ValueError("Invalid DNS hostname.")
+    qname = b"".join(bytes([len(label.encode())]) + label.encode() for label in labels) + b"\x00"
+    header = transaction_id.to_bytes(2, "big") + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00"
+    return header + qname + b"\x00\x01\x00\x01"
+
+
+def execute_probe(probe: dict, cfg: dict):
+    kind = probe["kind"]
+    timeout_s = float(probe.get("timeout_s", 2.0))
+    ifname = resolve_probe_interface(probe, cfg)
+    target = probe["target"]
+    started = time.perf_counter()
+    status = None
+    detail = ""
+
+    try:
+        if kind == "icmp":
+            cmd = [PING, "-n", "-c", "1", "-W", str(max(1, math.ceil(timeout_s)))]
+            if ifname:
+                cmd += ["-I", ifname]
+            cmd.append(target)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=timeout_s + 1.5,
+            )
+            if proc.returncode != 0:
+                raise OSError((proc.stderr or proc.stdout or "ICMP probe failed").strip())
+            match = re.search(r"time[=<]([0-9.]+)\s*ms", proc.stdout or "")
+            latency_ms = float(match.group(1)) if match else (time.perf_counter() - started) * 1000
+            status = "reply"
+            detail = "ICMP echo reply"
+
+        elif kind == "tcp":
+            sock = open_bound_tcp(
+                target,
+                int(probe.get("port") or 443),
+                timeout_s,
+                ifname,
+            )
+            latency_ms = (time.perf_counter() - started) * 1000
+            sock.close()
+            status = "connected"
+            detail = f'TCP/{int(probe.get("port") or 443)} connected'
+
+        elif kind == "http":
+            parsed = urlsplit(target)
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+            sock = open_bound_tcp(parsed.hostname, port, timeout_s, ifname)
+            if parsed.scheme == "https":
+                context = ssl.create_default_context()
+                sock = context.wrap_socket(sock, server_hostname=parsed.hostname)
+                sock.settimeout(timeout_s)
+            path = parsed.path or "/"
+            if parsed.query:
+                path += "?" + parsed.query
+            request_bytes = (
+                f"HEAD {path} HTTP/1.1\r\n"
+                f"Host: {parsed.hostname}\r\n"
+                "User-Agent: NetEm-WAN-Lab-Probe/1\r\n"
+                "Connection: close\r\n\r\n"
+            ).encode()
+            sock.sendall(request_bytes)
+            first_line = b""
+            while b"\r\n" not in first_line and len(first_line) < 4096:
+                chunk = sock.recv(512)
+                if not chunk:
+                    break
+                first_line += chunk
+            sock.close()
+            latency_ms = (time.perf_counter() - started) * 1000
+            line = first_line.split(b"\r\n", 1)[0].decode("latin-1", "replace")
+            match = re.match(r"HTTP/\d(?:\.\d)?\s+(\d{3})", line)
+            if not match:
+                raise OSError("HTTP response did not contain a valid status line.")
+            code = int(match.group(1))
+            if code >= 500:
+                raise OSError(f"HTTP {code}")
+            status = str(code)
+            detail = line[:180]
+
+        elif kind == "dns":
+            resolver = probe.get("resolver") or "1.1.1.1"
+            addr = socket.getaddrinfo(resolver, 53, type=socket.SOCK_DGRAM)[0]
+            family, socktype, proto, _canonname, sockaddr = addr
+            sock = socket.socket(family, socktype, proto)
+            sock.settimeout(timeout_s)
+            bind_socket_to_interface(sock, ifname)
+            transaction_id = int(time.time_ns() & 0xFFFF)
+            packet = dns_query_packet(target, transaction_id)
+            sock.sendto(packet, sockaddr)
+            response, _ = sock.recvfrom(4096)
+            sock.close()
+            latency_ms = (time.perf_counter() - started) * 1000
+            if len(response) < 12 or int.from_bytes(response[:2], "big") != transaction_id:
+                raise OSError("DNS response did not match the query.")
+            rcode = response[3] & 0x0F
+            if rcode != 0:
+                raise OSError(f"DNS response code {rcode}")
+            answers = int.from_bytes(response[6:8], "big")
+            status = f"{answers} answer" + ("" if answers == 1 else "s")
+            detail = f"DNS via {resolver}"
+
+        else:
+            raise ValueError("Unsupported probe type.")
+
+        return {
+            "timestamp": time.time(),
+            "probe_id": probe["id"],
+            "link_id": probe["link_id"],
+            "kind": kind,
+            "target": target,
+            "success": True,
+            "latency_ms": round(latency_ms, 3),
+            "status": status,
+            "detail": detail,
+            "source_interface": ifname,
+        }
+    except Exception as exc:
+        return {
+            "timestamp": time.time(),
+            "probe_id": probe["id"],
+            "link_id": probe["link_id"],
+            "kind": kind,
+            "target": target,
+            "success": False,
+            "latency_ms": None,
+            "status": "failed",
+            "detail": str(exc)[:240],
+            "source_interface": ifname,
+        }
+
+
+def record_probe_result(result: dict):
+    session_id = active_session_id()
+    with telemetry_connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO probe_samples (
+                timestamp, probe_id, link_id, kind, target, success,
+                latency_ms, status, detail, session_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                result["timestamp"],
+                result["probe_id"],
+                result["link_id"],
+                result["kind"],
+                result["target"],
+                1 if result["success"] else 0,
+                result.get("latency_ms"),
+                result.get("status"),
+                result.get("detail"),
+                session_id,
+            ),
+        )
+
+    with RUNTIME_LOCK:
+        previous = PROBE_RUNTIME.get(result["probe_id"])
+        runtime = dict(result)
+        runtime["session_id"] = session_id
+        PROBE_RUNTIME[result["probe_id"]] = runtime
+
+    if previous is not None and bool(previous.get("success")) != bool(result.get("success")):
+        state = "recovered" if result.get("success") else "failed"
+        log_event(
+            "probe",
+            f'{result["probe_id"]}: probe {state}',
+            probe_id=result["probe_id"],
+            link_id=result["link_id"],
+            success=result["success"],
+            latency_ms=result.get("latency_ms"),
+        )
+
+
+def run_probe_and_record(probe: dict, cfg: dict):
+    result = execute_probe(probe, cfg)
+    record_probe_result(result)
+    return result
+
+
+def probe_snapshot(cfg: dict):
+    rows = []
+    with RUNTIME_LOCK:
+        runtime = {key: dict(value) for key, value in PROBE_RUNTIME.items()}
+    for probe in get_probes(cfg):
+        row = dict(probe)
+        row["latest"] = runtime.get(probe.get("id")) or latest_probe_sample(probe.get("id"))
+        rows.append(row)
+    return rows
+
+
+def probe_worker():
+    init_telemetry_db()
+    next_due = {}
+    while not BACKGROUND_STOP.is_set():
+        cfg = load_config()
+        probes = [item for item in get_probes(cfg) if item.get("enabled", True)]
+        active_ids = {item.get("id") for item in probes}
+        next_due = {key: value for key, value in next_due.items() if key in active_ids}
+        now = time.time()
+
+        for probe in probes:
+            probe_id = probe.get("id")
+            if not probe_id or now < next_due.get(probe_id, 0):
+                continue
+            next_due[probe_id] = now + max(2, int(probe.get("interval_s", 5)))
+            try:
+                run_probe_and_record(probe, cfg)
+            except Exception as exc:
+                log_event(
+                    "probe",
+                    f"{probe_id}: probe execution error",
+                    error=str(exc)[:240],
+                )
+        BACKGROUND_STOP.wait(0.5)
+
+
+def start_background_workers():
+    global TELEMETRY_THREAD, PROBE_THREAD
+    init_telemetry_db()
+    BACKGROUND_STOP.clear()
+    if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
+        TELEMETRY_THREAD = threading.Thread(
+            target=telemetry_worker,
+            name="netem-telemetry",
+            daemon=True,
+        )
+        TELEMETRY_THREAD.start()
+    if PROBE_THREAD is None or not PROBE_THREAD.is_alive():
+        PROBE_THREAD = threading.Thread(
+            target=probe_worker,
+            name="netem-probes",
+            daemon=True,
+        )
+        PROBE_THREAD.start()
+
+
 def get_interface_mtu(ifname: str):
     if not ifname:
         return None
