@@ -7,10 +7,14 @@ import math
 import os
 import re
 import shutil
+import socket
+import sqlite3
+import ssl
 import subprocess
 import threading
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 from flask import (
     Flask,
@@ -34,12 +38,18 @@ VERSION_PATH = BASE_DIR / "version.txt"
 RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
 SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
+TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
 GIT = "/usr/bin/git"
+PING = shutil.which("ping") or "/usr/bin/ping"
 UPDATE_BRANCH = "main"
+
+TELEMETRY_SAMPLE_SECONDS = 2.0
+TELEMETRY_RETENTION_HOURS = 168
+MAX_PROBES = 20
 
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
@@ -64,6 +74,11 @@ SCENARIO_STATE = {
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
+BACKGROUND_STOP = threading.Event()
+TELEMETRY_THREAD = None
+PROBE_THREAD = None
+TELEMETRY_PREVIOUS = {}
+PROBE_RUNTIME = {}
 CAPTURE_STATE = {
     "active": False,
     "link_id": None,
