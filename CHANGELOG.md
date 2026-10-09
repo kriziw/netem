@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.1](https://github.com/kriziw/netem/compare/v0.11.0...v0.11.1) (2026-10-09)
+
+
+### Bug Fixes
+
+* prevent Command Center cards from stretching ([#38](https://github.com/kriziw/netem/issues/38)) ([3906f57](https://github.com/kriziw/netem/commit/3906f57cce823511e95b3f673945df6d66ca6c33))
+
 ## [0.11.0](https://github.com/kriziw/netem/compare/v0.10.0...v0.11.0) (2026-10-09)
 
 
