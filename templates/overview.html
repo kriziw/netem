@@ -451,7 +451,7 @@ document.querySelectorAll('[data-wan-drawer] form').forEach(form => {
     buttons.forEach(button => button.disabled = true);
     feedback.textContent = "Applying…";
     try {
-      const response = await fetch(form.action, {
+      const response = await fetch(new URL(form.getAttribute('action') || location.href, location.href).href, {
         method: "POST", body: new FormData(form), headers: {Accept: "application/json"}
       });
       const result = await response.json();

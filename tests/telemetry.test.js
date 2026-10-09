@@ -99,3 +99,40 @@ test('fixed slots retain a stable x step and stable scale avoids shrink jumps', 
   ui.renderSeries([element],[[1,2]],{slots:5,stableScale:true});
   assert.equal(element.d,'M75.00,91.40 L100.00,86.80');
 });
+
+test('WAN quick controls use the URL attribute when an action input masks form.action', async () => {
+  let submit, sent;
+  const feedback={setAttribute(){},classList:{toggle(){},add(){}}};
+  const form={action:{name:'action',value:'quality'},getAttribute:name=>name==='action'?'/wan/quick':null,
+    append(){},querySelectorAll:()=>[],addEventListener:(name,fn)=>{submit=fn;}};
+  class Data {constructor(value){this.form=value;}}
+  const ctx={document:{querySelectorAll:()=>[form],createElement:()=>feedback},URL,
+    location:{href:'https://netem.example/'},FormData:Data,
+    fetch:async(url,options)=>{sent={url,options};return {ok:true,json:async()=>({ok:true,messages:[{message:'Applied'}]})};}};
+  vm.createContext(ctx);
+  const source=fs.readFileSync('templates/overview.html','utf8');
+  vm.runInContext(source.slice(source.indexOf('// Submit WAN controls'),source.indexOf('const previousRates')),ctx);
+  await submit({defaultPrevented:false,preventDefault(){}});
+  assert.equal(sent.url,'https://netem.example/wan/quick');
+  assert.equal(sent.options.headers.Accept,'application/json');
+  assert.equal(sent.options.body.form,form);
+  assert.equal(feedback.textContent,'Applied');
+});
+
+test('generic controls resolve relative URLs despite a named action input', async () => {
+  let submit, sent;
+  class Form {constructor(){this.method='post';this.action={name:'action',value:'save'};}
+    getAttribute(name){return name==='action'?'./settings/save':null;}
+    querySelectorAll(){return [];}
+    setAttribute(){} removeAttribute(){}}
+  class Data {constructor(form){this.form=form;} append(){}}
+  const notice={textContent:''};
+  const ctx={window:{},document:{addEventListener:(name,fn)=>{submit=fn;},getElementById:()=>notice},
+    HTMLFormElement:Form,FormData:Data,URL,location:{href:'https://netem.example/',origin:'https://netem.example'},
+    fetch:async(url,options)=>{sent={url,options};return {ok:false,status:400};}};
+  vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/actions.js','utf8'),ctx);
+  const form=new Form();await submit({target:form,defaultPrevented:false,preventDefault(){}});
+  assert.equal(sent.url,'https://netem.example/settings/save');
+  assert.equal(sent.options.method,'POST');
+  assert.equal(sent.options.body.form,form);
+});
