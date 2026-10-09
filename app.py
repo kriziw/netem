@@ -3413,7 +3413,12 @@ def lab_scenario_start():
                 "link_id": link_id,
                 "started_at": time.time(),
                 "step": 0,
+                "step_count": len(scenario.get("steps", [])),
                 "step_label": "Starting",
+                "step_action": None,
+                "condition": None,
+                "result": None,
+                "error": None,
             }
         )
 
@@ -3706,6 +3711,7 @@ def api_state():
             "scenario": scenario_snapshot(),
             "session": session_snapshot(),
             "capture": capture_snapshot(),
+            "probes": probe_snapshot(cfg),
             "sla_profile": get_sla_profile(cfg),
             "events": EVENT_LOG[-20:],
         }
