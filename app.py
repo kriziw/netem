@@ -26,6 +26,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import site_catalog
+from showroom import create_showroom_app
 
 from flask import (
     Flask,
@@ -6151,7 +6152,70 @@ def clear():
     return redirect_after("wan_links")
 
 
+def showroom_snapshot():
+    """Publish only presentation data, never configuration, addresses or secrets."""
+    now = time.time()
+    cfg = load_config()
+    links = []
+    for state in build_link_states(cfg):
+        sample = latest_telemetry_sample(state["id"])
+        fresh = bool(sample and sample.get("rate_valid") and
+                     0 <= now - sample["timestamp"] <= TELEMETRY_SAMPLE_SECONDS * 3 and
+                     all(isinstance(sample.get(key), (int, float)) and
+                         math.isfinite(sample[key]) and sample[key] >= 0
+                         for key in ("down_mbps", "up_mbps")))
+        links.append({
+            "id": state["id"], "name": state["label"],
+            "profile": state["preset_name"], "quality": state["runtime_quality"],
+            "fault": state["fault"], "sla_pass": state["sla"]["pass"],
+            "delay_ms": state["effective"]["delay_ms"],
+            "jitter_ms": state["effective"]["jitter_ms"],
+            "loss_pct": state["effective"]["loss_pct"],
+            "download_limit_mbit": state["effective"].get("download_mbit"),
+            "upload_limit_mbit": state["effective"].get("upload_mbit"),
+            "sample_timestamp": sample["timestamp"] if sample else None,
+            "traffic_available": fresh,
+            "down_mbps": sample.get("down_mbps") if fresh else None,
+            "up_mbps": sample.get("up_mbps") if fresh else None,
+        })
+    scenario = scenario_snapshot()
+    lab_session = session_snapshot()
+    return {
+        "timestamp": now, "links": links,
+        "scenario": {key: scenario.get(key) for key in (
+            "active", "scenario_name", "step", "step_count", "step_label")},
+        "session": {key: lab_session.get(key) for key in ("active", "name")},
+    }
+
+
+showroom_app = create_showroom_app(showroom_snapshot)
+
+
+def run_servers():
+    """Share runtime state and workers; bind the viewer to its own HTTP listener."""
+    from werkzeug.serving import make_server
+
+    port = int(os.environ.get("NETEM_SHOWROOM_PORT", "8082"))
+    if port != 0 and (not 1 <= port <= 65535 or port == 8081):
+        raise ValueError("NETEM_SHOWROOM_PORT must be 0 (disabled) or a port other than 8081")
+    viewer = make_server(os.environ.get("NETEM_SHOWROOM_HOST", "0.0.0.0"),
+                         port, showroom_app, threaded=True) if port else None
+    viewer_thread = None
+    try:
+        restore_runtime_state()
+        start_background_workers()
+        if viewer:
+            viewer_thread = threading.Thread(target=viewer.serve_forever,
+                                             name="netem-showroom", daemon=True)
+            viewer_thread.start()
+        app.run(host="0.0.0.0", port=8081, debug=False)
+    finally:
+        if viewer:
+            if viewer_thread and viewer_thread.is_alive():
+                viewer.shutdown()
+                viewer_thread.join(timeout=5)
+            viewer.server_close()
+
+
 if __name__ == "__main__":
-    restore_runtime_state()
-    start_background_workers()
-    app.run(host="0.0.0.0", port=8081, debug=False)
+    run_servers()
