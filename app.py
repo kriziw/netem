@@ -2,6 +2,7 @@
 import copy
 import csv
 import io
+import ipaddress
 import json
 import math
 import os
@@ -15,6 +16,8 @@ import threading
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from flask import (
     Flask,
@@ -39,7 +42,11 @@ RUNTIME_DIR = BASE_DIR / "runtime"
 EVENT_LOG_PATH = RUNTIME_DIR / "events.jsonl"
 SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
 TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
+SECRETS_PATH = RUNTIME_DIR / "secrets.json"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
+
+TRAFFIC_GENERATOR_DISCOVERY_PORT = 47890
+TRAFFIC_GENERATOR_DISCOVERY_MAGIC = "NETEM_TRAFFIC_SIMULATOR_DISCOVERY_V1"
 
 TC = "/usr/sbin/tc"
 IP = "/usr/sbin/ip"
@@ -238,6 +245,208 @@ def save_config(cfg: dict):
     with tmp.open("w") as f:
         json.dump(cfg, f, indent=2)
     tmp.replace(CONFIG_PATH)
+
+
+def load_secrets():
+    if not SECRETS_PATH.exists():
+        return {}
+    try:
+        raw = json.loads(SECRETS_PATH.read_text())
+        return raw if isinstance(raw, dict) else {}
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def save_secrets(secrets_data):
+    RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+    tmp = SECRETS_PATH.with_suffix(".tmp")
+    tmp.write_text(json.dumps(secrets_data, indent=2))
+    os.chmod(tmp, 0o600)
+    tmp.replace(SECRETS_PATH)
+    try:
+        os.chmod(SECRETS_PATH, 0o600)
+    except OSError:
+        pass
+
+
+def traffic_generator_config(cfg=None):
+    cfg = cfg or load_config()
+    raw = cfg.get("traffic_generator")
+    return raw if isinstance(raw, dict) else {}
+
+
+def traffic_generator_api_key():
+    return str(load_secrets().get("traffic_generator_api_key") or "").strip()
+
+
+def traffic_generator_base_url(cfg=None):
+    integration = traffic_generator_config(cfg)
+    host = str(integration.get("host") or "").strip()
+    if not host:
+        return None
+    port = int(integration.get("port") or 8443)
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"https://{host}:{port}"
+
+
+def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
+    cfg = load_config()
+    base_url = traffic_generator_base_url(cfg)
+    key = traffic_generator_api_key()
+    if not base_url:
+        raise RuntimeError("Traffic Simulator is not configured.")
+    if not key:
+        raise RuntimeError("Traffic Simulator API key is not configured.")
+
+    body = None
+    headers = {
+        "Accept": "application/json",
+        "Authorization": f"Bearer {key}",
+        "User-Agent": f"NetEm-WAN-Lab/{get_app_version()}",
+    }
+    if payload is not None:
+        body = json.dumps(payload).encode("utf-8")
+        headers["Content-Type"] = "application/json"
+
+    integration = traffic_generator_config(cfg)
+    allow_self_signed = bool(integration.get("allow_self_signed", True))
+    context = (
+        ssl._create_unverified_context()
+        if allow_self_signed
+        else ssl.create_default_context()
+    )
+    req = urllib_request.Request(
+        base_url + path,
+        data=body,
+        headers=headers,
+        method=method,
+    )
+    try:
+        with urllib_request.urlopen(req, timeout=timeout, context=context) as response:
+            raw = response.read(2 * 1024 * 1024)
+            return json.loads(raw.decode("utf-8")) if raw else {}
+    except urllib_error.HTTPError as exc:
+        try:
+            detail = exc.read(8192).decode("utf-8", "replace")
+        except Exception:
+            detail = str(exc)
+        raise RuntimeError(f"Traffic Simulator returned HTTP {exc.code}: {detail[:300]}")
+    except (urllib_error.URLError, TimeoutError, OSError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"Traffic Simulator connection failed: {exc}")
+
+
+def traffic_generator_snapshot(include_catalog=False):
+    cfg = load_config()
+    integration = traffic_generator_config(cfg)
+    configured = bool(integration.get("host")) and bool(traffic_generator_api_key())
+    result = {
+        "configured": configured,
+        "connected": False,
+        "integration": {
+            "host": integration.get("host"),
+            "port": int(integration.get("port") or 8443),
+            "allow_self_signed": bool(integration.get("allow_self_signed", True)),
+            "instance_name": integration.get("instance_name"),
+            "version": integration.get("version"),
+            "tls_sha256": integration.get("tls_sha256"),
+        },
+        "status": None,
+        "catalog": None,
+        "error": None,
+    }
+    if not configured:
+        return result
+    try:
+        result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
+        result["connected"] = True
+        if include_catalog:
+            result["catalog"] = traffic_generator_request(
+                "/api/v1/catalog", timeout=2.0
+            )
+    except RuntimeError as exc:
+        result["error"] = str(exc)
+    return result
+
+
+def _management_broadcast_addresses(cfg=None):
+    cfg = cfg or load_config()
+    addresses = {"255.255.255.255"}
+    interface = cfg.get("mgmt_interface") or guess_mgmt_interface()
+    if not interface:
+        return sorted(addresses)
+    try:
+        proc = subprocess.run(
+            [IP, "-j", "-4", "addr", "show", "dev", interface],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+        if proc.returncode != 0:
+            return sorted(addresses)
+        data = json.loads(proc.stdout or "[]")
+        for device in data:
+            for addr in device.get("addr_info", []):
+                if addr.get("family") != "inet":
+                    continue
+                local = addr.get("local")
+                prefix = addr.get("prefixlen")
+                if local and prefix is not None:
+                    network = ipaddress.ip_network(f"{local}/{prefix}", strict=False)
+                    addresses.add(str(network.broadcast_address))
+    except (OSError, ValueError, json.JSONDecodeError, subprocess.TimeoutExpired):
+        pass
+    return sorted(addresses)
+
+
+def discover_traffic_generators(timeout=1.25):
+    nonce = str(time.time_ns())
+    request_payload = json.dumps(
+        {
+            "protocol": TRAFFIC_GENERATOR_DISCOVERY_MAGIC,
+            "nonce": nonce,
+        }
+    ).encode("utf-8")
+    found = {}
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        sock.settimeout(0.2)
+        sock.bind(("", 0))
+        for address in _management_broadcast_addresses():
+            try:
+                sock.sendto(
+                    request_payload,
+                    (address, TRAFFIC_GENERATOR_DISCOVERY_PORT),
+                )
+            except OSError:
+                continue
+
+        deadline = time.time() + max(0.25, min(3.0, float(timeout)))
+        while time.time() < deadline:
+            try:
+                data, peer = sock.recvfrom(8192)
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            try:
+                payload = json.loads(data.decode("utf-8"))
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                continue
+            if payload.get("service") != "netem-traffic-simulator":
+                continue
+            if payload.get("protocol") != TRAFFIC_GENERATOR_DISCOVERY_MAGIC:
+                continue
+            if payload.get("nonce") != nonce:
+                continue
+            payload["detected_address"] = peer[0]
+            key = f'{peer[0]}:{payload.get("api_port", 8443)}'
+            found[key] = payload
+    finally:
+        sock.close()
+    return list(found.values())
 
 
 DEFAULT_PRESETS = {
