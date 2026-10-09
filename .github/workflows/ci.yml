@@ -244,6 +244,9 @@ jobs:
                       path.unlink()
           PY
 
+      - name: Traffic Simulator regression tests
+        run: python -m unittest discover -s tests -v
+
       - name: Validate release configuration
         run: |
           python -m json.tool release-please-config.json >/dev/null

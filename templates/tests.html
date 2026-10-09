@@ -118,7 +118,7 @@
       <div class="k">Activity</div><div class="v">{{ tg.run.activity }}</div>
       <div class="k">Target</div><div class="v mono">{{ tg.run.target }}</div>
     </div>
-    <form method="post" action="{{ url_for('traffic_generator_adjust') }}" style="margin-top:12px">
+    <form method="post" action="{{ url_for('traffic_generator_adjust') }}" style="margin-top:12px"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
       <input type="hidden" name="return_to" value="tests">
       <div class="form-grid">
         <div><label>Target users</label><input type="number" name="users" min="1" max="5000" value="{{ tg.run.target_users }}"></div>
@@ -135,13 +135,13 @@
         <button class="btn" type="submit">Adjust live workload</button>
       </div>
     </form>
-    <form method="post" action="{{ url_for('traffic_generator_stop') }}" style="margin-top:8px" onsubmit="return confirm('Stop the corporate workload?');">
+    <form method="post" action="{{ url_for('traffic_generator_stop') }}" style="margin-top:8px" onsubmit="return confirm('Stop the corporate workload?');"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
       <input type="hidden" name="return_to" value="tests">
       <button class="btn btn-danger" type="submit">Stop workload</button>
     </form>
     {% else %}
     <div class="section-title">Start workload</div>
-    <form method="post" action="{{ url_for('traffic_generator_start') }}">
+    <form method="post" action="{{ url_for('traffic_generator_start') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
       <input type="hidden" name="return_to" value="tests">
       <div class="form-grid">
         <div>
@@ -268,7 +268,7 @@
   {"after": 20, "action": "fault", "value": "normal", "label": "Restore path"},
   {"after": 0, "action": "wait", "condition": {"type": "sla", "state": "pass"}, "timeout": 10, "label": "Wait for expected SLA recovery"}
 ]</textarea>
-      <div class="field-help">Actions: quality, fault, mtu, wait, assert · conditions: expected SLA, active probe or measured traffic · max 30 stages · timeout up to 600 seconds.</div>
+      <div class="field-help">Actions: quality, fault, mtu, traffic_generator, wait, assert · conditions: expected SLA, active probe, measured traffic or DEM · max 30 stages · timeout up to 600 seconds.</div>
       <div class="docs-note"><strong>Conditional examples:</strong> <code>{"type":"probe","probe_id":"probe-wan1-internet","field":"success","op":"==","value":false}</code> waits/asserts on reachability. Traffic conditions support <code>down_mbps</code>, <code>up_mbps</code>, <code>down_pps</code> and <code>up_pps</code>. Failed assertions are included in the active Lab Session report.</div>
       <button class="btn btn-primary" type="submit" style="margin-top:10px">Save custom test</button>
     </form>
@@ -345,9 +345,14 @@ setTimeout(() => window.location.reload(), 3500);
 async function refreshTrafficGenerator() {
   try {
     const response=await fetch("{{ url_for('api_traffic_generator') }}",{cache:"no-store"});
-    if(!response.ok) return;
     const snapshot=await response.json();
-    if(!snapshot.connected || !snapshot.status) return;
+    if(!snapshot.connected || !snapshot.status) {
+      document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
+      document.querySelectorAll("[data-tg-users],[data-tg-score],[data-tg-availability],[data-tg-p95]").forEach(el=>el.textContent="—");
+      return;
+    }
+    const initialRunning={{ (traffic_generator.connected and traffic_generator.status.status in ('starting','running'))|tojson }};
+    if(initialRunning!==["starting","running"].includes(snapshot.status.status)) { window.location.reload(); return; }
     const status=snapshot.status;
     const dem=status.dem || {};
     document.querySelectorAll("[data-tg-status]").forEach(el=>{

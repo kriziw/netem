@@ -481,3 +481,13 @@ If you are looking for the original project or its appliance offering, please re
 The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
 The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI identifies this as a lab-use fork maintained and extended by Kristofer Wohlgang, while crediting Techkarma NetEm as the project foundation.
+
+### Traffic Simulator integration validation
+
+The simulator integration uses direct HTTPS connections with certificate fingerprint validation before the API key is sent. Self-signed lab certificates can use a discovered fingerprint or trust on first connection. Verify certificate changes before replacing the trusted fingerprint in Integrations. HTTP redirects are rejected, and API errors redact the configured key.
+
+Custom scenarios execute `traffic_generator` actions (`start`, `adjust`, `stop`) through the simulator API. DEM conditions use the simulator's `endpoint_experience.score` for `experience_score`; unavailable or truncated DEM cannot pass an assertion. Workloads started by a scenario are stopped during scenario cleanup, including failure/cancellation; a scenario that only adjusts an existing workload leaves that workload running.
+
+For the dual-NIC simulator, controlled target routing, FortiGate policy/SNAT and verification steps, see the [Traffic Simulator deployment guide](https://github.com/kriziw/netem-traffic-simulator#installation--controlled-target). Simulator API keys are stored separately from `config.json`; the browser controls require session form tokens. NetEm remains a management-network lab application and has no general user authentication layer.
+
+Run regression coverage with `python -m unittest discover -s tests -v`.
