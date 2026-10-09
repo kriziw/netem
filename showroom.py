@@ -2,12 +2,17 @@
 from pathlib import Path
 
 from flask import Flask, jsonify, render_template, send_from_directory
+import branding
 
 
-def create_showroom_app(snapshot):
+def create_showroom_app(snapshot, branding_directory=None):
     root = Path(__file__).resolve().parent
     viewer = Flask("netem_showroom", static_folder=None,
                    template_folder=str(root / "templates"))
+    if branding_directory:
+        branding.init_app(viewer, branding_directory)
+    else:
+        viewer.context_processor(lambda: {"branding": branding.DEFAULT_BRAND, "branding_enabled": False})
 
     @viewer.before_request
     def read_only():

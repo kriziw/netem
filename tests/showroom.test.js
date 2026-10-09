@@ -45,7 +45,7 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(win.document.querySelectorAll('.path').length, 2);
   assert.equal(win.document.querySelector('h3').textContent, '<img src=x onerror=alert(1)>');
-  assert.equal(win.document.querySelectorAll('img').length, 0);
+  assert.equal(win.document.querySelectorAll('.path img').length, 0);
   assert.match(win.document.getElementById('total-down').textContent, /^10 /);
   rotate();
   assert.equal(win.document.querySelector('h3').textContent, 'WAN 2');

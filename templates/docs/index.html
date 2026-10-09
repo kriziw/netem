@@ -1,11 +1,11 @@
 {% extends "base.html" %}
-{% block title %}Documentation · NetEm WAN Lab{% endblock %}
+{% block title %}Documentation · {{ branding.name }}{% endblock %}
 {% block crumb %}Documentation{% endblock %}
 
 {% block content %}
 <div class="docs-hero">
   <div class="eyebrow">In-app wiki</div>
-  <h1>NetEm WAN Lab documentation</h1>
+  <h1>{{ branding.name }} documentation</h1>
   <p class="page-description">Operational guidance for every current function in the platform: topology, WAN impairment, scenarios, safe traffic/security tests, live analytics, APIs, updates and troubleshooting.</p>
   <div class="docs-search">
     <input id="docs-search" type="text" placeholder="Search documentation… e.g. blackhole, MTU, throughput, capture, API" autocomplete="off">
