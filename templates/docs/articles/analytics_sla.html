@@ -1,64 +1,50 @@
-
-<h2 id="two-data-types">Measured traffic vs injected conditions</h2>
-<p>Analytics intentionally combines two different types of data. Understanding the distinction is essential when interpreting the graphs.</p>
+<h2 id="three-data-types">Injected, measured and observed data</h2>
+<p>Analytics deliberately separates three perspectives so the UI does not confuse configuration with evidence.</p>
 <div class="docs-table"><table>
-<thead><tr><th>Data</th><th>Source</th><th>What it means</th></tr></thead>
+<thead><tr><th>Perspective</th><th>Current source</th><th>Meaning</th></tr></thead>
 <tbody>
-<tr><td>Throughput</td><td>Linux interface byte counters</td><td>Traffic actually crossing the selected WAN path.</td></tr>
-<tr><td>Packet rate</td><td>Linux interface packet counters</td><td>Packets actually crossing the path per second.</td></tr>
-<tr><td>Latency</td><td>Current NetEm runtime state</td><td>Delay NetEm intends to inject, not a remote active-probe result.</td></tr>
-<tr><td>Jitter</td><td>Current NetEm runtime state</td><td>Configured/injected jitter.</td></tr>
-<tr><td>Packet loss</td><td>Current NetEm runtime state</td><td>Configured/injected loss percentage.</td></tr>
-<tr><td>Quality</td><td>Current NetEm runtime state</td><td>Selected quality percentage or scenario quality stage.</td></tr>
+<tr><td>Injected</td><td>NetEm runtime state</td><td>Delay, jitter, loss, quality and bandwidth that NetEm intends to apply.</td></tr>
+<tr><td>Measured</td><td>Linux counters + active probes</td><td>Traffic actually crossing the interfaces and independent ICMP/TCP/HTTP/DNS response timing.</td></tr>
+<tr><td>Observed</td><td>Future vendor adapter</td><td>The SD-WAN/firewall's own SLA health, measured metrics and selected path.</td></tr>
 </tbody></table></div>
 
-<h2 id="target">Live analysis target</h2>
-<p>Select the WAN at the top of Analytics. The four chart panels then use that WAN's browser-side rolling history. Switching target changes the visible series without changing the WAN configuration.</p>
+<h2 id="persistent">Persistent SQLite telemetry</h2>
+<p>A background worker samples each configured WAN approximately every two seconds and stores server-side time series in <code>runtime/telemetry.db</code>. The default retention window is 168 hours (7 days). Browser reloads therefore no longer erase historical WAN charts.</p>
+<p>Stored WAN samples include downstream/upstream Mbit/s, downstream/upstream PPS, injected latency/jitter/loss/quality, expected SLA state, runtime fault and active Lab Session ID.</p>
 
-<h2 id="throughput">Throughput chart</h2>
-<p>Downstream and upstream rates are calculated from differences between successive counter samples:</p>
+<h2 id="range">Historical range</h2>
+<p>Use the range selector beside the WAN selector to load 15 minutes, 1 hour, 6 hours, 24 hours or 7 days. The history API aggregates older ranges into a bounded number of chart points, then the browser appends fresh live samples.</p>
+
+<h2 id="throughput">Throughput and packet rate</h2>
+<p>Directional rates are derived from successive Linux counter samples:</p>
 <div class="docs-flow">rate (Mbit/s) = (new byte counter − previous byte counter) × 8
                 ÷ elapsed seconds ÷ 1,000,000</div>
-<p>Directional mapping is explicit: downstream uses the inner interface TX counter and upstream uses the outer interface TX counter. Both series share the same dynamic Y-axis scale so their visual relationship is meaningful.</p>
+<p>Downstream uses inner-interface TX and upstream uses outer-interface TX. Packet rate uses the equivalent packet-counter delta.</p>
 
-<h2 id="pps">Packet-rate chart</h2>
-<p>Packet rate uses the equivalent packet-counter delta and is shown as downstream/upstream packets per second. It can reveal behavior that bandwidth alone hides—for example, a high PPS stream of small packets.</p>
-
-<h2 id="impairment-charts">Latency, jitter, loss and quality</h2>
-<p>Latency and jitter share one dynamic millisecond scale. Loss and quality share a fixed 0–100% scale. These graphs show NetEm's current injected state, including temporary scenario stages, because the runtime state API tracks the effective profile actually applied.</p>
-
-<h2 id="window">Sampling and time window</h2>
-<p>The UI polls approximately every 1.5 seconds. Analytics stores up to 200 samples per WAN in the current browser page, giving roughly a five-minute rolling view at that sampling interval. Reloading the page resets this chart history. The event log is persistent; the chart time series is not yet stored server-side.</p>
-
-<h2 id="sla">Generic SLA evaluator</h2>
-<p>The SLA profile defines maximum accepted latency, jitter and packet loss. The default profile is:</p>
+<h2 id="active-measurements">Active measurements</h2>
+<p>Analytics can continuously run four bounded probe types and persist every result to SQLite:</p>
 <div class="docs-table"><table>
-<thead><tr><th>Metric</th><th>Default threshold</th></tr></thead>
+<thead><tr><th>Type</th><th>What is measured</th></tr></thead>
 <tbody>
-<tr><td>Latency</td><td>100 ms</td></tr>
-<tr><td>Jitter</td><td>30 ms</td></tr>
-<tr><td>Packet loss</td><td>2%</td></tr>
+<tr><td>ICMP</td><td>Echo reachability and reply time.</td></tr>
+<tr><td>TCP</td><td>Connection establishment time to a host/port.</td></tr>
+<tr><td>HTTP/HTTPS</td><td>Time to establish the connection/TLS session and receive an HTTP status line.</td></tr>
+<tr><td>DNS</td><td>UDP A-query response time via the configured resolver.</td></tr>
 </tbody></table></div>
-<p>The expected SLA passes only when all three metrics are within threshold and no runtime data-plane fault is active. A blackhole therefore fails the <strong>data_plane</strong> check even if the saved latency/jitter/loss values are otherwise healthy.</p>
+<p>Probe intervals are limited to 2–3600 seconds and timeouts to 0.2–10 seconds. Up to 20 probes can be configured.</p>
+<div class="docs-warning"><strong>Transparent-path limitation:</strong> the WAN bridge ports normally carry no L3 address. A probe using <strong>Automatic</strong> source follows the NetEm host's routing table and is associated with the WAN for correlation, but it does not prove the selected transparent path was crossed. Inner/outer binding is available when that interface has a usable L3 route/source address. True appliance-side path probes require a remote probe agent or vendor observation, which remains a future extension.</div>
 
-<h3 id="edit-sla">Edit the SLA profile</h3>
-<ol>
-  <li>Open Analytics.</li>
-  <li>Scroll to <strong>Generic SLA evaluator</strong>.</li>
-  <li>Give the profile a descriptive name.</li>
-  <li>Set maximum latency, jitter and loss.</li>
-  <li>Click <strong>Save SLA profile</strong>.</li>
-</ol>
-<p>The profile is persisted in <code>config.json</code> and immediately affects expected PASS/FAIL status across Overview, WAN Links, Analytics and the state API.</p>
+<h2 id="probe-events">Probe state transitions</h2>
+<p>Every probe sample is stored, but the event timeline is not flooded with routine successes. A <code>probe</code> runtime event is written only when the probe changes between success and failure/recovery.</p>
 
-<h2 id="expected-observed">Injected vs observed</h2>
-<p>The current <strong>Injected vs observed</strong> table only has the NetEm side populated. The observed column is reserved for future SD-WAN/firewall adapters. The intended model is:</p>
-<div class="docs-flow">NetEm injected state       Appliance observed state
-80 ms latency             84 ms SLA latency
-3.0% loss                 3.2% SLA loss
-expected SLA FAIL         appliance SLA FAIL
-                          selected path = WAN2</div>
-<p>With that data, future scenario reports can calculate detection delay, failover delay and recovery convergence rather than only displaying impairment values.</p>
+<h2 id="sla">Generic expected SLA</h2>
+<p>The generic SLA evaluator remains based on injected conditions, independent of active probes. The default thresholds are 100 ms latency, 30 ms jitter and 2% loss. Any runtime blackhole also fails the data-plane check.</p>
 
-<h2 id="events">Event timeline and export</h2>
-<p>Analytics shows recent persistent events newest first. Use the JSON or CSV buttons to export up to the retained event-history window. Events are operational records, not packet-level telemetry.</p>
+<h2 id="comparison">Injected vs measured vs observed</h2>
+<p>The comparison table now shows NetEm's injected state beside the most recent active measurement for the selected WAN. A future vendor adapter adds the third column without changing the impairment engine.</p>
+
+<h2 id="sessions">Session correlation</h2>
+<p>When a Lab Session is active, both telemetry rows and probe samples are written with that session ID. The completed session report can therefore summarize peak throughput, worst injected conditions, SLA-fail samples, probe success rate and average/P95/max measured response time.</p>
+
+<h2 id="apis">Historical API</h2>
+<p><code>GET /api/v1/history?link_id=wan1&amp;minutes=60</code> returns aggregated persisted WAN samples plus probe samples for the requested period. <code>GET /api/v1/probes</code> returns probe configuration and the latest result for each probe.</p>
