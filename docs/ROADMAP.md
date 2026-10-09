@@ -1,254 +1,77 @@
 # NetEm WAN Lab Roadmap
 
-This roadmap prioritizes capabilities that turn NetEm from a powerful impairment UI into a repeatable network-resilience validation platform.
+NetEm is moving from a WAN-impairment GUI toward a vendor-neutral network-resilience validation platform:
 
-## Product direction
+> see what is happening → choose a test → inject a controlled condition → measure the outcome → assert requirements → retain evidence → compare results.
 
-The design goal is:
+## Implemented measurement/evidence foundation
 
-> See what is happening → choose the outcome to test → inject a controlled condition → observe the device response → retain evidence → compare results.
+### Active measurement engine
 
-Core impairment remains vendor-neutral. Vendor-specific integrations are optional observers layered on top.
+Continuous bounded measurements now support ICMP echo, TCP connect, HTTP/HTTPS response, and DNS A-query response. Probe intervals are limited to 2–3600 seconds and timeouts to 0.2–10 seconds. Results are persisted, associated with Lab Sessions, and failure/recovery transitions are logged as runtime events.
 
-## Recommended next milestone: measured truth + evidence
+Important topology limitation: transparent WAN ports normally have no Layer-3 address. Automatic probe source therefore uses the NetEm host routing table and is not claimed to prove that the selected transparent WAN was crossed. Interface binding works when that interface has usable Layer-3 routing. A remote probe-agent design is recommended later for true appliance-side independent measurement.
 
-### 1. Active measurement engine
+### Persistent SQLite telemetry
 
-Add first-party probes that measure what actually traverses the impaired path:
+The runtime telemetry database stores downstream/upstream Mbit/s and PPS, injected delay/jitter/loss/quality, expected SLA state, runtime fault, session ID, and active-probe samples.
 
-- ICMP latency/loss
-- TCP connect timing
-- HTTP/HTTPS transaction timing
-- DNS query timing
-- optional user-defined probe target per WAN
+WAN sampling is approximately every two seconds with 168-hour default retention. Analytics can load 15m/1h/6h/24h/7d ranges and then append live browser samples.
 
-Why first: the current UI knows exactly what it injects, but latency/jitter/loss are not yet independently measured end-to-end. Active probes create the missing “measured” side of the platform.
+### Session reports + assertions
 
-### 2. Persistent telemetry store
+Completed Lab Sessions now produce evidence reports with PASS / FAIL / UNSCORED result, scenario run status, assertion outcomes, WAN telemetry summaries, probe success rate and latency percentiles, correlated events, printable HTML, and JSON export.
 
-Add lightweight SQLite time-series/session storage for:
+Reports are snapshotted into the session record.
 
-- throughput and PPS
-- injected delay/jitter/loss/quality
-- active-probe results
-- SLA state
-- runtime faults
-- scenario stages
-- future vendor-observed state
+### Conditional scenarios
 
-Keep Prometheus as an optional external export rather than an internal dependency.
+Scenario actions now include quality, fault, mtu, wait, and assert.
 
-### 3. Session results and reports
+Conditions can evaluate expected SLA PASS/FAIL, active-probe success/latency, measured downstream/upstream Mbit/s, and measured downstream/upstream PPS. Conditional stages have bounded timeout/polling and can stop or continue after failure.
 
-Extend Lab Sessions with:
+## Recommended next milestone
 
-- baseline snapshot
-- tests run
-- event timeline
-- captures attached to session
-- expected SLA transitions
-- measured probe transitions
-- pass/fail assertions
-- HTML/JSON/CSV report export
-- later PDF export
+### 1. Vendor adapter framework — Fortinet first
 
-This turns sessions into useful evidence instead of only event grouping.
+Create a normalized adapter contract for WAN member health, observed latency/jitter/loss, SLA state, selected path, and transition timestamps. Implement Fortinet first for the existing lab, then reuse the same contract for Cisco, Palo Alto, Juniper, VMware/VeloCloud and Versa.
 
-## Next milestone: SD-WAN response correlation
+This unlocks real metrics such as failure-detection time, path-move time, total failover convergence, recovery convergence, and injected vs measured vs appliance-observed differences.
 
-### 4. Vendor adapter framework
+### 2. Parallel multi-WAN scenarios
 
-Create a normalized adapter contract:
+Allow one scenario to manipulate more than one WAN: primary failure while backup degrades, dual brownout, staggered recovery, and bounded multi-link chaos profiles.
 
-- member/link health
-- observed latency
-- observed jitter
-- observed loss
-- SLA pass/fail
-- selected path
-- path/policy change events
+### 3. Bounded traffic generator
 
-Adapters should be optional and isolated from the impairment engine.
+Wrap iperf3 with configured/allowlisted targets, explicit duration, bandwidth/PPS caps, upload/download/bidirectional modes, burst/microburst profiles, emergency stop, and Lab Session association.
 
-### 5. Fortinet adapter first
+### 4. Session comparison analytics
 
-Recommended first implementation because the current lab already uses FortiGate.
+Compare completed runs by assertion outcome, timing, probe percentiles, WAN traffic behavior, expected SLA behavior, and later vendor-observed failover/recovery timing.
 
-Potential inputs:
+### 5. Runtime qdisc + updater preflight
 
-- FortiGate REST API
-- FortiManager where appropriate
-- FortiAnalyzer for event/log correlation
+Verify actual kernel qdisc state after Apply and compare requested vs installed shaping. Before updates, verify service-user write permissions, clean/fast-forward Git state, and compatible systemd restart policy.
 
-Primary output:
+### 6. Remote probe agent
 
-- SLA failure detection time
-- path-selection/failover time
-- recovery time
-- injected vs FortiGate-observed metrics
+Add a lightweight probe agent behind the firewall/SD-WAN device for true appliance-side path measurement without assigning IP addresses to NetEm's transparent bridge members.
 
-Then add Cisco, Palo Alto, Juniper, VMware/VeloCloud and Versa using the same normalized model.
+### 7. Shared-lab platform capabilities
 
-## Test orchestration
-
-### 6. Assertions and conditional stages
-
-Extend scenarios beyond fixed timers:
-
-- wait until expected SLA fails
-- wait until vendor SLA fails
-- wait until traffic moves to another WAN
-- assert failover within N seconds
-- assert recovery within N seconds
-- branch on pass/fail
-- abort on timeout
-
-### 7. Parallel multi-WAN scenarios
-
-Allow one scenario to manipulate multiple WANs:
-
-- degrade WAN1 while WAN2 remains healthy
-- fail WAN1 then degrade WAN2
-- simultaneous dual brownout
-- staggered recovery
-- multi-link chaos profiles with safe bounds
-
-### 8. Test templates
-
-Higher-level templates that generate scenario definitions:
-
-- primary-link outage
-- brownout before failure
-- asymmetric outage
-- high latency
-- packet-loss burst
-- MTU regression
-- backup-link degradation during failover
-- recovery/hysteresis validation
-
-## Traffic generation and replay
-
-### 9. Bounded traffic generator
-
-Wrap iperf3 with guardrails:
-
-- configured/allowlisted targets only
-- explicit duration
-- maximum bandwidth/PPS
-- upload/download/bidirectional
-- constant, burst and microburst patterns
-- emergency stop
-- session association
-
-### 10. Sanitized PCAP replay
-
-Wrap tcpreplay with:
-
-- configured lab interfaces only
-- rate cap
-- duration/packet cap
-- explicit user confirmation
-- session association
-- no unrestricted external target selection
-
-## Analytics
-
-### 11. Session-aware time-series analytics
-
-Add:
-
-- scenario annotations
-- fault markers
-- SLA transitions
-- vendor path changes
-- capture start/stop markers
-- zoomable time range
-- compare WAN1 vs WAN2
-- compare two sessions
-
-### 12. Automatic resilience metrics
-
-Calculate:
-
-- detection time
-- failover convergence
-- service interruption
-- recovery convergence
-- packet-loss window
-- application transaction failure window
-- SLA false-positive/false-negative cases
-
-## Platform quality
-
-### 13. Updater and deployment preflight
-
-Before enabling Install Update, verify:
-
-- repository writable by service user
-- .git object store writable
-- application tree writable
-- runtime tree writable
-- working tree clean
-- fast-forward possible
-- systemd Restart policy compatible
-
-### 14. Runtime qdisc self-verification
-
-After applying a profile:
-
-- inspect actual qdisc hierarchy
-- compare kernel state with requested state
-- surface partial failures
-- optionally self-heal safe inconsistencies
-
-This is especially important for bandwidth shaping.
-
-### 15. Authentication and API tokens
-
-For broader/shared labs:
-
-- local admin/operator/viewer roles
-- scoped API tokens
-- reverse-proxy-aware auth option
-- audit trail for control actions
-
-### 16. Backup/restore
-
-Export/import:
-
-- config
-- access profiles
-- custom tests
-- SLA profiles
-- integration settings
-- sessions/history metadata
-
-## Scale
-
-### 17. Dynamic WAN count
-
-Move from the current two-link UI to a topology model that can represent:
-
-- 1–8 WANs
-- arbitrary display names
-- dynamic bridge/interface pairs
-- multiple appliances/test segments later
-
-Do this only after the core session/measurement model is stable, because it touches configuration, UI and telemetry models broadly.
+Later: authentication and role separation, scoped API tokens, audit trail, config/profile/session backup and restore, dynamic WAN count beyond two, and additional vendor adapters.
 
 ## Recommended order
 
-1. Active probes
-2. SQLite telemetry
-3. Session reports + assertions
-4. Fortinet adapter
-5. Conditional scenarios
-6. Parallel multi-WAN scenarios
-7. Bounded traffic generator
-8. Session-aware analytics / comparison
-9. qdisc self-verification + update preflight
-10. Additional vendor adapters
-11. Authentication / API tokens
-12. Dynamic WAN count
+1. Fortinet adapter framework
+2. Parallel multi-WAN scenarios
+3. Bounded traffic generator
+4. Session comparison analytics
+5. qdisc/updater preflight
+6. Remote probe agent
+7. Additional vendor adapters
+8. Authentication / API tokens
+9. Dynamic WAN count
 
-The highest-value next step is not another impairment primitive. It is adding measured truth and evidence around the impairment engine that already exists.
+The key architectural shift is now in place: NetEm can inject, measure, assert and retain evidence. The next milestone should correlate that evidence with the SD-WAN appliance's own observed behavior.
