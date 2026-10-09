@@ -652,7 +652,7 @@ pre {
 .command-center-grid {
   display:grid; grid-template-columns:minmax(0,1.7fr) minmax(280px,.7fr); gap:14px;
 }
-.command-main { display:grid; gap:14px; min-width:0; }
+.command-main { display:grid; gap:14px; min-width:0; align-content:start; }
 .command-side { display:grid; gap:14px; align-content:start; }
 
 .live-topology {
