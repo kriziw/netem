@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.11.2](https://github.com/kriziw/netem/compare/v0.11.1...v0.11.2) (2026-10-09)
+
+
+### Bug Fixes
+
+* distinguish missing WAN attribution from idle traffic ([#40](https://github.com/kriziw/netem/issues/40)) ([7abe9ea](https://github.com/kriziw/netem/commit/7abe9ea0d32433053db7f8ea9bef2d631c9408c4))
+
 ## [0.11.1](https://github.com/kriziw/netem/compare/v0.11.0...v0.11.1) (2026-10-09)
 
 
