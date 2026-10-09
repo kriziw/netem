@@ -1,0 +1,57 @@
+
+<h2 id="purpose">What the diagnosis answers</h2>
+<p>The Command Center's <strong>Why experience is degraded</strong> and <strong>SD-WAN steering</strong> cards answer three questions while a test runs:</p>
+<ol>
+  <li><strong>What are simulated users feeling?</strong> The Traffic Simulator classifies every failed transaction and splits HTTP time into waiting for the response and transferring it.</li>
+  <li><strong>Which WAN carried it?</strong> The simulator's target reports the appliance address each transaction came from, and NetEm maps that address to a WAN.</li>
+  <li><strong>What on that WAN explains it?</strong> NetEm measures each direction's fill level against its speed limit, packets dropped because the queue was full, and the loss, delay or fault it injects.</li>
+</ol>
+<div class="docs-flow">Simulator symptom (e.g. video bursts losing packets)
+  ↓
+appliance egress address seen by the target → WAN
+  ↓
+path condition on that WAN (queue full, injected loss/delay, fault)
+  ↓
+finding: symptom · WAN · cause</div>
+
+<h2 id="findings">Reading findings</h2>
+<ul>
+  <li><strong>Experience findings</strong> start from a simulator symptom and list each WAN that carried it with the matching NetEm conditions. When no condition matches, the finding says NetEm's impairment does not explain it, so look at the appliance (policy, inspection, CPU) or the target.</li>
+  <li><strong>"Without a reply to show the WAN"</strong> counts failures that never got an answer, such as connect timeouts or media bursts with no echo. Their WAN is unknown; NetEm names the WANs whose conditions could explain them.</li>
+  <li><strong>Path findings</strong> show conditions on a WAN that no user symptom points at yet. Without a Traffic Simulator, all findings are path findings.</li>
+  <li><strong>HTTP errors</strong> come from the appliance (for example a block page) or the target, not from network quality.</li>
+</ul>
+<p>Findings that turn red or amber are written to the activity log when they appear and when they have been gone for 30 seconds, so lab sessions keep a timeline of problems.</p>
+
+<h2 id="wan-cards">WAN bottleneck view</h2>
+<p>Each WAN pulse card shows how full each direction is against its configured limit, rate-limiter queue drops per second, NetEm's injected loss drops, and the success rate of the simulated users whose traffic used that WAN. A red <strong>↑ full</strong> or <strong>↓ full</strong> badge on the topology marks a direction that is at least 90% full or dropping because its queue is full.</p>
+<p>The rate limiter's queue holds about 50 ms of data at the configured speed. On an idle link, TCP bursts fit and nothing is dropped. On a saturated link the queue fills, which adds up to about 50 ms of delay before packets are dropped, like a real access line.</p>
+
+<h2 id="steering">SD-WAN steering</h2>
+<p>For voice &amp; video, web/collaboration/DNS and file transfers, the steering card shows where transactions went in the last 10 seconds. Each bar segment is a WAN, colored by its health:</p>
+<ul>
+  <li><strong>Healthy</strong>: no impairment that fails the Model SLA and no full queue.</li>
+  <li><strong>Congested</strong>: a direction is at least 90% full or dropping because its queue is full.</li>
+  <li><strong>Degraded</strong>: the configured impairment fails the Model SLA (latency, jitter or loss).</li>
+  <li><strong>Failed</strong>: a fault such as a blackhole is active.</li>
+</ul>
+<p>Verdicts:</p>
+<ul>
+  <li><strong>Steered away</strong>: the class used the impaired WAN before and at most 10% of it remains there.</li>
+  <li><strong>Unaffected</strong>: the class is not on the impaired WAN and was not using it before.</li>
+  <li><strong>Users affected</strong>: more than 10% is still on the impaired WAN, and transactions there failed or were at least 1.5× (and 50 ms) slower than on a healthy WAN.</li>
+  <li><strong>On impaired WAN</strong>: more than 10% is still on the impaired WAN, without measured impact yet.</li>
+  <li><strong>No healthy WAN</strong>: every WAN is impaired.</li>
+</ul>
+<p>When a WAN becomes impaired, NetEm times how long the appliance takes to move each class that was using it. The activity log records "SD-WAN moved … off WAN2 14 s after it became degraded", or "SD-WAN still sends …" after 60 seconds without steering. Times come from a 10-second window, so they can read up to about 10 seconds late.</p>
+
+<h2 id="mapping">Mapping appliance addresses to WANs</h2>
+<p>Per-WAN attribution needs the appliance to translate (SNAT) traffic to each WAN's own address, so the target sees which WAN carried it. While a workload runs, NetEm learns the addresses by briefly watching each WAN's upstream side for packets to the target. This needs <code>tcpdump</code> and <code>CAP_NET_RAW</code>, the same as packet capture. You can also enter the addresses under <strong>WAN links → a WAN → Diagnostics → Appliance WAN addresses</strong>; entered addresses take precedence.</p>
+<ul>
+  <li><strong>"Appears on several WANs"</strong>: the appliance is not translating per WAN. Enable SNAT to each WAN interface address.</li>
+  <li><strong>"NetEm did not see these addresses on any WAN"</strong>: something between NetEm and the target, such as the upstream router, translates addresses. Enter the appliance's WAN addresses manually.</li>
+</ul>
+<p>Per-WAN attribution and steering need Traffic Simulator v0.7 or later with its controlled target updated to the same release. An older target is reported by the simulator as an outdated-target finding.</p>
+
+<h2 id="media-modes">Voice/video judging</h2>
+<p>Choose per workload how much packet loss fails a voice or video burst. <strong>Strict</strong> fails a burst on any lost packet. <strong>Realistic</strong> accepts small random loss that codecs usually conceal: voice up to 2% (1 of 50 packets) and video up to 1% (2 of 200 packets) per burst. Media findings show how many bursts fail under each mode, so you can compare without rerunning.</p>

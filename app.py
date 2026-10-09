@@ -134,6 +134,10 @@ TELEMETRY_THREAD = None
 PROBE_THREAD = None
 TELEMETRY_PREVIOUS = {}
 TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
+BOTTLENECK_COLUMNS = tuple(
+    f"{direction}_{name}" for direction in ("down", "up")
+    for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes")
+)
 NET_SYSFS = Path("/sys/class/net")
 PROBE_RUNTIME = {}
 CAPTURE_STATE = {
@@ -1473,6 +1477,28 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
+SHAPER_QUEUE_MS = 50
+SHAPER_BURST_MS = 1
+UNSHAPED_SIZING_MBIT = 1000
+
+
+def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
+    """Queue sizes that scale with the configured rate instead of fixed bytes.
+
+    A fixed 32 KB rate-limiter queue held under 3 ms at 100 Mbit/s, so TCP's
+    window bursts overflowed it on an otherwise idle link and every transfer paid
+    for retransmissions. Like a real access link, the queue now holds about
+    50 ms of data. netem also keeps every packet for its delay, so its packet
+    queue must hold rate × (delay + jitter) or it drops on long-delay links.
+    """
+    bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
+    hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
+    netem_limit = max(1000, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
+    burst = max(3200, int(bytes_per_ms * SHAPER_BURST_MS))
+    limit = max(65536, int(bytes_per_ms * SHAPER_QUEUE_MS))
+    return netem_limit, burst, limit
+
+
 def apply_netem(
     ifname: str,
     delay_ms: float,
@@ -1493,7 +1519,8 @@ def apply_netem(
     # Always start clean
     clear_qdisc(ifname)
 
-    parts = ["netem"]
+    netem_limit, burst_bytes, limit_bytes = shaper_queue_sizes(rate_mbit, delay_ms, jitter_ms)
+    parts = ["netem", f"limit {netem_limit}"]
     if delay_ms and delay_ms > 0:
         if jitter_ms and jitter_ms > 0:
             parts.append(f"delay {delay_ms:.1f}ms {jitter_ms:.1f}ms")
@@ -1527,7 +1554,7 @@ def apply_netem(
         rate_str = f"{rate_value}mbit"
         tbf_cmd = (
             f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
-            f"rate {rate_str} buffer 3200 limit 32768"
+            f"rate {rate_str} buffer {burst_bytes} limit {limit_bytes}"
         )
         rc2, out2, err2 = run_cmd(tbf_cmd)
         if rc2 != 0:
@@ -1821,6 +1848,78 @@ def traffic_rates(current: dict, previous: dict | None):
             deltas[2], deltas[3])
 
 
+def parse_qdisc_stats(raw: str):
+    """Parse `tc -s qdisc show dev <if>` into one counter dict per qdisc."""
+    qdiscs = []
+    current = None
+    scale = {"": 1, "k": 1024, "m": 1024 * 1024, "g": 1024 ** 3}
+    for line in (raw or "").splitlines():
+        head = re.match(r"\s*qdisc\s+(\S+)\s+([0-9a-fA-F]+:)", line)
+        if head:
+            current = {"kind": head.group(1), "handle": head.group(2), "root": " root " in f" {line} ",
+                       "bytes": None, "packets": None, "drops": None, "overlimits": None,
+                       "backlog_bytes": None, "backlog_packets": None}
+            qdiscs.append(current)
+            continue
+        if current is None:
+            continue
+        sent = re.search(r"Sent\s+(\d+)\s+bytes\s+(\d+)\s+pkt\s+\(dropped\s+(\d+),\s+overlimits\s+(\d+)", line)
+        if sent:
+            current.update(bytes=int(sent.group(1)), packets=int(sent.group(2)),
+                           drops=int(sent.group(3)), overlimits=int(sent.group(4)))
+        backlog = re.search(r"backlog\s+([0-9.]+)([KkMmGg]?)b\s+(\d+)p", line)
+        if backlog:
+            current.update(backlog_bytes=int(float(backlog.group(1)) * scale[backlog.group(2).lower()]),
+                           backlog_packets=int(backlog.group(3)))
+    return qdiscs
+
+
+def qdisc_counters(ifname: str):
+    """Drop counters for one direction: the root qdisc plus its rate limiter, if any."""
+    if not ifname:
+        return None
+    rc, out, _err = run_cmd(f"{TC} -s qdisc show dev {ifname}")
+    if rc != 0:
+        return None
+    qdiscs = parse_qdisc_stats(out)
+    root = next((item for item in qdiscs if item["root"]), None)
+    if not root or root["packets"] is None or root["drops"] is None:
+        return None
+    netem = next((item for item in qdiscs if item["kind"] == "netem"), None)
+    tbf = next((item for item in qdiscs if item["kind"] == "tbf"), None)
+    return {
+        "kind": root["kind"],
+        "packets": root["packets"],
+        "netem_drops": (netem or {}).get("drops") or 0,
+        "queue_drops": (tbf or {}).get("drops") or 0,
+        "backlog_bytes": sum(item["backlog_bytes"] or 0 for item in qdiscs),
+        "shaped": tbf is not None,
+    }
+
+
+def qdisc_rates(current, previous, dt):
+    """Per-second drops for one direction, or None across a reset or unknown read.
+
+    The rate limiter (tbf) drops only when its small queue is full. netem's own
+    counter adds its injected random loss to the overflow handed back by tbf.
+    """
+    if not current or not previous or dt <= 0 or current["kind"] != previous["kind"]:
+        return None
+    sent = current["packets"] - previous["packets"]
+    netem_drops = current["netem_drops"] - previous["netem_drops"]
+    queue_drops = current["queue_drops"] - previous["queue_drops"]
+    if min(sent, netem_drops, queue_drops) < 0:
+        return None
+    dropped = max(netem_drops, queue_drops)
+    offered = sent + dropped
+    return {
+        "queue_drops_ps": queue_drops / dt,
+        "injected_drops_ps": max(0, netem_drops - queue_drops) / dt,
+        "drop_pct": dropped * 100.0 / offered if offered else 0.0,
+        "backlog_bytes": current["backlog_bytes"],
+    }
+
+
 # ---------- Persistent telemetry / active measurement ----------
 
 def telemetry_connect():
@@ -1886,11 +1985,33 @@ def init_telemetry_db():
         if "rate_valid" not in columns:
             # Preserve existing history; its original sampler did not record validity.
             conn.execute("ALTER TABLE telemetry_samples ADD COLUMN rate_valid INTEGER NOT NULL DEFAULT 1")
+        for name in BOTTLENECK_COLUMNS:
+            if name not in columns:
+                # Older samples have no bottleneck measurements; NULL means unknown, not zero.
+                conn.execute(f"ALTER TABLE telemetry_samples ADD COLUMN {name} REAL")
 
 
 def active_session_id():
     with RUNTIME_LOCK:
         return ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None
+
+
+def bottleneck_values(current: dict, previous: dict | None, rates, effective: dict, fault: str):
+    """Utilization of each shaped direction and its drops since the previous sample."""
+    values = dict.fromkeys(BOTTLENECK_COLUMNS)
+    dt = current["monotonic_timestamp"] - previous["monotonic_timestamp"] if previous else 0
+    for direction, index, limit_key in (("down", 0, "download_mbit"), ("up", 1, "upload_mbit")):
+        counters = (current.get("qdisc") or {}).get(direction)
+        before = ((previous or {}).get("qdisc") or {}).get(direction)
+        drops = qdisc_rates(counters, before, dt)
+        if drops:
+            for key, value in drops.items():
+                values[f"{direction}_{key}"] = value
+        limit = float(effective.get(limit_key) or 0)
+        # Utilization only means something while the rate limiter is in place.
+        if rates is not None and fault == "normal" and limit > 0 and counters and counters["shaped"]:
+            values[f"{direction}_util_pct"] = rates[index] * 100.0 / limit
+    return values
 
 
 def collect_telemetry_sample():
@@ -1909,43 +2030,42 @@ def collect_telemetry_sample():
             continue
         active_links.add(link_id)
         current = traffic_snapshot(link)
-        rates = traffic_rates(current, TELEMETRY_PREVIOUS.get(link_id))
+        current["qdisc"] = {"down": qdisc_counters(link.get("inner")), "up": qdisc_counters(link.get("outer"))}
+        previous = TELEMETRY_PREVIOUS.get(link_id)
+        rates = traffic_rates(current, previous)
         down_mbps, up_mbps, down_pps, up_pps = rates or (0.0, 0.0, 0.0, 0.0)
         TELEMETRY_PREVIOUS[link_id] = current
         now = current["timestamp"]
         effective = state.get("effective", {})
-        rows.append(
-            (
-                now,
-                link_id,
-                down_mbps,
-                up_mbps,
-                down_pps,
-                up_pps,
-                float(effective.get("delay_ms", 0.0)),
-                float(effective.get("jitter_ms", 0.0)),
-                float(effective.get("loss_pct", 0.0)),
-                float(state.get("runtime_quality", 100)),
-                1 if state.get("sla", {}).get("pass") else 0,
-                state.get("fault", "normal"),
-                active_session_id(),
-                int(rates is not None),
-            )
-        )
+        row = {
+            "timestamp": now,
+            "link_id": link_id,
+            "down_mbps": down_mbps,
+            "up_mbps": up_mbps,
+            "down_pps": down_pps,
+            "up_pps": up_pps,
+            "delay_ms": float(effective.get("delay_ms", 0.0)),
+            "jitter_ms": float(effective.get("jitter_ms", 0.0)),
+            "loss_pct": float(effective.get("loss_pct", 0.0)),
+            "quality": float(state.get("runtime_quality", 100)),
+            "sla_pass": 1 if state.get("sla", {}).get("pass") else 0,
+            "fault": state.get("fault", "normal"),
+            "session_id": active_session_id(),
+            "rate_valid": int(rates is not None),
+        }
+        row.update(bottleneck_values(current, previous, rates, effective, row["fault"]))
+        rows.append(row)
 
     for removed in set(TELEMETRY_PREVIOUS) - active_links:
         TELEMETRY_PREVIOUS.pop(removed, None)
 
     if rows:
+        columns = list(rows[0])
         with telemetry_connect() as conn:
             conn.executemany(
-                """
-                INSERT INTO telemetry_samples (
-                    timestamp, link_id, down_mbps, up_mbps, down_pps, up_pps,
-                    delay_ms, jitter_ms, loss_pct, quality, sla_pass, fault, session_id, rate_valid
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                rows,
+                f"INSERT INTO telemetry_samples ({', '.join(columns)}) "
+                f"VALUES ({', '.join('?' for _ in columns)})",
+                [tuple(row[name] for name in columns) for row in rows],
             )
     return rows
 
@@ -2021,6 +2141,609 @@ def latest_telemetry_sample(link_id: str):
         for key in ("down_mbps", "up_mbps", "down_pps", "up_pps"):
             sample[key] = None
     return sample
+
+
+# ---------- Live bottleneck diagnosis ----------
+#
+# NetEm measures each WAN's path (utilization against the shaped rate, rate-limiter
+# queue drops, injected loss and delay). The Traffic Simulator reports what its
+# users experienced and the appliance egress address the target saw for each
+# transaction. Mapping those addresses to WANs connects each symptom to the WAN
+# that carried it and to the path condition that explains it.
+
+DIAGNOSIS_WINDOW_SECONDS = 12
+DIAGNOSIS_INTERVAL_SECONDS = 3.0
+DIAGNOSIS_CLEAR_SECONDS = 30
+SATURATION_PCT = 90.0
+EGRESS_LEARN_INTERVAL_SECONDS = 60
+DIAGNOSIS_LOCK = threading.Lock()
+DIAGNOSIS_CACHE = {"timestamp": 0.0, "payload": None}
+DIAGNOSIS_ACTIVE = {}
+DIAGNOSIS_THREAD = None
+EGRESS_LEARNED = {}
+EGRESS_LEARN_STATE = {"running": False, "last_run": 0.0, "error": None, "target": None}
+SEVERITY_ORDER = {"bad": 0, "warn": 1, "info": 2}
+# Path conditions that can explain each simulator symptom.
+SYMPTOM_CAUSES = {
+    "media_loss": ("fault", "injected_loss", "queue_drops"),
+    "media_no_reply": ("fault", "injected_loss", "queue_drops"),
+    "timeouts": ("fault", "queue_drops", "injected_loss"),
+    "connection_errors": ("fault",),
+    "bandwidth_bound": ("saturated", "queue_drops"),
+    # Saturation alone cannot: NetEm's shallow queue adds only milliseconds of delay.
+    "slow_wait": ("injected_delay", "queue_drops", "injected_loss"),
+}
+# Added delay explains a slow first byte only when it is a meaningful share of the wait.
+DELAY_SHARE = 0.25
+
+
+def recent_telemetry_samples(link_id: str, seconds=DIAGNOSIS_WINDOW_SECONDS):
+    try:
+        with telemetry_connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM telemetry_samples WHERE link_id = ? AND timestamp >= ? ORDER BY timestamp",
+                (link_id, time.time() - seconds),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
+
+
+def _mean(values):
+    values = [float(value) for value in values if value is not None]
+    return sum(values) / len(values) if values else None
+
+
+def path_signals(state: dict, samples: list):
+    """Summarize one WAN's recent path measurements and the conditions they show."""
+    effective = state.get("effective") or {}
+    fault = state.get("fault", "normal")
+    signals = {
+        "link_id": state["id"],
+        "label": state.get("label") or state["id"],
+        "fault": fault,
+        "injected": {key: float(effective.get(key) or 0.0) for key in ("delay_ms", "jitter_ms", "loss_pct")},
+        "directions": {},
+        "causes": [],
+    }
+    if fault != "normal":
+        signals["causes"].append({"kind": "fault", "direction": None, "severity": "bad",
+                                  "text": f"{fault.replace('_', ' ')} active"})
+    valid = [sample for sample in samples if sample.get("rate_valid")]
+    for direction, limit_key, name in (("down", "download_mbit", "Download"), ("up", "upload_mbit", "Upload")):
+        info = {
+            "rate_mbps": _mean(sample.get(f"{direction}_mbps") for sample in valid),
+            "limit_mbit": float(effective.get(limit_key) or 0) or None,
+        }
+        for key in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes"):
+            info[key] = _mean(sample.get(f"{direction}_{key}") for sample in samples)
+        info["queue_delay_ms"] = (info["backlog_bytes"] * 8 / (info["limit_mbit"] * 1000)
+                                  if info["backlog_bytes"] is not None and info["limit_mbit"] else None)
+        signals["directions"][direction] = info
+        if info["util_pct"] is not None and info["util_pct"] >= SATURATION_PCT:
+            signals["causes"].append({"kind": "saturated", "direction": direction, "severity": "warn",
+                                      "text": f"{name} at {info['util_pct']:.0f}% of {info['limit_mbit']:g} Mbit/s"})
+        if (info["queue_drops_ps"] or 0) >= 1:
+            signals["causes"].append({
+                "kind": "queue_drops", "direction": direction, "severity": "warn",
+                "text": f"{name} queue full: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
+            })
+    loss = signals["injected"]["loss_pct"]
+    if loss > 0 and fault == "normal":
+        dropped = signals["directions"]["down"]["injected_drops_ps"]
+        signals["causes"].append({
+            "kind": "injected_loss", "direction": "down", "severity": "warn",
+            "text": f"{loss:g}% random loss injected on download" + (f" ({dropped:.1f} packets/s)" if dropped else ""),
+        })
+    delay, jitter = signals["injected"]["delay_ms"], signals["injected"]["jitter_ms"]
+    if (delay > 0 or jitter > 0) and fault == "normal":
+        signals["causes"].append({
+            "kind": "injected_delay", "direction": "down", "severity": "info",
+            "text": f"{delay:g} ms" + (f" ± {jitter:g} ms" if jitter else "") + " delay added to every round trip",
+        })
+    signals["full"] = sorted({cause["direction"] for cause in signals["causes"]
+                              if cause["kind"] in ("saturated", "queue_drops")})
+    # Health decides where a well-behaved SD-WAN appliance should steer traffic.
+    sla = state.get("sla") or {}
+    failing = [name for name, ok in (sla.get("checks") or {}).items() if not ok and name != "data_plane"]
+    if fault != "normal":
+        signals["health"], signals["health_reason"] = "failed", f"{fault.replace('_', ' ')} active"
+    elif not sla.get("pass", True):
+        signals["health"], signals["health_reason"] = "degraded", "Model SLA fails on " + ", ".join(failing or ["impairment"])
+    elif signals["full"]:
+        signals["health"] = "congested"
+        signals["health_reason"] = "; ".join(cause["text"] for cause in signals["causes"]
+                                             if cause["kind"] in ("saturated", "queue_drops"))
+    else:
+        signals["health"], signals["health_reason"] = "healthy", None
+    return signals
+
+
+def configured_egress(cfg: dict):
+    entries = []
+    for link in cfg.get("wan_links", []):
+        for value in link.get("appliance_addresses") or []:
+            try:
+                entries.append((ipaddress.ip_network(str(value), strict=False), link.get("id") or link.get("bridge")))
+            except ValueError:
+                continue
+    return entries
+
+
+def resolve_egress(address: str, cfg: dict):
+    """Map an appliance egress address to its WAN: entered addresses first, then learned ones."""
+    try:
+        ip = ipaddress.ip_address(address)
+    except ValueError:
+        return None
+    for network, link_id in configured_egress(cfg):
+        if ip.version == network.version and ip in network:
+            return {"link_id": link_id, "source": "manual"}
+    learned = EGRESS_LEARNED.get(str(ip))
+    if not learned:
+        return None
+    links = sorted(learned["links"])
+    if len(links) == 1:
+        return {"link_id": links[0], "source": "learned"}
+    # One address on several WANs: the appliance is not translating to per-WAN addresses.
+    return {"link_id": None, "source": "ambiguous", "links": links}
+
+
+def parse_tcpdump_sources(output: str):
+    sources = set()
+    for line in (output or "").splitlines():
+        match = re.search(r"\bIP6?\s+(\S+)\.\d+\s+>\s", line)
+        if match:
+            try:
+                sources.add(str(ipaddress.ip_address(match.group(1))))
+            except ValueError:
+                continue
+    return sources
+
+
+def capture_sources(interface: str, target_ip: str, seconds=3.0):
+    """Briefly watch a WAN's upstream side for packets to the target; return their sources."""
+    tcpdump = shutil.which("tcpdump")
+    if not tcpdump or not interface:
+        return set(), "tcpdump unavailable"
+    try:
+        proc = subprocess.Popen(
+            [tcpdump, "-i", interface, "-nn", "-q", "-l", "-c", "50", "-s", "96", "dst", "host", target_ip],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+        )
+    except OSError as exc:
+        return set(), str(exc)[:200]
+    try:
+        out, err = proc.communicate(timeout=seconds)
+    except subprocess.TimeoutExpired:
+        proc.terminate()
+        try:
+            out, err = proc.communicate(timeout=2)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            out, err = proc.communicate()
+    sources = parse_tcpdump_sources(out)
+    if not sources and proc.returncode not in (0, None, -15) and "listening on" not in (err or ""):
+        return set(), (err or "tcpdump failed").strip().splitlines()[-1][:200]
+    return sources, None
+
+
+def learn_egress_addresses(cfg: dict, target_ip: str):
+    found, errors = {}, []
+    for link in cfg.get("wan_links", []):
+        link_id = link.get("id") or link.get("bridge")
+        sources, error = capture_sources(link.get("outer"), target_ip)
+        if error:
+            errors.append(f"{link_id}: {error}")
+        for address in sources:
+            found.setdefault(address, set()).add(link_id)
+    now = time.time()
+    with DIAGNOSIS_LOCK:
+        for address, links in found.items():
+            EGRESS_LEARNED[address] = {"links": links, "seen_at": now}
+        EGRESS_LEARN_STATE.update(running=False, last_run=now, target=target_ip,
+                                  error="; ".join(errors)[:300] or None)
+
+
+def maybe_learn_egress(cfg: dict, status, unmapped):
+    """Learn unknown egress addresses in the background while a workload runs."""
+    run = (status or {}).get("run") or {}
+    if not unmapped or (status or {}).get("status") not in ("starting", "running") or not run.get("target"):
+        return
+    if not shutil.which("tcpdump"):
+        return
+    with DIAGNOSIS_LOCK:
+        if EGRESS_LEARN_STATE["running"] or time.time() - EGRESS_LEARN_STATE["last_run"] < EGRESS_LEARN_INTERVAL_SECONDS:
+            return
+        EGRESS_LEARN_STATE["running"] = True
+    try:
+        host = urlsplit(str(run["target"])).hostname or ""
+        target_ip = socket.getaddrinfo(host, None)[0][4][0]
+    except (OSError, ValueError, IndexError) as exc:
+        with DIAGNOSIS_LOCK:
+            EGRESS_LEARN_STATE.update(running=False, last_run=time.time(), error=f"Cannot resolve target: {exc}"[:200])
+        return
+    threading.Thread(target=learn_egress_addresses, args=(cfg, target_ip),
+                     name="netem-egress-learn", daemon=True).start()
+
+
+def _egress_count(value):
+    if isinstance(value, (int, float)):
+        return int(value)
+    return int((value or {}).get("transfers") or (value or {}).get("requests") or 0)
+
+
+def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
+    """Attach each simulator symptom to the WANs that carried it and the path conditions there."""
+    by_link = {item["link_id"]: item for item in signals}
+    findings, explained = [], set()
+    for symptom in (dem_diagnosis or {}).get("findings") or []:
+        relevant = SYMPTOM_CAUSES.get(symptom.get("id"), ())
+        direction = {"download": "down", "upload": "up"}.get(symptom.get("direction"))
+        waits = [value.get("p95_wait_ms") for value in (symptom.get("by_egress") or {}).values()
+                 if isinstance(value, dict) and value.get("p95_wait_ms")]
+
+        def explains(link, cause):
+            if cause["kind"] not in relevant or (direction and cause["direction"] not in (None, direction)):
+                return False
+            if cause["kind"] == "injected_delay" and waits:
+                added = link["injected"]["delay_ms"] + link["injected"]["jitter_ms"] + sum(
+                    item.get("queue_delay_ms") or 0 for item in link["directions"].values())
+                return added >= DELAY_SHARE * max(waits)
+            return True
+
+        def matching(link_id):
+            link = by_link.get(link_id)
+            return [cause for cause in link["causes"] if explains(link, cause)] if link else []
+
+        per_link, unattributed = {}, 0
+        for address, value in (symptom.get("by_egress") or {}).items():
+            mapped = resolve_egress(address, cfg) if address != "unknown" else None
+            if mapped and mapped.get("link_id") in by_link:
+                per_link[mapped["link_id"]] = per_link.get(mapped["link_id"], 0) + _egress_count(value)
+            else:
+                unattributed += _egress_count(value)
+        wans = []
+        for link_id, affected in sorted(per_link.items(), key=lambda item: -item[1]):
+            causes = matching(link_id)
+            explained.update((link_id, cause["kind"], cause["direction"]) for cause in causes)
+            # A full queue is the saturation's effect, so the saturation is explained with it.
+            explained.update((link_id, "saturated", cause["direction"]) for cause in causes if cause["kind"] == "queue_drops")
+            wans.append({"link_id": link_id, "label": by_link[link_id]["label"], "affected": affected,
+                         "causes": [cause["text"] for cause in causes]})
+        candidates = [item["label"] for item in signals if matching(item["link_id"])] if unattributed else []
+        hint = None
+        if symptom.get("id") == "http_errors":
+            hint = "Returned by the appliance or the target, not caused by network quality."
+        elif relevant and not any(wan["causes"] for wan in wans) and not candidates:
+            hint = "NetEm's impairment does not explain this. Check the appliance (policy, inspection, CPU) or the target."
+        findings.append({
+            "source": "experience", "id": symptom.get("id"), "severity": symptom.get("severity", "warn"),
+            "title": symptom.get("title", ""), "detail": symptom.get("detail", ""), "wans": wans,
+            "unattributed": unattributed, "candidates": candidates, "hint": hint,
+        })
+    for item in signals:
+        for cause in item["causes"]:
+            if cause["kind"] == "injected_delay" or (item["link_id"], cause["kind"], cause["direction"]) in explained:
+                continue
+            findings.append({
+                "source": "path", "id": cause["kind"],
+                "severity": cause["severity"] if cause["kind"] == "fault" or dem_diagnosis is None else "info",
+                "title": f"{item['label']}: {cause['text']}",
+                "detail": ("No simulated-user impact traced to it in this window." if dem_diagnosis is not None
+                           else "Path measurement only. Connect the Traffic Simulator to see the effect on users."),
+                "wans": [{"link_id": item["link_id"], "label": item["label"], "affected": 0, "causes": [cause["text"]]}],
+                "unattributed": 0, "candidates": [], "hint": None,
+            })
+    findings.sort(key=lambda finding: (SEVERITY_ORDER.get(finding["severity"], 9), finding["source"] != "experience"))
+    return findings
+
+
+def wan_experience(dem_diagnosis, signals: list, cfg: dict):
+    """Simulated-user experience per WAN from the simulator's per-egress breakdown."""
+    totals = {item["link_id"]: {"requests": 0, "failures": 0, "apps": {}} for item in signals}
+    unattributed = {"requests": 0, "failures": 0}
+    for address, item in ((dem_diagnosis or {}).get("egress") or {}).items():
+        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        bucket = totals.get((mapped or {}).get("link_id"))
+        if bucket is None:
+            unattributed["requests"] += item.get("requests") or 0
+            unattributed["failures"] += item.get("failures") or 0
+            continue
+        bucket["requests"] += item.get("requests") or 0
+        bucket["failures"] += item.get("failures") or 0
+        for app_name, app in (item.get("applications") or {}).items():
+            counts = bucket["apps"].setdefault(app_name, [0, 0])
+            counts[0] += app.get("requests") or 0
+            counts[1] += app.get("failures") or 0
+    result = {}
+    for link_id, bucket in totals.items():
+        if not bucket["requests"]:
+            result[link_id] = None
+            continue
+        failing = [(name, (total - failed) * 100.0 / total) for name, (total, failed) in bucket["apps"].items() if failed]
+        worst = min(failing, key=lambda entry: entry[1]) if failing else None
+        result[link_id] = {
+            "requests": bucket["requests"],
+            "availability_pct": round((bucket["requests"] - bucket["failures"]) * 100.0 / bucket["requests"], 2),
+            "worst_app": worst[0] if worst else None,
+            "worst_availability_pct": round(worst[1], 1) if worst else None,
+        }
+    return result, unattributed
+
+
+def egress_mapping_finding(addresses: dict, learn_state: dict, tcpdump: bool):
+    unmapped = sorted(address for address, mapped in addresses.items() if not mapped or not mapped.get("link_id"))
+    if not unmapped:
+        return None
+    ambiguous = [address for address in unmapped if (addresses[address] or {}).get("source") == "ambiguous"]
+    if ambiguous:
+        detail = (f"{', '.join(ambiguous)} appears on several WANs, so the appliance is not translating traffic to "
+                  "per-WAN addresses. Enable SNAT to each WAN interface address for per-WAN attribution.")
+    elif not tcpdump:
+        detail = ("Enter the appliance's WAN addresses under WAN links → a WAN → Diagnostics, or install tcpdump "
+                  "and grant CAP_NET_RAW so NetEm can detect them.")
+    elif learn_state.get("last_run") and not learn_state.get("error"):
+        detail = ("NetEm did not see these addresses on any WAN. The upstream router may translate addresses "
+                  "before the target; enter the appliance's WAN addresses manually.")
+    else:
+        detail = learn_state.get("error") or "Detecting which WAN uses these addresses…"
+    return {
+        "source": "mapping", "id": "egress_unmapped", "severity": "info",
+        "title": f"Can't tell which WAN carried traffic from {', '.join(unmapped[:3])}" + ("…" if len(unmapped) > 3 else ""),
+        "detail": detail, "wans": [], "unattributed": 0, "candidates": [], "hint": None,
+    }
+
+
+def track_diagnosis_events(findings: list, now=None):
+    """Log when a problem appears and when it has been gone for a while."""
+    now = now or time.time()
+    seen = set()
+    for finding in findings:
+        if finding["severity"] not in ("bad", "warn"):
+            continue
+        wans = [wan["label"] for wan in finding["wans"] if wan.get("affected") or finding["source"] == "path"]
+        key = f"{finding['source']}:{finding['id']}:{','.join(sorted(wans))}"
+        seen.add(key)
+        if key in DIAGNOSIS_ACTIVE:
+            DIAGNOSIS_ACTIVE[key]["last_seen"] = now
+            continue
+        DIAGNOSIS_ACTIVE[key] = {"title": finding["title"], "since": now, "last_seen": now}
+        log_event("diagnosis", f"Detected: {finding['title']}" + (f" · {', '.join(wans)}" if wans else ""),
+                  finding=finding["id"], severity=finding["severity"], wans=wans)
+    for key, entry in list(DIAGNOSIS_ACTIVE.items()):
+        if key not in seen and now - entry["last_seen"] >= DIAGNOSIS_CLEAR_SECONDS:
+            DIAGNOSIS_ACTIVE.pop(key, None)
+            log_event("diagnosis", f"Cleared: {entry['title']}", finding=key.split(":")[1],
+                      duration_seconds=round(entry["last_seen"] - entry["since"]))
+
+
+# ---------- SD-WAN steering assessment ----------
+#
+# A well-behaved appliance moves traffic off an impaired WAN onto a healthy one.
+# Per traffic class, compare where transactions went in the last seconds with
+# each WAN's health, judge the user impact on impaired WANs, and time how long
+# the appliance took to move the class after a WAN became impaired.
+
+STEERING_CLASSES = (("realtime", "Voice & video"), ("interactive", "Web, collaboration & DNS"), ("bulk", "File transfers"))
+DEFAULT_APP_CLASSES = {"voice": "realtime", "video": "realtime", "web_saas": "interactive", "collaboration": "interactive",
+                       "dns": "interactive", "file_sync": "bulk", "developer": "bulk", "updates": "bulk", "backup": "bulk"}
+STEERED_AWAY_PCT = 10.0
+STEERING_GRACE_SECONDS = 60
+# Latency on an impaired WAN counts as user impact once it is this much worse than on a healthy one.
+STEERING_LATENCY_FACTOR = 1.5
+STEERING_LATENCY_MARGIN_MS = 50
+STEERING_STATE = {"links": {}, "classes": {}, "baseline": {}}
+
+
+def track_link_health(signals: list, now: float):
+    links = STEERING_STATE["links"]
+    for item in signals:
+        current = links.get(item["link_id"])
+        if not current or current["health"] != item["health"]:
+            links[item["link_id"]] = {"health": item["health"], "since": now}
+    active = {(item["link_id"], links[item["link_id"]]["since"]) for item in signals}
+    for key in [key for key in STEERING_STATE["classes"] if (key[1], key[2]) not in active]:
+        STEERING_STATE["classes"].pop(key, None)
+
+
+def track_steering_reaction(cls: str, label: str, link: dict, pct, now: float):
+    """Time how long the appliance took to move a class off a WAN that became impaired."""
+    state = STEERING_STATE["links"][link["link_id"]]
+    key = (cls, link["link_id"], state["since"])
+    entry = STEERING_STATE["classes"].get(key)
+    if entry is None:
+        # Only traffic that used this WAN while it was healthy can be steered away from it.
+        baseline = STEERING_STATE["baseline"].get((cls, link["link_id"]))
+        entry = STEERING_STATE["classes"][key] = {
+            "used": baseline is not None and baseline > STEERED_AWAY_PCT, "steered_at": None, "warned": False,
+        }
+    elapsed = now - state["since"]
+    if entry["used"] and pct is not None and entry["steered_at"] is None:
+        if pct <= STEERED_AWAY_PCT:
+            entry["steered_at"] = now
+            log_event("steering", f"SD-WAN moved {label.lower()} off {link['label']} {round(elapsed)} s after it became {link['health']}",
+                      link_id=link["link_id"], traffic_class=cls, seconds=round(elapsed))
+        elif not entry["warned"] and elapsed >= STEERING_GRACE_SECONDS:
+            entry["warned"] = True
+            log_event("steering", f"SD-WAN still sends {pct:.0f}% of {label.lower()} over {link['health']} {link['label']} after {round(elapsed)} s",
+                      link_id=link["link_id"], traffic_class=cls, share_pct=round(pct, 1))
+    return {
+        "link_id": link["link_id"], "label": link["label"], "health": link["health"],
+        "impaired_for_seconds": round(elapsed), "was_used": entry["used"],
+        "steered_after_seconds": round(entry["steered_at"] - state["since"]) if entry["steered_at"] else None,
+    }
+
+
+def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
+    """Per traffic class: where it goes now, the health there, the user impact and a verdict."""
+    now = now or time.time()
+    diagnosis = (dem or {}).get("diagnosis") or {}
+    recent = diagnosis.get("egress_recent") or {}
+    if not isinstance(recent.get("egress"), dict):
+        return None
+    window = recent.get("window_seconds", 10)
+    applications = (dem or {}).get("applications") or {}
+    by_link = {item["link_id"]: item for item in signals}
+    track_link_health(signals, now)
+
+    def class_of(app):
+        return (applications.get(app) or {}).get("class") or DEFAULT_APP_CLASSES.get(app, "interactive")
+
+    def link_of(address):
+        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        return (mapped or {}).get("link_id")
+
+    classes = []
+    for cls, label in STEERING_CLASSES:
+        shares, unattributed = dict.fromkeys(by_link, 0), 0
+        for address, per_app in recent["egress"].items():
+            count = sum(item.get("requests") or 0 for app, item in per_app.items() if class_of(app) == cls)
+            if link_of(address) in shares:
+                shares[link_of(address)] += count
+            else:
+                unattributed += count
+        impact = {link_id: {"requests": 0, "failures": 0, "p95_ms": None} for link_id in by_link}
+        for address, item in (diagnosis.get("egress") or {}).items():
+            bucket = impact.get(link_of(address))
+            for app, counts in (item.get("applications") or {}).items():
+                if bucket is None or class_of(app) != cls:
+                    continue
+                bucket["requests"] += counts.get("requests") or 0
+                bucket["failures"] += counts.get("failures") or 0
+                if counts.get("p95_ms") is not None:
+                    bucket["p95_ms"] = max(bucket["p95_ms"] or 0, counts["p95_ms"])
+        total = sum(shares.values())
+        for link_id, count in shares.items():
+            if total and by_link[link_id]["health"] == "healthy":
+                STEERING_STATE["baseline"][(cls, link_id)] = count * 100.0 / total
+
+        unhealthy = [link_id for link_id in by_link if by_link[link_id]["health"] != "healthy"]
+        healthy = [link_id for link_id in by_link if link_id not in unhealthy]
+        reactions = [track_steering_reaction(cls, label, by_link[link_id],
+                                             shares[link_id] * 100.0 / total if total else None, now)
+                     for link_id in unhealthy]
+        names = lambda ids: ", ".join(by_link[link_id]["label"] for link_id in ids)
+        split = " · ".join(f"{by_link[link_id]['label']} {count * 100.0 / total:.0f}%" for link_id, count in shares.items()) if total else ""
+        if not total:
+            verdict, severity, text = "idle", "info", f"No {label.lower()} traffic traced to a WAN in the last {window} s."
+        elif not unhealthy:
+            verdict, severity, text = "balanced", "good", f"All WANs healthy · {split}"
+        elif not healthy:
+            verdict, severity, text = "no_healthy", "warn", f"Every WAN is impaired, so there is no healthy path to steer to · {split}"
+        else:
+            on_bad = sum(shares[link_id] for link_id in unhealthy) * 100.0 / total
+            failures = sum(impact[link_id]["failures"] for link_id in unhealthy)
+            requests_bad = sum(impact[link_id]["requests"] for link_id in unhealthy)
+            bad_p95 = max((impact[link_id]["p95_ms"] or 0 for link_id in unhealthy), default=0)
+            good_p95 = max((impact[link_id]["p95_ms"] or 0 for link_id in healthy), default=0)
+            slower = bool(good_p95) and bad_p95 > good_p95 * STEERING_LATENCY_FACTOR and bad_p95 - good_p95 > STEERING_LATENCY_MARGIN_MS
+            if on_bad <= STEERED_AWAY_PCT and not any(reaction["was_used"] for reaction in reactions):
+                verdict, severity = "unaffected", "good"
+                text = f"Not using impaired {names(unhealthy)}, and was not using it before · {split}"
+            elif on_bad <= STEERED_AWAY_PCT:
+                verdict, severity = "steered", "good"
+                text = f"Steered to {names(healthy)}: {100 - on_bad:.0f}% avoids impaired {names(unhealthy)}."
+            elif failures or slower:
+                verdict, severity = "stuck_impact", "bad"
+                effects = []
+                if failures:
+                    effects.append(f"{failures} of {requests_bad} failed there in the last minute")
+                if slower:
+                    effects.append(f"P95 {bad_p95:.0f} ms there vs {good_p95:.0f} ms on {names(healthy)}")
+                text = f"{on_bad:.0f}% still on impaired {names(unhealthy)}; " + "; ".join(effects) + "."
+            else:
+                verdict, severity = "stuck", "warn"
+                text = f"{on_bad:.0f}% still on impaired {names(unhealthy)}; no user impact measured there yet."
+        classes.append({
+            "class": cls, "label": label, "verdict": verdict, "severity": severity, "text": text,
+            "unattributed": unattributed, "reactions": reactions,
+            "shares": [{"link_id": link_id, "label": by_link[link_id]["label"], "health": by_link[link_id]["health"],
+                        "health_reason": by_link[link_id]["health_reason"], "requests": count, "pct": round(count * 100.0 / total, 1) if total else None,
+                        "failures": impact[link_id]["failures"], "p95_ms": impact[link_id]["p95_ms"]}
+                       for link_id, count in shares.items()],
+        })
+    return {"window_seconds": window, "steered_away_pct": STEERED_AWAY_PCT, "classes": classes}
+
+
+def steering_findings(steering):
+    findings = []
+    for item in (steering or {}).get("classes", []):
+        if item["severity"] not in ("bad", "warn"):
+            continue
+        impaired = [share for share in item["shares"] if share["health"] != "healthy" and share["requests"]]
+        findings.append({
+            "source": "steering", "id": f"steering_{item['verdict']}_{item['class']}", "severity": item["severity"],
+            "title": f"SD-WAN keeps {item['label'].lower()} on an impaired WAN" if item["verdict"].startswith("stuck")
+                     else f"No healthy WAN for {item['label'].lower()}",
+            "detail": item["text"],
+            "wans": [{"link_id": share["link_id"], "label": share["label"], "affected": share["requests"],
+                      "causes": [share["health_reason"] or share["health"]]} for share in impaired],
+            "unattributed": 0, "candidates": [], "hint": None,
+        })
+    return findings
+
+
+def build_diagnosis():
+    cfg = load_config()
+    snapshot = traffic_generator_snapshot()
+    status = snapshot.get("status") if snapshot.get("connected") else None
+    dem = (status or {}).get("dem") or {}
+    dem_diagnosis = dem.get("diagnosis") if isinstance(dem.get("diagnosis"), dict) else None
+    signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
+    findings = correlate_findings(dem_diagnosis, signals, cfg)
+    steering = assess_steering(dem, signals, cfg)
+    findings.extend(steering_findings(steering))
+    findings.sort(key=lambda finding: (SEVERITY_ORDER.get(finding["severity"], 9), finding["source"] != "experience"))
+    experience, unattributed = wan_experience(dem_diagnosis, signals, cfg)
+    for item in signals:
+        item["experience"] = experience.get(item["link_id"])
+    addresses = {address: resolve_egress(address, cfg)
+                 for address in ((dem_diagnosis or {}).get("egress") or {}) if address != "unknown"}
+    maybe_learn_egress(cfg, status, [address for address, mapped in addresses.items() if not mapped])
+    with DIAGNOSIS_LOCK:
+        learn_state = dict(EGRESS_LEARN_STATE)
+    tcpdump = bool(shutil.which("tcpdump"))
+    mapping = egress_mapping_finding(addresses, learn_state, tcpdump)
+    if mapping:
+        findings.append(mapping)
+    track_diagnosis_events(findings)
+    return {
+        "timestamp": time.time(),
+        "links": signals,
+        "findings": findings,
+        "steering": steering,
+        "unattributed_experience": unattributed,
+        "egress": {"addresses": addresses, "learning": learn_state, "tcpdump_available": tcpdump},
+        "simulator": {
+            "diagnosis_available": dem_diagnosis is not None,
+            "media_mode": (dem_diagnosis or {}).get("media_mode"),
+            "interactive_p95_ms": dem.get("interactive_p95_ms"),
+        },
+        "traffic_generator": snapshot,
+    }
+
+
+def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1):
+    with DIAGNOSIS_LOCK:
+        cached = dict(DIAGNOSIS_CACHE)
+    if cached["payload"] is not None and time.time() - cached["timestamp"] <= max_age:
+        return cached["payload"]
+    payload = build_diagnosis()
+    with DIAGNOSIS_LOCK:
+        DIAGNOSIS_CACHE.update(timestamp=time.time(), payload=payload)
+    return payload
+
+
+def diagnosis_worker():
+    # Keeps findings (and their Detected/Cleared events) current without an open browser.
+    while not BACKGROUND_STOP.is_set():
+        try:
+            current_diagnosis(max_age=0)
+        except Exception as exc:
+            with DIAGNOSIS_LOCK:
+                DIAGNOSIS_CACHE["error"] = str(exc)[:240]
+        BACKGROUND_STOP.wait(DIAGNOSIS_INTERVAL_SECONDS)
 
 
 def query_probe_history(probe_id=None, link_id=None, since=None, limit=1000):
@@ -2413,7 +3136,7 @@ def probe_worker():
 
 
 def start_background_workers():
-    global TELEMETRY_THREAD, PROBE_THREAD
+    global TELEMETRY_THREAD, PROBE_THREAD, DIAGNOSIS_THREAD
     init_telemetry_db()
     BACKGROUND_STOP.clear()
     if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
@@ -2430,6 +3153,13 @@ def start_background_workers():
             daemon=True,
         )
         PROBE_THREAD.start()
+    if DIAGNOSIS_THREAD is None or not DIAGNOSIS_THREAD.is_alive():
+        DIAGNOSIS_THREAD = threading.Thread(
+            target=diagnosis_worker,
+            name="netem-diagnosis",
+            daemon=True,
+        )
+        DIAGNOSIS_THREAD.start()
 
 
 
@@ -3217,6 +3947,9 @@ def build_link_states(cfg: dict, include_qdisc=False):
             "effective": effective,
             "fault": fault,
             "sla": sla,
+            "appliance_addresses": link.get("appliance_addresses") or [],
+            "learned_addresses": sorted(address for address, item in EGRESS_LEARNED.items()
+                                        if link_id in item["links"]),
             "mtu": {
                 "inner": get_interface_mtu(inner),
                 "outer": get_interface_mtu(outer),
@@ -3351,6 +4084,14 @@ DOCS_PAGES = [
         "summary": "Operate the lab from one live view with clickable WAN controls, flow state, sparklines and quick actions.",
         "template": "docs/articles/overview.html",
         "keywords": "command center dashboard live topology throughput events health status quick actions",
+    },
+    {
+        "slug": "diagnosis",
+        "title": "Diagnosing experience & steering",
+        "category": "Operate",
+        "summary": "See why simulated users suffer, which WAN carried it, what on that WAN explains it, and whether the appliance steers away.",
+        "template": "docs/articles/diagnosis.html",
+        "keywords": "diagnosis bottleneck cause queue drops saturation steering sd-wan failover reaction dem egress snat wan attribution media strict realistic",
     },
     {
         "slug": "tests",
@@ -3888,6 +4629,9 @@ def traffic_generator_start():
     target = (request.form.get("target") or "").strip()
     if target:
         payload["target"] = target
+    # Only simulators that offer media modes get the field; older ones reject unknown fields.
+    if request.form.get("media_mode"):
+        payload["media_mode"] = request.form.get("media_mode")
 
     try:
         status = traffic_generator_request(
@@ -3915,7 +4659,7 @@ def traffic_generator_start():
 @app.route("/traffic-generator/adjust", methods=["POST"])
 def traffic_generator_adjust():
     payload = {}
-    for key in ("users", "spawn_rate", "activity"):
+    for key in ("users", "spawn_rate", "activity", "media_mode"):
         value = request.form.get(key)
         if value not in (None, ""):
             payload[key] = value
@@ -3967,6 +4711,41 @@ def traffic_generator_stop():
     except RuntimeError as exc:
         flash(str(exc), "error")
     return redirect_after("tests")
+
+
+@app.route("/api/v1/diagnosis")
+def api_diagnosis():
+    return jsonify(current_diagnosis())
+
+
+@app.route("/wan/egress", methods=["POST"])
+def wan_egress():
+    """Save the appliance's WAN addresses so simulator traffic maps to this WAN."""
+    link_id = request.form.get("link_id") or ""
+    entries = [item for item in re.split(r"[\s,]+", request.form.get("appliance_addresses") or "") if item]
+    try:
+        addresses = [str(ipaddress.ip_network(item, strict=False)) if "/" in item else str(ipaddress.ip_address(item))
+                     for item in entries]
+    except ValueError:
+        flash("Enter IP addresses or prefixes separated by commas.", "error")
+        return redirect_after("wan_links")
+    if len(addresses) > 16:
+        flash("Enter at most 16 addresses or prefixes per WAN.", "error")
+        return redirect_after("wan_links")
+    cfg = load_config()
+    link = get_link(cfg, link_id)
+    if not link:
+        flash("Unknown WAN link.", "error")
+        return redirect_after("wan_links")
+    if addresses:
+        link["appliance_addresses"] = addresses
+    else:
+        link.pop("appliance_addresses", None)
+    save_config(cfg)
+    log_event("config", f"{link_id}: appliance WAN addresses {', '.join(addresses) or 'cleared'}",
+              link_id=link_id, appliance_addresses=addresses)
+    flash("Appliance WAN addresses saved." if addresses else "Appliance WAN addresses cleared.", "success")
+    return redirect_after("wan_links")
 
 
 @app.route("/api/v1/traffic-generator")

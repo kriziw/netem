@@ -22,6 +22,10 @@
 
 <h2 id="wan-pulse">WAN pulse cards</h2>
 <p>WAN pulse cards combine the current measured downstream rate with a rolling sparkline, upstream rate, latency and loss. The small delta under throughput shows how the rate changed since the previous live sample; it is a short-term activity cue rather than a long-term trend calculation.</p>
+<p>Below the chart, bars show how full each direction is against its configured limit, followed by rate-limiter queue drops, injected loss drops and the success rate of simulated users whose traffic used that WAN.</p>
+
+<h2 id="diagnosis">Why experience is degraded &amp; SD-WAN steering</h2>
+<p>These cards connect what simulated users feel to the WAN that carried their traffic and the condition on that WAN that explains it, and judge whether the appliance moves traffic off impaired WANs. See <a href="{{ url_for('documentation_page', slug='diagnosis') }}">Diagnosing experience &amp; steering</a>.</p>
 
 <h2 id="quick-actions">Quick actions</h2>
 <p>The right side of the Command Center exposes outcome-oriented shortcuts such as Degrade a WAN, Fail a WAN, Unstable WAN and Capture traffic. These open the Tests workflow rather than asking you to locate the underlying implementation feature.</p>

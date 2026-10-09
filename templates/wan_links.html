@@ -197,6 +197,16 @@
             <div class="k">Bridge</div><div class="v mono">{{ link.bridge }}</div>
             <div class="k">Runtime fault</div><div class="v">{{ link.fault }}</div>
           </div>
+          <div class="section-title">Appliance WAN addresses</div>
+          <div class="form-grid">
+            <div>
+              <label>Addresses or prefixes on this WAN</label>
+              <input type="text" name="appliance_addresses" value="{{ link.appliance_addresses|join(', ') }}" placeholder="e.g. 198.18.1.2 or 198.18.1.0/30">
+            </div>
+            <div style="display:flex;align-items:end"><button class="btn" type="submit" formaction="{{ url_for('wan_egress') }}">Save addresses</button></div>
+          </div>
+          <div class="field-help">Ties Traffic Simulator experience to this WAN: the target reports the appliance address each transaction came from. NetEm detects these automatically while a workload runs if tcpdump is available{% if link.learned_addresses %} (seen on this WAN: <span class="mono">{{ link.learned_addresses|join(', ') }}</span>){% endif %}. Entered addresses take precedence.</div>
+
           <div class="section-title">Traffic control state</div>
           <details><summary>Inner / downstream</summary><div class="details-body"><pre>{{ link.qdisc.raw or "no qdisc configured" }}</pre></div></details>
           <details><summary>Outer / upstream</summary><div class="details-body"><pre>{{ link.outer_qdisc.raw or "no qdisc configured" }}</pre></div></details>

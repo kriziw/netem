@@ -328,7 +328,11 @@ window.NetEmUI = (() => {
     const number = (value, max = Infinity) => value != null && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= max ? Number(value) : null;
     const score = hasData ? number(dem.experience_score, 100) : null;
     const success = hasData ? number(dem.availability_pct, 100) : null;
-    const latency = hasData ? number(dem.p95_ms) : null;
+    // Interactive P95 leaves out large transfers, whose time is mostly bandwidth.
+    const interactive = hasData && dem.interactive_p95_ms != null;
+    const latency = hasData ? number(interactive ? dem.interactive_p95_ms : dem.p95_ms) : null;
+    const scope = interactive ? 'web, collaboration and DNS transactions' : 'timed transactions';
+    const blended = interactive && number(dem.p95_ms) != null ? ' All applications including large transfers: '+number(dem.p95_ms).toFixed(0)+' ms.' : '';
     const missing = connected ? 'Waiting for measured transactions.' : 'Simulator unavailable; impact cannot be measured.';
     const rows = [
       {key:'experience', value:score == null ? '—' : score.toFixed(0)+'/100',
@@ -339,7 +343,7 @@ window.NetEmUI = (() => {
         explanation:success == null ? missing : (100-success).toFixed(2)+'% of simulated transactions failed. '+(success >= 99 ? 'Few or no request failures.' : success >= 95 ? 'Some users may need to retry.' : 'Frequent failures interrupt simulated work.')},
       {key:'response', value:latency == null ? '—' : latency.toFixed(0)+' ms',
         tone:latency == null ? 'unknown' : latency <= 400 ? 'good' : latency <= 1800 ? 'warn' : 'bad',
-        explanation:latency == null ? (hasData ? 'No successful responses with timing data.' : missing) : '95% of successful timed transactions finished within '+latency.toFixed(0)+' ms. '+(latency <= 400 ? 'Short waits for most requests.' : latency <= 1800 ? 'Users may notice waiting.' : 'Long waits for successful requests.')}
+        explanation:latency == null ? (hasData ? 'No successful responses with timing data.' : missing) : '95% of successful '+scope+' finished within '+latency.toFixed(0)+' ms. '+(latency <= 400 ? 'Short waits for most requests.' : latency <= 1800 ? 'Users may notice waiting.' : 'Long waits for successful requests.')+blended}
     ];
     for (const row of rows) {
       const element = root.querySelector('[data-dem-indicator="'+row.key+'"]');
@@ -354,5 +358,75 @@ window.NetEmUI = (() => {
     if (window) window.textContent = connected ? 'Last '+(number(dem.window_seconds) || 60)+' seconds · '+(number(dem.requests) || 0)+' measured transactions'+(dem.truncated ? ' · sample limit reached' : '') : 'Measurements unavailable';
   }
 
-  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary};
+  function escapeHtml(value) {
+    return String(value ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  }
+
+  // Findings pair what simulated users experienced with the WAN that carried it and the path condition there.
+  function diagnosisFindingsHtml(payload) {
+    const findings = (payload && payload.findings) || [];
+    if (!findings.length) return '<li class="diag-empty">No problems detected right now.</li>';
+    return findings.map(finding => {
+      const wans = (finding.wans || []).filter(wan => wan.affected || finding.source !== 'experience').map(wan =>
+        '<div class="diag-wan"><strong>'+escapeHtml(wan.label)+'</strong>'+(wan.affected ? ' · '+wan.affected+' affected' : '')+
+        (wan.causes && wan.causes.length ? ' ← '+wan.causes.map(escapeHtml).join('; ') : finding.source === 'experience' ? ' · no NetEm impairment explains it' : '')+'</div>');
+      if (finding.unattributed) {
+        wans.push('<div class="diag-wan muted">'+finding.unattributed+' without a reply to show the WAN'+
+          (finding.candidates && finding.candidates.length ? ' · likely '+finding.candidates.map(escapeHtml).join(' or ') : '')+'</div>');
+      }
+      return '<li class="diag-finding '+escapeHtml(finding.severity)+'"><span class="diag-dot" aria-hidden="true"></span><div class="diag-body">'+
+        '<div class="diag-title">'+escapeHtml(finding.title)+'</div>'+wans.join('')+
+        (finding.detail ? '<div class="diag-detail">'+escapeHtml(finding.detail)+'</div>' : '')+
+        (finding.hint ? '<div class="diag-hint">'+escapeHtml(finding.hint)+'</div>' : '')+'</div></li>';
+    }).join('');
+  }
+
+  // Per-WAN bottleneck view: how full each shaped direction is, its drops, and its users' experience.
+  function linkBottleneck(link) {
+    const directions = (link && link.directions) || {};
+    const direction = (key, arrow) => {
+      const item = directions[key] || {};
+      const pct = item.util_pct == null ? null : Math.max(0, Math.min(100, Number(item.util_pct)));
+      return {
+        pct,
+        tone: pct == null ? 'unknown' : pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'good',
+        text: arrow+' '+(pct == null ? '—' : Math.round(pct)+'%')+(item.limit_mbit ? ' of '+formatNumber(item.limit_mbit, 0)+' Mbit/s' : ' · unshaped'),
+      };
+    };
+    const drops = item => item && item.queue_drops_ps != null ? formatNumber(item.queue_drops_ps, item.queue_drops_ps < 10 ? 1 : 0)+'/s' : '—';
+    const injected = directions.down && directions.down.injected_drops_ps;
+    const experience = link && link.experience;
+    return {
+      down: direction('down', '↓'),
+      up: direction('up', '↑'),
+      drops: 'Queue drops ↓ '+drops(directions.down)+' ↑ '+drops(directions.up)+(injected ? ' · injected loss '+formatNumber(injected, 1)+'/s' : ''),
+      experience: experience ? 'Users on this WAN: '+formatNumber(experience.availability_pct, 1)+'% success'+
+        (experience.worst_app ? ' · worst '+experience.worst_app.replaceAll('_', ' ')+' '+formatNumber(experience.worst_availability_pct, 0)+'%' : '') :
+        'No simulated users traced to this WAN yet',
+      badge: ((link && link.full) || []).map(key => key === 'down' ? '↓ full' : '↑ full').join(' '),
+    };
+  }
+
+  // SD-WAN steering: per traffic class, where it goes now (bar segments colored by WAN health) and the verdict.
+  function steeringHtml(steering) {
+    if (!steering) {
+      return '<div class="diag-empty">Steering is assessed once the Traffic Simulator reports per-WAN traffic (v0.7 or later with its target updated) and NetEm can map the appliance WAN addresses.</div>';
+    }
+    const verdicts = {steered:'Steered away', unaffected:'Unaffected', balanced:'Healthy', stuck:'On impaired WAN', stuck_impact:'Users affected', no_healthy:'No healthy WAN', idle:'No traffic'};
+    return (steering.classes || []).map(item => {
+      const segments = (item.shares || []).filter(share => share.pct).map(share =>
+        '<span class="steer-seg '+escapeHtml(share.health)+'" style="width:'+Number(share.pct)+'%" title="'+
+        escapeHtml(share.label+' · '+formatNumber(share.pct, 0)+'% · '+share.health+(share.health_reason ? ' ('+share.health_reason+')' : ''))+'">'+
+        (share.pct >= 14 ? escapeHtml(share.label)+' '+formatNumber(share.pct, 0)+'%' : '')+'</span>').join('');
+      const reactions = (item.reactions || []).filter(reaction => reaction.was_used).map(reaction =>
+        reaction.steered_after_seconds != null ? 'moved off '+reaction.label+' ≈'+reaction.steered_after_seconds+' s after it became '+reaction.health
+          : reaction.label+' '+reaction.health+' for '+reaction.impaired_for_seconds+' s');
+      return '<div class="steer-row"><div class="steer-head"><strong>'+escapeHtml(item.label)+'</strong>'+
+        '<span class="status '+({good:'good', warn:'warn', bad:'bad'}[item.severity] || 'info')+'">'+(verdicts[item.verdict] || escapeHtml(item.verdict))+'</span></div>'+
+        '<div class="steer-bar">'+(segments || '<span class="steer-seg empty" style="width:100%"></span>')+'</div>'+
+        '<div class="steer-text">'+escapeHtml(item.text)+(reactions.length ? '<br>'+reactions.map(escapeHtml).join(' · ') : '')+'</div></div>';
+    }).join('');
+  }
+
+  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml};
 })();

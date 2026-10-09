@@ -72,6 +72,7 @@
                   {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("Model SLA fail" if not link.sla.pass else "Model SLA pass") }}
                 </span>
                 <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
+                <span class="path-full" data-diag="{{ link.id }}-badge" hidden></span>
                 <div class="live-activity-line">
                   <span class="activity-state no-data" data-live="{{ link.id }}-activity-state">NO DATA</span>
                   <span data-live="{{ link.id }}-last-seen">waiting…</span>
@@ -93,7 +94,7 @@
     <section class="card">
       <div class="card-head">
         <div>
-          <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show measured traffic crossing each WAN. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic.") }}</div>
+          <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show measured traffic crossing each WAN. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic. Bars show how full each direction is against its configured speed limit. Queue drops are packets the rate limiter discarded because its queue was full; injected loss is NetEm's configured random loss.") }}</div>
           <div class="card-sub">Download and upload traffic. Click any card to act on that WAN.</div>
         </div>
       </div>
@@ -125,6 +126,12 @@
               <div class="metric-box"><div class="metric-label">Upload now</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
               <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
               <div class="metric-box"><div class="metric-label">Injected loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
+            </div>
+            <div class="bottleneck">
+              <div class="bottleneck-meter"><span class="meter-label" data-diag="{{ link.id }}-down-text">↓ —</span><span class="meter"><span class="meter-fill" data-diag="{{ link.id }}-down-bar"></span></span></div>
+              <div class="bottleneck-meter"><span class="meter-label" data-diag="{{ link.id }}-up-text">↑ —</span><span class="meter"><span class="meter-fill" data-diag="{{ link.id }}-up-bar"></span></span></div>
+              <div class="bottleneck-line" data-diag="{{ link.id }}-drops">Queue drops —</div>
+              <div class="bottleneck-line" data-diag="{{ link.id }}-experience">Waiting for measurements…</div>
             </div>
           </button>
           {% endfor %}
@@ -205,7 +212,7 @@
           <div class="dem-users">Simulated users: <strong data-tg-users>{{ traffic_generator.status.users }}</strong></div>
           <div class="dem-summary" id="overview-dem">
             <p class="card-sub" data-dem-window>Waiting for measurements…</p>
-            {% for metric, title in [('experience','Overall experience'),('success','Request success'),('response','Response time · P95')] %}
+            {% for metric, title in [('experience','Overall experience'),('success','Request success'),('response','Interactive response · P95')] %}
             <div class="dem-indicator unknown" data-dem-indicator="{{ metric }}">
               <span class="dem-signal" data-dem-symbol aria-hidden="true">—</span>
               <div class="dem-detail"><div class="dem-heading">{{ title }} <span data-dem-status>No data</span></div><strong class="dem-value" data-dem-value>—</strong><p data-dem-explanation>Waiting for measured transactions.</p></div>
@@ -214,7 +221,7 @@
             <details class="dem-thresholds"><summary>How to read these indicators</summary>
               <p>Experience: green ≥75, amber 55–74, red &lt;55. The simulator weights request success 65% and application-specific response scores 35%; without timing data it uses success alone.</p>
               <p>Request success: green ≥99%, amber 95–98.99%, red &lt;95%. This is successful simulated transactions, rather than service uptime.</p>
-              <p>P95 response: green ≤400 ms, amber 401–1800 ms, red &gt;1800 ms. These are lab display thresholds. Timing includes application work and transfer time; it is not network ping latency.</p>
+              <p>Interactive response P95: green ≤400 ms, amber 401–1800 ms, red &gt;1800 ms, over web, collaboration and DNS transactions. Large downloads and uploads are left out because their time is mostly bandwidth; the explanation also shows the P95 across all applications. These are lab display thresholds. Timing includes application work and transfer time; it is not network ping latency.</p>
               <p>Gray means no measured data. These indicators describe simulator requests, not real employee monitoring.</p>
             </details>
           </div>
@@ -234,6 +241,30 @@
           <div class="empty-state"><strong>No simulator connected</strong>Connect a Corporate Traffic Simulator to see employee experience during WAN tests.</div>
           <a class="btn btn-sm" data-simulator-modal="integration" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Detect simulator</a>
         {% endif %}
+      </div>
+    </section>
+
+    <section class="card" id="diagnosis-card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">Why experience is degraded {{ metric_help("diagnosis", "Why experience is degraded", "Each finding pairs a symptom measured by the Traffic Simulator with the WAN that carried it (from the appliance address the target saw) and the NetEm path condition that explains it: a full queue, injected loss or delay, or a fault. Path-only findings show conditions no user symptom points at yet.") }}</div>
+          <div class="card-sub" data-diag-sub>Live causes per WAN</div>
+        </div>
+        <span class="status info" data-diag-status>Checking</span>
+      </div>
+      <div class="card-pad"><ul class="diag-list" id="diagnosis-findings"><li class="diag-empty">Collecting measurements…</li></ul></div>
+    </section>
+
+    <section class="card" id="steering-card">
+      <div class="card-head">
+        <div>
+          <div class="card-title">SD-WAN steering {{ metric_help("steering", "SD-WAN steering", "For each traffic class, the bar shows where its transactions went in the last seconds, colored by the health of each WAN: healthy, congested (full queue), degraded (Model SLA fails on the configured impairment) or failed (fault). A good appliance moves traffic off impaired WANs; the verdict shows whether it did and what users felt on the impaired path. Reaction times come from a 10-second window, so they can read up to about 10 seconds late.") }}</div>
+          <div class="card-sub">Does the appliance move traffic off impaired WANs?</div>
+        </div>
+      </div>
+      <div class="card-pad">
+        <div id="steering-classes"><div class="diag-empty">Collecting measurements…</div></div>
+        <div class="steer-legend"><span style="--legend:var(--success)">Healthy</span><span style="--legend:var(--warning)">Congested</span><span style="--legend:#ff9f6b">Degraded</span><span style="--legend:var(--danger)">Failed</span></div>
       </div>
     </section>
 
@@ -603,39 +634,76 @@ NetEmUI.createLiveClient({
   }
 });
 
-{% if traffic_generator.configured %}
-async function refreshTrafficGeneratorOverview() {
-  try {
-    const response=await fetch("{{ url_for('api_traffic_generator') }}",{cache:"no-store"});
-    if(!response.ok) throw new Error("Simulator status unavailable");
-    const snapshot=await response.json();
-    const status=snapshot.status || {};
-    const dem=status.dem || {};
-    document.querySelectorAll("[data-tg-status]").forEach(el=>{
-      if(!snapshot.connected){
-        el.textContent="DISCONNECTED";
-        el.className="status bad";
-      }else{
-        el.textContent=String(status.status||"idle").toUpperCase();
-        el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
-      }
+function renderLinkDiagnosis(link) {
+  const view = NetEmUI.linkBottleneck(link);
+  const set = (key, value) => document.querySelectorAll('[data-diag="' + link.link_id + '-' + key + '"]').forEach(el => el.textContent = value);
+  for (const direction of ["down", "up"]) {
+    set(direction + "-text", view[direction].text);
+    document.querySelectorAll('[data-diag="' + link.link_id + '-' + direction + '-bar"]').forEach(el => {
+      el.style.width = (view[direction].pct ?? 0) + "%";
+      el.className = "meter-fill " + view[direction].tone;
     });
-    if(!snapshot.connected) {
-      document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent="—");
-      NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
-      return;
-    }
-    if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
-    document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
-    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true);
-  } catch (_) {
-    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
-    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
   }
+  set("drops", view.drops);
+  set("experience", view.experience);
+  document.querySelectorAll('[data-diag="' + link.link_id + '-badge"]').forEach(el => { el.textContent = view.badge; el.hidden = !view.badge; });
+}
+
+function renderDiagnosisCard(payload) {
+  document.getElementById("diagnosis-findings").innerHTML = NetEmUI.diagnosisFindingsHtml(payload);
+  document.getElementById("steering-classes").innerHTML = NetEmUI.steeringHtml(payload.steering);
+  const findings = payload.findings || [];
+  const problems = findings.filter(item => item.severity === "bad" || item.severity === "warn").length;
+  document.querySelectorAll("[data-diag-status]").forEach(el => {
+    el.textContent = problems ? problems + (problems === 1 ? " problem" : " problems") : "No problems";
+    el.className = "status " + (problems ? (findings.some(item => item.severity === "bad") ? "bad" : "warn") : "good");
+  });
+  const mode = payload.simulator?.media_mode;
+  document.querySelectorAll("[data-diag-sub]").forEach(el => el.textContent = "Live causes per WAN" + (mode ? " · voice/video judged " + mode : ""));
+}
+
+{% if traffic_generator.configured %}
+function renderTrafficGeneratorOverview(snapshot) {
+  const status=snapshot.status || {};
+  const dem=status.dem || {};
+  document.querySelectorAll("[data-tg-status]").forEach(el=>{
+    if(!snapshot.connected){
+      el.textContent="DISCONNECTED";
+      el.className="status bad";
+    }else{
+      el.textContent=String(status.status||"idle").toUpperCase();
+      el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
+    }
+  });
+  if(!snapshot.connected) {
+    document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent="—");
+    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
+    return;
+  }
+  if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
+  document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
+  NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true);
 }
 {% if traffic_generator.connected %}NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{{ (traffic_generator.status.dem or {})|tojson }},true);{% endif %}
-refreshTrafficGeneratorOverview();
-setInterval(refreshTrafficGeneratorOverview,2500);
 {% endif %}
+
+async function refreshDiagnosisOverview() {
+  try {
+    const response=await fetch("{{ url_for('api_diagnosis') }}",{cache:"no-store"});
+    if(!response.ok) throw new Error("Diagnosis unavailable");
+    const payload=await response.json();
+    renderDiagnosisCard(payload);
+    (payload.links || []).forEach(renderLinkDiagnosis);
+    {% if traffic_generator.configured %}renderTrafficGeneratorOverview(payload.traffic_generator || {});{% endif %}
+  } catch (_) {
+    document.querySelectorAll("[data-diag-status]").forEach(el=>{el.textContent="Unavailable";el.className="status bad";});
+    {% if traffic_generator.configured %}
+    NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
+    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
+    {% endif %}
+  }
+}
+refreshDiagnosisOverview();
+setInterval(refreshDiagnosisOverview,2500);
 </script>
 {% endblock %}

@@ -105,8 +105,8 @@
         <div class="metric-value" style="font-size:13px" data-tg-availability>{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
       </div>
       <div class="metric-box">
-        <div class="metric-label">P95 endpoint response</div>
-        <div class="metric-value" style="font-size:13px" data-tg-p95>{{ "%.0f"|format(tg_dem.p95_ms) ~ " ms" if tg_dem.p95_ms is not none else "—" }}</div>
+        <div class="metric-label">Interactive P95</div>
+        <div class="metric-value" style="font-size:13px" data-tg-p95>{% set tg_p95 = tg_dem.interactive_p95_ms if tg_dem.interactive_p95_ms is not none else tg_dem.p95_ms %}{{ "%.0f"|format(tg_p95) ~ " ms" if tg_p95 is not none else "—" }}</div>
       </div>
     </div>
 
@@ -131,6 +131,15 @@
           {% endfor %}
           </select>
         </div>
+        {% if catalog.media_modes %}
+        <div><label>Voice/video judging</label>
+          <select name="media_mode">
+          {% for key,item in catalog.media_modes.items() %}
+            <option value="{{ key }}" title="{{ item.description }}" {% if key == tg.run.media_mode %}selected{% endif %}>{{ item.label }}</option>
+          {% endfor %}
+          </select>
+        </div>
+        {% endif %}
       </div>
       <div class="actions">
         <button class="btn" type="submit">Adjust live workload</button>
@@ -172,7 +181,18 @@
           </select>
         </div>
         <div><label>Target override · optional</label><input type="url" name="target" placeholder="Use simulator default target"></div>
+        {% if catalog.media_modes %}
+        <div>
+          <label>Voice/video judging</label>
+          <select name="media_mode">
+          {% for key,item in catalog.media_modes.items() %}
+            <option value="{{ key }}" title="{{ item.description }}">{{ item.label }}</option>
+          {% endfor %}
+          </select>
+        </div>
+        {% endif %}
       </div>
+      <div class="field-help" style="margin-bottom:10px">Patterns other than Steady set their own activity at each stage.{% for key,item in (catalog.media_modes or {}).items() %} <strong>{{ item.label }}:</strong> {{ item.description }}{% endfor %}</div>
       <button class="btn btn-primary" type="submit">Start corporate simulation</button>
     </form>
     {% endif %}
@@ -362,7 +382,8 @@ async function refreshTrafficGenerator() {
     document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
     document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
     document.querySelectorAll("[data-tg-availability]").forEach(el=>el.textContent=dem.availability_pct==null?"—":Number(dem.availability_pct).toFixed(2)+"%");
-    document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=dem.p95_ms==null?"—":Number(dem.p95_ms).toFixed(0)+" ms");
+    const p95=dem.interactive_p95_ms??dem.p95_ms;
+    document.querySelectorAll("[data-tg-p95]").forEach(el=>el.textContent=p95==null?"—":Number(p95).toFixed(0)+" ms");
   } catch (_) {}
 }
 refreshTrafficGenerator();
