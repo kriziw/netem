@@ -27,6 +27,7 @@ from urllib import request as urllib_request
 
 import site_catalog
 from showroom import create_showroom_app
+import branding
 
 from flask import (
     Flask,
@@ -54,6 +55,11 @@ SESSIONS_PATH = RUNTIME_DIR / "sessions.json"
 TELEMETRY_DB_PATH = RUNTIME_DIR / "telemetry.db"
 SECRETS_PATH = RUNTIME_DIR / "secrets.json"
 CAPTURE_DIR = RUNTIME_DIR / "captures"
+
+BRANDING_DIR = os.environ.get("NETEM_BRANDING_DIR")
+if not BRANDING_DIR and (RUNTIME_DIR / "branding" / "branding.json").is_file():
+    BRANDING_DIR = str(RUNTIME_DIR / "branding")
+branding.init_app(app, BRANDING_DIR)
 
 def _session_secret():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -6188,7 +6194,7 @@ def showroom_snapshot():
     }
 
 
-showroom_app = create_showroom_app(showroom_snapshot)
+showroom_app = create_showroom_app(showroom_snapshot, BRANDING_DIR)
 
 
 def run_servers():

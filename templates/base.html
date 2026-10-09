@@ -3,18 +3,26 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}NetEm WAN Lab{% endblock %}</title>
+  <title>{% block title %}{{ branding.name }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  {% if branding_enabled %}
+  <link rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% if branding.favicon %}<link rel="icon" href="{{ url_for('branding_asset', filename=branding.favicon) }}">{% endif %}
+  {% endif %}
   {% block head %}{% endblock %}
 </head>
 <body>
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      <div class="brand-mark">N</div>
+      {% if branding.logo %}
+      <img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">
+      {% else %}
+      <div class="brand-mark">{{ branding.mark }}</div>
+      {% endif %}
       <div>
-        <div class="brand-name">NetEm WAN Lab</div>
-        <div class="brand-sub">Resilience test platform</div>
+        <div class="brand-name">{{ branding.name }}</div>
+        <div class="brand-sub">{{ branding.subtitle }}</div>
       </div>
     </div>
 
@@ -67,7 +75,7 @@
     <header class="topbar">
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn btn-sm mobile-menu" type="button" id="mobile-menu">Menu</button>
-        <div class="breadcrumb"><span>NetEm</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
+        <div class="breadcrumb"><span>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
         {% if global_runtime.session.active %}

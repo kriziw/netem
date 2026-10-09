@@ -3,13 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Showroom · NetEm WAN Lab</title>
+  <title>Showroom · {{ branding.name }}</title>
   <link rel="stylesheet" href="/assets/showroom.css">
+  {% if branding_enabled %}
+  <link rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% if branding.favicon %}<link rel="icon" href="{{ url_for('branding_asset', filename=branding.favicon) }}">{% endif %}
+  {% endif %}
   <script src="/assets/showroom.js" defer></script>
 </head>
 <body>
   <header>
-    <div><div class="eyebrow">NetEm WAN Lab · Showroom</div><h1>Network resilience, live</h1></div>
+    <div>
+      {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">{% endif %}
+      <div class="eyebrow">{{ branding.name }} · Showroom</div><h1>Network resilience, live</h1>
+    </div>
     <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
   </header>
   <main>

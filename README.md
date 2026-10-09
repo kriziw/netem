@@ -27,6 +27,10 @@ See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architec
 
 ## Enterprise UI
 
+Optional appliance branding supports private names, logos, favicons, palettes
+and locally hosted fonts without putting corporate assets in the repository.
+See [the branding guide](docs/BRANDING.md).
+
 The interface uses progressive disclosure so the full feature set is available without making the normal workflow feature-centric:
 
 - **Command Center** — primary live workspace with clickable WAN paths, traffic-flow state, sparklines, quick quality/bandwidth/fault/MTU controls and recent activity.
