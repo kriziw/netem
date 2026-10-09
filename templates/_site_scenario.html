@@ -1,0 +1,44 @@
+<section class="card" id="site-scenario">
+  <div class="card-head">
+    <div><div class="card-title">Site scenario</div><div class="card-sub">Model your client’s site, then test its experience and failover targets.</div></div>
+    <a class="btn btn-sm" href="{{ url_for('documentation_page', slug='site-scenarios') }}">Guide</a>
+  </div>
+  <div class="card-pad">
+    <form method="post" action="{{ url_for('site_save') }}" id="site-selection">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      <input type="hidden" name="return_to" value="tests">
+      <div class="site-selectors">
+        {% for field, title in [('industry','Industry'),('sub_industry','Sub-industry'),('function','Site function'),('size','Size'),('criticality','Criticality')] %}
+        <div><label for="site-{{ field }}">{{ title }}</label><select id="site-{{ field }}" name="{{ field }}" required></select></div>
+        {% endfor %}
+      </div>
+      <p class="field-help" id="site-criticality-help"></p>
+      <label class="site-sla-choice"><input type="checkbox" name="apply_sla" value="1"> Replace the current WAN SLA thresholds with this site’s thresholds when saving</label>
+      <div class="actions"><button class="btn btn-primary" type="submit" id="site-save" disabled>Save as active site</button><span class="field-help" id="site-save-hint"></span></div>
+    </form>
+    <div id="site-preview" aria-live="polite">Loading site preview…</div>
+    <form method="post" action="{{ url_for('site_run') }}" id="site-run" data-connected="{{ 'true' if traffic_generator.connected else 'false' }}" data-busy="{{ 'true' if scenario_state.active or site_state.active else 'false' }}">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      <input type="hidden" name="return_to" value="tests">
+      <div class="grid grid-3">
+        {% for role in ['primary','backup'] %}
+        <div><label for="site-{{ role }}">{{ role|capitalize }} WAN</label><select id="site-{{ role }}" name="{{ role }}_link" required>
+          {% for link in links %}<option value="{{ link.id }}" {% if role == 'backup' and loop.index == 2 %}selected{% endif %}>{{ link.label }}</option>{% endfor %}
+        </select></div>
+        {% endfor %}
+        <div><label for="site-users">Simulated users</label><input id="site-users" name="users" type="number" min="1" max="5000" required></div>
+      </div>
+      <p class="field-help">WAN lines apply to the selected roles. Each test restores the WAN to its saved configuration. User count can be adjusted before running.</p>
+      <div class="actions">
+        <button class="btn" type="submit" formaction="{{ url_for('site_apply_wan') }}" data-site-action disabled>Apply WAN lines</button>
+        <button class="btn btn-primary" type="submit" name="test_id" value="all" data-site-run disabled>Run all</button>
+      </div>
+      <div id="site-test-list"></div>
+    </form>
+    <p class="field-help" id="site-run-hint"></p>
+    <div id="site-results" aria-live="polite"></div>
+    {% if site_state.active %}
+    <form method="post" action="{{ url_for('site_stop') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="return_to" value="tests"><button class="btn btn-danger" type="submit">Stop plan &amp; restore</button></form>
+    {% endif %}
+  </div>
+</section>

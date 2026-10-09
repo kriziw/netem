@@ -8,6 +8,7 @@
   <div>
     <div class="eyebrow">Live lab operations</div>
     <h1>Command Center</h1>
+    {% if site_plan %}<a class="status info" href="{{ url_for('tests') }}#site-scenario">{{ site_plan.label }}</a>{% endif %}
     <p class="page-description">See the current paths, change a WAN in one click and watch the result without leaving the operational view. Traffic rates are measured; delay, jitter, loss, quality and model SLA describe NetEm’s requested impairments. Use active probes in Analytics for measured response times.</p>
   </div>
   <div class="page-actions">
@@ -28,7 +29,8 @@
       <span class="card-sub"> · {{ scenario_state.link_id }} · <span id="running-test-stage">{{ scenario_state.step_label }}</span></span>
       <div class="field-help" id="running-test-condition">{% if scenario_state.condition %}Waiting for {{ scenario_state.condition.description }}{% endif %}</div>
     </div>
-    <form method="post" action="{{ url_for('lab_scenario_stop') }}">
+    <form method="post" action="{{ url_for('site_stop') if site_state.active else url_for('lab_scenario_stop') }}">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
       <input type="hidden" name="return_to" value="overview">
       <button class="btn btn-sm btn-danger" type="submit">Stop &amp; restore</button>
     </form>
@@ -219,10 +221,14 @@
             </div>
             {% endfor %}
             <details class="dem-thresholds"><summary>How to read these indicators</summary>
+              {% if site_plan %}
+              <p>Active site targets: experience ≥{{ site_plan.targets.experience_min }}, request success ≥{{ site_plan.targets.success_min_pct }}%, interactive P95 ≤{{ site_plan.targets.interactive_p95_max_ms }} ms and steering ≤{{ site_plan.targets.steering_max_s }} s. Green meets the target; red misses it. Gray means the required measurements are unavailable.</p>
+              {% else %}
               <p>Experience: green ≥75, amber 55–74, red &lt;55. The simulator weights request success 65% and application-specific response scores 35%; without timing data it uses success alone.</p>
               <p>Request success: green ≥99%, amber 95–98.99%, red &lt;95%. This is successful simulated transactions, rather than service uptime.</p>
               <p>Interactive response P95: green ≤400 ms, amber 401–1800 ms, red &gt;1800 ms, over web, collaboration and DNS transactions. Large downloads and uploads are left out because their time is mostly bandwidth; the explanation also shows the P95 across all applications. These are lab display thresholds. Timing includes application work and transfer time; it is not network ping latency.</p>
               <p>Gray means no measured data. These indicators describe simulator requests, not real employee monitoring.</p>
+              {% endif %}
             </details>
           </div>
           <div class="actions" style="margin-top:10px">
@@ -410,6 +416,7 @@
 
 {% block scripts %}
 <script>
+const siteTargets = {{ (site_plan.targets if site_plan else none)|tojson }};
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 
 const qualityModels = {{ quality_curves | tojson }};
@@ -651,7 +658,7 @@ function renderLinkDiagnosis(link) {
 
 function renderDiagnosisCard(payload) {
   document.getElementById("diagnosis-findings").innerHTML = NetEmUI.diagnosisFindingsHtml(payload);
-  document.getElementById("steering-classes").innerHTML = NetEmUI.steeringHtml(payload.steering);
+  document.getElementById("steering-classes").innerHTML = NetEmUI.steeringHtml(payload.steering, siteTargets);
   const findings = payload.findings || [];
   const problems = findings.filter(item => item.severity === "bad" || item.severity === "warn").length;
   document.querySelectorAll("[data-diag-status]").forEach(el => {
@@ -682,9 +689,9 @@ function renderTrafficGeneratorOverview(snapshot) {
   }
   if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
   document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
-  NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true);
+  NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true,siteTargets);
 }
-{% if traffic_generator.connected %}NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{{ (traffic_generator.status.dem or {})|tojson }},true);{% endif %}
+{% if traffic_generator.connected %}NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{{ (traffic_generator.status.dem or {})|tojson }},true,siteTargets);{% endif %}
 {% endif %}
 
 async function refreshDiagnosisOverview() {

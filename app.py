@@ -25,6 +25,8 @@ from urllib.parse import urlsplit
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+import site_catalog
+
 from flask import (
     Flask,
     render_template,
@@ -80,6 +82,7 @@ def protect_integration_forms():
     if request.method == "POST" and request.endpoint in (
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop",
+        "site_save", "site_apply_wan", "site_run", "site_stop",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -692,9 +695,9 @@ def validate_condition(raw, step_index):
         raise ValueError(f"Step {step_index}: condition must be an object.")
 
     condition_type = str(raw.get("type") or "").strip().lower()
-    if condition_type not in ("sla", "probe", "traffic", "dem"):
+    if condition_type not in ("sla", "probe", "traffic", "dem", "steering"):
         raise ValueError(
-            f"Step {step_index}: condition type must be sla, probe, traffic or dem."
+            f"Step {step_index}: condition type must be sla, probe, traffic, dem or steering."
         )
 
     condition = {"type": condition_type}
@@ -778,6 +781,9 @@ def validate_condition(raw, step_index):
             "requests_per_second",
             "failures_per_second",
             "active_users",
+            "interactive_p95_ms",
+            "realtime_availability_pct",
+            "interactive_availability_pct",
         ):
             raise ValueError(
                 f"Step {step_index}: unsupported DEM field."
@@ -805,6 +811,21 @@ def validate_condition(raw, step_index):
                 "window": max(10, min(3600, window)),
             }
         )
+
+    elif condition_type == "steering":
+        # Passes once the SD-WAN appliance keeps this traffic class off impaired WANs.
+        traffic_class = str(raw.get("class") or "realtime").strip().lower()
+        if traffic_class not in ("realtime", "interactive", "bulk"):
+            raise ValueError(f"Step {step_index}: steering class must be realtime, interactive or bulk.")
+        condition["class"] = traffic_class
+        if "within" in raw:
+            try:
+                within = float(raw["within"])
+                if not math.isfinite(within) or not 1 <= within <= 600:
+                    raise ValueError()
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {step_index}: steering within must be 1-600 seconds.") from None
+            condition["within"] = within
 
     return condition
 
@@ -882,8 +903,8 @@ def validate_scenario_steps(raw_steps):
                     f"Step {index}: traffic_generator operation must be "
                     "start, adjust or stop."
                 )
-            if operation == "adjust" and set(value) - {"operation", "users", "spawn_rate", "activity", "personas", "applications"}:
-                raise ValueError(f"Step {index}: adjust supports users, spawn_rate, activity, personas and applications only.")
+            if operation == "adjust" and set(value) - {"operation", "users", "spawn_rate", "activity", "personas", "applications", "media_mode"}:
+                raise ValueError(f"Step {index}: adjust supports users, spawn_rate, activity, personas, applications and media_mode only.")
             cleaned = {"operation": operation}
 
             if operation in ("start", "adjust"):
@@ -908,6 +929,12 @@ def validate_scenario_steps(raw_steps):
                 for key in ("profile", "activity", "pattern"):
                     if key in value:
                         cleaned[key] = str(value[key]).strip()[:80]
+                if "media_mode" in value:
+                    if value["media_mode"] not in ("strict", "realistic"):
+                        raise ValueError(f"Step {index}: media_mode must be strict or realistic.")
+                    cleaned["media_mode"] = value["media_mode"]
+                if operation == "start" and value.get("label"):
+                    cleaned["label"] = str(value["label"]).strip()[:120]
                 if "target" in value:
                     target = str(value["target"]).strip()
                     parsed = urlsplit(target)
@@ -2526,8 +2553,12 @@ def track_diagnosis_events(findings: list, now=None):
 # the appliance took to move the class after a WAN became impaired.
 
 STEERING_CLASSES = (("realtime", "Voice & video"), ("interactive", "Web, collaboration & DNS"), ("bulk", "File transfers"))
-DEFAULT_APP_CLASSES = {"voice": "realtime", "video": "realtime", "web_saas": "interactive", "collaboration": "interactive",
-                       "dns": "interactive", "file_sync": "bulk", "developer": "bulk", "updates": "bulk", "backup": "bulk"}
+DEFAULT_APP_CLASSES = {"voice": "realtime", "video": "realtime", "ot_telemetry": "realtime",
+                       "web_saas": "interactive", "collaboration": "interactive", "dns": "interactive", "mes": "interactive",
+                       "erp": "interactive", "pos": "interactive", "wms_scan": "interactive", "emr": "interactive",
+                       "core_banking": "interactive", "file_sync": "bulk", "developer": "bulk", "updates": "bulk",
+                       "backup": "bulk", "plm_cad": "bulk", "pacs_imaging": "bulk", "cctv_backhaul": "bulk",
+                       "guest_internet": "bulk"}
 STEERED_AWAY_PCT = 10.0
 STEERING_GRACE_SECONDS = 60
 # Latency on an impaired WAN counts as user impact once it is this much worse than on a healthy one.
@@ -3539,6 +3570,8 @@ def condition_summary(condition: dict):
             f'DEM {condition.get("field")} {condition.get("op")} '
             f'{condition.get("value")}'
         )
+    if kind == "steering":
+        return f'{condition.get("class", "realtime")} traffic steered off impaired WANs'
     return "condition"
 
 
@@ -3618,11 +3651,12 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         if field != "active_users" and payload.get("truncated"):
             return False, None, "DEM transaction window exceeded the sample limit"
         experience = payload.get("endpoint_experience") or {}
-        actual = (
-            payload.get("active_users")
-            if field == "active_users"
-            else experience.get("score" if field == "experience_score" else field)
-        )
+        if field in ("realtime_availability_pct", "interactive_availability_pct"):
+            actual = class_availability(payload.get("applications") or {}, field.split("_", 1)[0])
+        elif field == "active_users":
+            actual = payload.get("active_users")
+        else:
+            actual = experience.get("score" if field == "experience_score" else field)
         passed = compare_condition_value(
             actual,
             condition.get("op", ">="),
@@ -3634,7 +3668,32 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         )
         return passed, actual, detail
 
+    if kind == "steering":
+        steering = current_diagnosis(max_age=0).get("steering")
+        if not steering:
+            return False, None, "Steering needs per-WAN data from Traffic Simulator v0.7 or later"
+        item = next((entry for entry in steering["classes"] if entry["class"] == condition.get("class")), None)
+        if not item:
+            return False, None, "Unknown traffic class"
+        passed = item["verdict"] in ("steered", "unaffected", "balanced")
+        within = condition.get("within")
+        if within is not None:
+            late = any(reaction.get("was_used") and reaction.get("steered_after_seconds") is not None
+                       and reaction["steered_after_seconds"] > within for reaction in item.get("reactions", []))
+            passed = passed and not late
+        return passed, item["verdict"], item["text"]
+
     return False, None, "Unsupported condition"
+
+
+def class_availability(applications: dict, traffic_class: str):
+    """Request success of one traffic class from the simulator's per-application summary."""
+    requests = successes = 0
+    for name, item in applications.items():
+        if (item.get("class") or DEFAULT_APP_CLASSES.get(name)) == traffic_class:
+            requests += item.get("requests") or 0
+            successes += item.get("successes") or 0
+    return round(successes * 100.0 / requests, 3) if requests else None
 
 
 def wait_for_scenario_condition(
@@ -4094,6 +4153,14 @@ DOCS_PAGES = [
         "keywords": "diagnosis bottleneck cause queue drops saturation steering sd-wan failover reaction dem egress snat wan attribution media strict realistic",
     },
     {
+        "slug": "site-scenarios",
+        "title": "Site scenarios",
+        "category": "Operate",
+        "summary": "Model a client site with industry traffic, experience targets, WAN lines and an ordered test plan.",
+        "template": "docs/articles/site-scenarios.html",
+        "keywords": "industry sub-industry site function size criticality manufacturing automotive personas workload failover",
+    },
+    {
         "slug": "tests",
         "title": "Tests",
         "category": "Operate",
@@ -4222,6 +4289,8 @@ def overview():
         presets=get_presets(cfg),
         quality_curves=QUALITY_CURVES,
         traffic_generator=traffic_generator_snapshot(),
+        site_plan=active_site_plan(cfg),
+        site_state=site_plan_snapshot(),
     )
 
 
@@ -4265,11 +4334,14 @@ def tests():
         tcpdump_available=bool(shutil.which("tcpdump")),
         selected_scenario=scenario_id,
         traffic_generator=traffic_generator,
+        site_options=site_catalog.catalog(),
+        site_plan=active_site_plan(cfg, traffic_generator.get("catalog")),
+        site_state=site_plan_snapshot(),
         events=list(reversed([
             event for event in EVENT_LOG
             if event.get("kind") in (
                 "scenario", "scenario-config", "fault", "mtu",
-                "capture", "security-test", "traffic-generator"
+                "capture", "security-test", "traffic-generator", "site", "site-test"
             )
         ][-40:])),
     )
@@ -4933,6 +5005,221 @@ def lab_fault():
     return redirect_after("scenarios")
 
 
+# ---------- Site scenarios ----------
+#
+# A saved site profile (industry, sub-industry, function, size, criticality)
+# supplies the simulated workload, the pass/fail targets, typical WAN lines and an
+# ordered test plan; see site_catalog.py. The plan runs test by test through the
+# scenario engine, so each test restores its WAN like any other scenario.
+
+SITE_PLAN_STATE = {"active": False, "label": None, "tests": [], "current": None,
+                   "started_at": None, "finished_at": None, "result": None}
+SITE_PLAN_STOP = threading.Event()
+SIMULATOR_CATALOG_CACHE = {"timestamp": 0.0, "catalog": None}
+SITE_FIELDS = ("industry", "sub_industry", "function", "size", "criticality")
+
+
+def simulator_catalog(max_age=60):
+    """The connected simulator's catalog, briefly cached; None when unavailable."""
+    if time.time() - SIMULATOR_CATALOG_CACHE["timestamp"] <= max_age:
+        return SIMULATOR_CATALOG_CACHE["catalog"]
+    catalog = None
+    if traffic_generator_config().get("host") and traffic_generator_api_key():
+        try:
+            catalog = traffic_generator_request("/api/v1/catalog", timeout=2.0)
+        except RuntimeError:
+            catalog = None
+    SIMULATOR_CATALOG_CACHE.update(timestamp=time.time(), catalog=catalog)
+    return catalog
+
+
+def active_site_plan(cfg=None, catalog=None):
+    selection = (cfg if cfg is not None else load_config()).get("site_profile")
+    if not isinstance(selection, dict):
+        return None
+    try:
+        return site_catalog.build_site_plan(selection, catalog)
+    except ValueError:
+        return None
+
+
+def site_plan_snapshot():
+    with RUNTIME_LOCK:
+        return copy.deepcopy(SITE_PLAN_STATE)
+
+
+def run_site_plan(plan: dict, tests: list, link_for_role: dict):
+    """Run site tests one after another; each is an ordinary scenario on its WAN."""
+    log_event("site-test", f"Site test plan started · {plan['label']}", tests=[test["id"] for test in tests])
+    results = []
+    for test in tests:
+        if SITE_PLAN_STOP.is_set():
+            break
+        link_id = link_for_role[test["role"]]
+        scenario = {"id": f"site_{test['id']}", "name": test["name"], "steps": validate_scenario_steps(test["steps"])}
+        with RUNTIME_LOCK:
+            if SITE_PLAN_STOP.is_set():
+                break
+            SITE_PLAN_STATE["current"] = test["id"]
+            for item in SITE_PLAN_STATE["tests"]:
+                if item["id"] == test["id"]:
+                    item.update(status="running", link_id=link_id)
+            SCENARIO_STOP.clear()
+            SCENARIO_STATE.update({
+                "active": True, "scenario_id": scenario["id"], "scenario_name": f"{plan['label']}: {test['name']}",
+                "link_id": link_id, "started_at": time.time(), "step": 0, "step_count": len(scenario["steps"]),
+                "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
+            })
+        try:
+            run_scenario(link_id, scenario)
+        except Exception as exc:
+            # Keep plan state recoverable even if the scenario runner fails before cleanup.
+            with RUNTIME_LOCK:
+                SCENARIO_STATE.update(active=False, result="failed", error=str(exc)[:240])
+        finished = scenario_snapshot()
+        result = finished.get("result") or "failed"
+        with RUNTIME_LOCK:
+            for item in SITE_PLAN_STATE["tests"]:
+                if item["id"] == test["id"]:
+                    item.update(status=result, error=finished.get("error"))
+        log_event("site-test", f"{test['name']} — {result.upper()}", test_id=test["id"], link_id=link_id,
+                  result=result, error=finished.get("error"), site=plan["label"])
+        results.append(result)
+        if result == "stopped":
+            break
+    stopped = SITE_PLAN_STOP.is_set() or "stopped" in results
+    overall = "stopped" if stopped else ("passed" if results and all(item == "passed" for item in results) else "failed")
+    with RUNTIME_LOCK:
+        for item in SITE_PLAN_STATE["tests"]:
+            if item["status"] == "pending":
+                item["status"] = "skipped"
+        SITE_PLAN_STATE.update(active=False, current=None, finished_at=time.time(), result=overall)
+    SITE_PLAN_STOP.clear()
+    log_event("site-test", f"Site test plan finished — {overall.upper()} · {plan['label']}", result=overall)
+
+
+@app.route("/api/v1/site-plan")
+def api_site_plan():
+    try:
+        plan = site_catalog.build_site_plan({key: request.args.get(key) for key in SITE_FIELDS}, simulator_catalog())
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+    return jsonify(plan)
+
+
+@app.route("/site/save", methods=["POST"])
+def site_save():
+    if site_plan_snapshot().get("active") or scenario_snapshot().get("active"):
+        flash("Stop the site plan before changing its profile.", "error")
+        return redirect_after("tests")
+    try:
+        plan = site_catalog.build_site_plan({key: request.form.get(key) for key in SITE_FIELDS})
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect_after("tests")
+    cfg = load_config()
+    cfg["site_profile"] = plan["selection"]
+    apply_sla = bool(request.form.get("apply_sla"))
+    if apply_sla:
+        cfg["sla_profile"] = plan["sla_profile"]
+    save_config(cfg)
+    log_event("site", f"Active site: {plan['label']}", selection=plan["selection"], sla_applied=apply_sla)
+    flash(f"Active site: {plan['label']}." + (" WAN SLA thresholds set from its criticality." if apply_sla else ""), "success")
+    return redirect_after("tests")
+
+
+@app.route("/site/wan", methods=["POST"])
+def site_apply_wan():
+    """Shape the chosen WANs like the active site's typical primary and backup lines."""
+    cfg = load_config()
+    plan = active_site_plan(cfg)
+    if not plan:
+        flash("Save a site first.", "error")
+        return redirect_after("tests")
+    if scenario_snapshot().get("active") or site_plan_snapshot().get("active"):
+        flash("Wait for the running test to finish before changing WAN lines.", "error")
+        return redirect_after("tests")
+    role_ids = [request.form.get(f"{role}_link") or "" for role in ("primary", "backup")]
+    if len(set(role_ids)) != 2 or any(not get_link(cfg, link_id) for link_id in role_ids):
+        flash("Choose two different existing WANs for primary and backup.", "error")
+        return redirect_after("tests")
+    presets = get_presets(cfg)
+    applied = []
+    for role in ("primary", "backup"):
+        link = get_link(cfg, request.form.get(f"{role}_link") or "")
+        line = plan["wan_lines"][role]
+        if not link or line["preset"] not in presets:
+            continue
+        link.update(preset=line["preset"], mode="quality", quality=100,
+                    bandwidth_download_mbit=line["download_mbit"], bandwidth_upload_mbit=line["upload_mbit"])
+        link.pop("custom_profile", None)
+        applied.append((link, line))
+    save_config(cfg)
+    for link, line in applied:
+        ok, msg, _effective = apply_selected_profile(link, presets)
+        label = f"{presets[line['preset']].get('name', line['preset'])} {line['download_mbit']}/{line['upload_mbit']} Mbit/s"
+        log_event("site", f"{link.get('name', link.get('id'))} set to {label} ({line['role']})", link_id=link.get("id"), ok=ok)
+        if not ok:
+            flash(f"{link.get('name', link.get('id'))}: {msg}", "error")
+    flash("WAN lines applied for " + plan["label"] + "." if applied else "Choose WANs for the primary and backup lines.",
+          "success" if applied else "error")
+    return redirect_after("tests")
+
+
+@app.route("/site/run", methods=["POST"])
+def site_run():
+    cfg = load_config()
+    plan = active_site_plan(cfg, simulator_catalog(max_age=0))
+    if not plan:
+        flash("Save a site first.", "error")
+        return redirect_after("tests")
+    if request.form.get("users"):
+        try:
+            users = int(request.form["users"])
+            if not 1 <= users <= site_catalog.MAX_SIMULATED_USERS:
+                raise ValueError()
+        except (TypeError, ValueError):
+            flash("Simulated users must be an integer from 1 to 5000.", "error")
+            return redirect_after("tests")
+        plan["start"]["users"] = users
+        plan["start"]["spawn_rate"] = max(5.0, round(users / 30.0, 1))
+        plan["tests"] = site_catalog.test_plan(plan["selection"], plan["start"])
+    if not traffic_generator_snapshot().get("connected"):
+        flash("Site tests need a connected Traffic Simulator.", "error")
+        return redirect_after("tests")
+    test_id = request.form.get("test_id") or "all"
+    tests = [test for test in plan["tests"] if test_id in ("all", test["id"])]
+    links = {role: request.form.get(f"{role}_link") or "" for role in ("primary", "backup")}
+    if not tests or any(not get_link(cfg, links[role]) for role in ("primary", "backup")):
+        flash("Choose the site test and existing WANs for its primary/backup roles.", "error")
+        return redirect_after("tests")
+    if links["primary"] == links["backup"]:
+        flash("Primary and backup must be different WANs.", "error")
+        return redirect_after("tests")
+    with RUNTIME_LOCK:
+        if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
+            flash("A test is already running.", "error")
+            return redirect_after("tests")
+        SITE_PLAN_STOP.clear()
+        SITE_PLAN_STATE.update(
+            active=True, label=plan["label"], current=None, started_at=time.time(), finished_at=None, result=None,
+            tests=[{"id": test["id"], "name": test["name"], "role": test["role"], "status": "pending",
+                    "link_id": None, "error": None} for test in tests],
+        )
+    threading.Thread(target=run_site_plan, args=(plan, tests, links), name="netem-site-plan", daemon=True).start()
+    flash(f"Running {len(tests)} site test{'s' if len(tests) != 1 else ''} for {plan['label']}.", "success")
+    return redirect_after("tests")
+
+
+@app.route("/site/stop", methods=["POST"])
+def site_stop():
+    if site_plan_snapshot().get("active"):
+        SITE_PLAN_STOP.set()
+        SCENARIO_STOP.set()
+        flash("Stopping the site test plan; the running test restores its WAN.", "info")
+    return redirect_after("tests")
+
+
 @app.route("/lab/scenario/start", methods=["POST"])
 def lab_scenario_start():
     link_id = request.form.get("link_id") or ""
@@ -4951,7 +5238,7 @@ def lab_scenario_start():
         return redirect_after("scenarios")
 
     with RUNTIME_LOCK:
-        if SCENARIO_STATE["active"]:
+        if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
             flash("A scenario is already running.", "error")
             return redirect_after("scenarios")
         SCENARIO_STOP.clear()
@@ -4983,6 +5270,8 @@ def lab_scenario_start():
 
 @app.route("/lab/scenario/stop", methods=["POST"])
 def lab_scenario_stop():
+    if site_plan_snapshot().get("active"):
+        SITE_PLAN_STOP.set()
     if scenario_snapshot().get("active"):
         SCENARIO_STOP.set()
         flash("Scenario stop requested. The configured WAN profile will be restored.", "info")
@@ -5259,6 +5548,7 @@ def api_state():
             "version": get_app_version(),
             "links": links,
             "scenario": scenario_snapshot(),
+            "site_plan": site_plan_snapshot(),
             "session": session_snapshot(),
             "capture": capture_snapshot(),
             "probes": probe_snapshot(cfg),
