@@ -160,7 +160,7 @@ Debian 12 is the recommended base.
 
 ```bash
 sudo apt update
-sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git
+sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git iputils-ping
 
 # Optional: enables bounded PCAP capture from Tests
 sudo apt install -y tcpdump
