@@ -1,61 +1,42 @@
-<h2 id="direction">Product direction</h2>
-<p>The next phase should focus less on adding more sliders and more on turning existing impairment controls into measurable, repeatable validation. The target workflow is:</p>
-<div class="docs-flow">See what is happening
-→ choose the outcome to test
-→ inject a controlled condition
-→ observe the device response
-→ retain evidence
-→ compare results</div>
-
-<h2 id="next">Recommended next milestone: measured truth + evidence</h2>
-<h3 id="probes">1. Active measurement engine</h3>
-<p>Add ICMP, TCP-connect, HTTP/HTTPS and DNS probes per WAN. This fills the biggest current gap: NetEm knows what it injected, but latency/jitter/loss are not yet independently measured end-to-end.</p>
-
-<h3 id="sqlite">2. Persistent telemetry</h3>
-<p>Store throughput/PPS, injected impairment, probe results, SLA state, faults and scenario stages in SQLite. Keep Prometheus optional for external monitoring.</p>
-
-<h3 id="reports">3. Session reports</h3>
-<p>Extend Lab Sessions with baseline snapshots, tests run, captures, assertions and downloadable evidence. This should become the primary record of a validation exercise.</p>
-
-<h2 id="vendor">SD-WAN response correlation</h2>
-<p>Introduce a normalized vendor adapter model for member health, observed latency/jitter/loss, SLA state and selected path. Implement Fortinet first, then reuse the same contract for Cisco, Palo Alto, Juniper, VMware/VeloCloud and Versa.</p>
-
-<h2 id="orchestration">Test orchestration</h2>
-<ul>
-  <li>conditional waits such as “wait until vendor SLA fails”;</li>
-  <li>assert failover/recovery within a threshold;</li>
-  <li>parallel multi-WAN actions;</li>
-  <li>timeouts, branches and automatic pass/fail results;</li>
-  <li>higher-level test templates for common resilience cases.</li>
-</ul>
-
-<h2 id="traffic">Traffic generation and replay</h2>
-<p>Add a bounded iperf3 wrapper for constant/burst/microburst traffic and a sanitized tcpreplay workflow. Both should be restricted to configured/allowlisted lab targets and include hard rate/duration limits plus an emergency stop.</p>
-
-<h2 id="analytics">Analytics evolution</h2>
-<p>Persist session-aware time series, annotate charts with scenario/fault/vendor events, compare WANs and sessions, and calculate automatic resilience metrics such as detection time, failover convergence, interruption window and recovery convergence.</p>
-
-<h2 id="platform">Platform quality</h2>
-<ul>
-  <li>update preflight that checks Git/service-user write permissions before fetch/merge;</li>
-  <li>runtime qdisc self-verification after every apply;</li>
-  <li>authentication, scoped API tokens and audit trail for shared labs;</li>
-  <li>configuration/profile/session backup and restore;</li>
-  <li>eventual dynamic WAN count beyond the current two-link topology.</li>
-</ul>
-
-<h2 id="order">Recommended implementation order</h2>
-<div class="docs-table"><table>
-<thead><tr><th>Priority</th><th>Capability</th><th>Why now</th></tr></thead>
-<tbody>
-<tr><td>1</td><td>Active probes</td><td>Adds measured truth beside injected state.</td></tr>
-<tr><td>2</td><td>SQLite telemetry</td><td>Makes analytics and sessions persistent.</td></tr>
-<tr><td>3</td><td>Session reports + assertions</td><td>Turns tests into reusable evidence.</td></tr>
-<tr><td>4</td><td>Fortinet adapter</td><td>Measures real SD-WAN reaction in the current lab.</td></tr>
-<tr><td>5</td><td>Conditional scenarios</td><td>Moves from timed playback to validation orchestration.</td></tr>
-<tr><td>6</td><td>Parallel multi-WAN tests</td><td>Exercises more realistic failure combinations.</td></tr>
-<tr><td>7</td><td>Bounded traffic generator</td><td>Adds controlled load as another test dimension.</td></tr>
-<tr><td>8</td><td>Session comparison analytics</td><td>Enables tuning and vendor/config comparisons.</td></tr>
+<h2 id="implemented">Implemented in this development line</h2>
+<p>The first measurement/evidence milestone is now in place:</p>
+<div class="docs-table"><table><thead><tr><th>Capability</th><th>Status</th><th>What is now available</th></tr></thead><tbody>
+<tr><td>Active measurement engine</td><td><span class="status good">Implemented</span></td><td>ICMP, TCP, HTTP/HTTPS and DNS probes with persisted results and state-transition events.</td></tr>
+<tr><td>Persistent telemetry</td><td><span class="status good">Implemented</span></td><td>SQLite WAN/probe time series, ~2s WAN sampling, 7-day retention and historical API/chart ranges.</td></tr>
+<tr><td>Session reports + assertions</td><td><span class="status good">Implemented</span></td><td>PASS/FAIL/UNSCORED session reports, test/assertion summaries, WAN telemetry and probe statistics, HTML + JSON evidence.</td></tr>
+<tr><td>Conditional scenarios</td><td><span class="status good">Implemented</span></td><td>State-driven wait/assert stages using expected SLA, active probes or measured traffic.</td></tr>
 </tbody></table></div>
 
-<div class="docs-tip"><strong>Most important:</strong> the next feature should not be another impairment primitive. The platform already has a strong impairment engine. The highest-value step is measuring and proving what happens because of those impairments.</div>
+<h2 id="next">Recommended next features</h2>
+<p>With measurement, persistence, assertions and reports available, the highest-value next step is to correlate NetEm with the appliance under test and expand orchestration.</p>
+
+<h3 id="vendor">1. Vendor adapter framework + Fortinet first</h3>
+<p>Define a normalized adapter contract for WAN-member health, observed latency/jitter/loss, SLA state and selected path. Implement Fortinet first so session reports can calculate real detection and failover timing in the current lab, then reuse the contract for other vendors.</p>
+
+<h3 id="parallel">2. Parallel multi-WAN scenarios</h3>
+<p>Allow a test to manipulate multiple WANs at once: primary outage while backup degrades, staggered recovery, dual brownout and bounded chaos profiles.</p>
+
+<h3 id="traffic">3. Bounded traffic generator</h3>
+<p>Add a guarded iperf3 workflow with allowlisted/configured targets, hard bandwidth/PPS/duration limits, constant/burst/microburst modes, emergency stop and Lab Session correlation.</p>
+
+<h3 id="comparison">4. Session comparison analytics</h3>
+<p>Compare two completed validation runs: assertion outcomes, fail/recovery timing, probe percentiles, throughput behavior and later vendor-observed response. This is especially useful for before/after tuning and vendor/config comparisons.</p>
+
+<h3 id="preflight">5. qdisc and updater self-verification</h3>
+<p>After applying shaping, compare requested state with the kernel qdisc state and surface partial failures. Before an in-app update, verify Git/service-user permissions, working-tree cleanliness, fast-forward eligibility and restart policy.</p>
+
+<h3 id="agent">6. Remote probe agent</h3>
+<p>Add a lightweight probe agent that can run behind the appliance under test. This removes the current transparent-bridge limitation of host-routed probes and gives true appliance-side path measurements without adding L3 addresses to NetEm's WAN bridge ports.</p>
+
+<h3 id="platform">7. Shared-lab platform features</h3>
+<ul>
+<li>authentication and scoped API tokens;</li>
+<li>configuration/profile/session backup and restore;</li>
+<li>dynamic WAN count beyond two links;</li>
+<li>additional vendor adapters.</li>
+</ul>
+
+<h2 id="metrics">Resilience metrics unlocked by the next adapter phase</h2>
+<p>Once vendor-observed events exist beside injected and measured state, session reports can calculate detection time, failover convergence, service interruption, recovery convergence and discrepancies between expected, measured and appliance-observed SLA state.</p>
+
+<div class="docs-tip"><strong>Recommended next implementation:</strong> the Fortinet adapter framework is now the logical next milestone. The measurement/evidence foundation it depends on is already present.</div>
