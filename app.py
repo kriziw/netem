@@ -608,9 +608,9 @@ def validate_condition(raw, step_index):
         raise ValueError(f"Step {step_index}: condition must be an object.")
 
     condition_type = str(raw.get("type") or "").strip().lower()
-    if condition_type not in ("sla", "probe", "traffic"):
+    if condition_type not in ("sla", "probe", "traffic", "dem"):
         raise ValueError(
-            f"Step {step_index}: condition type must be sla, probe or traffic."
+            f"Step {step_index}: condition type must be sla, probe, traffic or dem."
         )
 
     condition = {"type": condition_type}
@@ -681,6 +681,38 @@ def validate_condition(raw, step_index):
                 f"Step {step_index}: traffic comparison needs a numeric value."
             )
         condition.update({"field": field, "op": op, "value": value})
+
+    elif condition_type == "dem":
+        field = str(raw.get("field") or "experience_score").strip().lower()
+        if field not in (
+            "experience_score",
+            "availability_pct",
+            "p50_ms",
+            "p95_ms",
+            "requests_per_second",
+            "failures_per_second",
+            "active_users",
+        ):
+            raise ValueError(
+                f"Step {step_index}: unsupported DEM field."
+            )
+        op = str(raw.get("op") or ">=").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        try:
+            value = float(raw.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Step {step_index}: DEM comparison needs a numeric value."
+            )
+        condition.update(
+            {
+                "field": field,
+                "op": op,
+                "value": value,
+                "window": max(10, min(3600, int(raw.get("window", 60)))),
+            }
+        )
 
     return condition
 
@@ -2544,6 +2576,11 @@ def condition_summary(condition: dict):
             f'{condition.get("field")} {condition.get("op")} '
             f'{condition.get("value")}'
         )
+    if kind == "dem":
+        return (
+            f'DEM {condition.get("field")} {condition.get("op")} '
+            f'{condition.get("value")}'
+        )
     return "condition"
 
 
@@ -2606,6 +2643,34 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
             condition.get("value"),
         )
         return passed, actual, f"{field}={actual}"
+
+    if kind == "dem":
+        try:
+            window = int(condition.get("window", 60))
+            payload = traffic_generator_request(
+                f"/api/v1/dem/experience?window={window}",
+                timeout=2.5,
+            )
+        except (RuntimeError, ValueError) as exc:
+            return False, None, str(exc)
+
+        field = condition.get("field", "experience_score")
+        experience = payload.get("endpoint_experience") or {}
+        actual = (
+            payload.get("active_users")
+            if field == "active_users"
+            else experience.get(field)
+        )
+        passed = compare_condition_value(
+            actual,
+            condition.get("op", ">="),
+            condition.get("value"),
+        )
+        detail = (
+            f'{field}={actual} · '
+            f'rating={experience.get("rating", "unknown")}'
+        )
+        return passed, actual, detail
 
     return False, None, "Unsupported condition"
 
