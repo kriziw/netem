@@ -16,7 +16,9 @@
   </div>
 </div>
 
-{% if scenario_state.active %}
+{% include "_site_scenario.html" %}
+
+{% if scenario_state.active and not site_state.active %}
 <section class="running-test-bar">
   <div class="running-test-line">
     <div>
@@ -34,7 +36,7 @@
 </section>
 {% endif %}
 
-<div class="section-title">Quick network tests</div>
+<div class="section-title">Generic tests</div>
 <div class="test-grid">
   {% for scenario in scenarios if not scenario.id.startswith('custom_') %}
   <section class="test-card {% if selected_scenario == scenario.id %}selected{% endif %}" id="test-{{ scenario.id }}">
@@ -321,6 +323,13 @@
 
 {% block scripts %}
 <script>
+const siteUI = NetEmSites.mount({{ site_options|tojson }}, {{ site_plan|tojson }}, {{ site_state|tojson }});
+{% if site_state.active %}
+NetEmUI.createLiveClient({interval:1000, maxPoints:20, onSample({state}) {
+  siteUI?.update(state.site_plan);
+  if (!state.site_plan?.active) window.NetEmActions.refresh();
+}});
+{% endif %}
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 
 const copy = document.getElementById("copy-beacon");
@@ -337,7 +346,7 @@ const selected = document.getElementById("test-{{ selected_scenario }}");
 if (selected) setTimeout(() => selected.scrollIntoView({behavior:"smooth", block:"center"}), 80);
 {% endif %}
 
-{% if scenario_state.active %}
+{% if scenario_state.active and not site_state.active %}
 NetEmUI.createLiveClient({
   interval:1000,
   maxPoints:20,
