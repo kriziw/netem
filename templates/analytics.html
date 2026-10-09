@@ -295,94 +295,196 @@
 document.querySelectorAll("[data-ts]").forEach(el => el.textContent = NetEmUI.eventTime(el.dataset.ts));
 
 const selector = document.getElementById("analytics-link");
+const rangeSelector = document.getElementById("analytics-range");
+const persistentByLink = {};
 let lastState = null;
+let historyToken = 0;
 
-function render(history, state) {
-  const id = selector.value;
-  const h = history[id];
-  const link = (state.links || []).find(item => item.id === id);
-  if (!h || !link) return;
-
-  NetEmUI.renderSeries(
-    [document.getElementById("chart-down"), document.getElementById("chart-up")],
-    [h.down, h.up],
-    {
-      axis: document.getElementById("axis-throughput-y"),
-      timeAxis: document.getElementById("axis-throughput-x"),
-      timestamps: h.timestamps,
-      unit: " Mb/s"
-    }
-  );
-  NetEmUI.renderSeries(
-    [document.getElementById("chart-rxpps"), document.getElementById("chart-txpps")],
-    [h.rxpps, h.txpps],
-    {
-      axis: document.getElementById("axis-pps-y"),
-      timeAxis: document.getElementById("axis-pps-x"),
-      timestamps: h.timestamps,
-      unit: " pps"
-    }
-  );
-  NetEmUI.renderSeries(
-    [document.getElementById("chart-latency"), document.getElementById("chart-jitter")],
-    [h.latency, h.jitter],
-    {
-      axis: document.getElementById("axis-delay-y"),
-      timeAxis: document.getElementById("axis-delay-x"),
-      timestamps: h.timestamps,
-      unit: " ms"
-    }
-  );
-  NetEmUI.renderSeries(
-    [document.getElementById("chart-loss"), document.getElementById("chart-quality")],
-    [h.loss, h.quality],
-    {
-      fixedMax: 100,
-      fixedMin: 0,
-      axis: document.getElementById("axis-quality-y"),
-      timeAxis: document.getElementById("axis-quality-x"),
-      timestamps: h.timestamps,
-      unit: "%"
-    }
-  );
-
-  const i = h.down.length - 1;
-  if (i >= 0) {
-    document.getElementById("live-throughput-value").textContent = NetEmUI.formatRate(h.down[i]) + " ↓ · " + NetEmUI.formatRate(h.up[i]) + " ↑";
-    document.getElementById("live-pps-value").textContent = Math.round(h.rxpps[i]) + " down · " + Math.round(h.txpps[i]) + " up";
-    document.getElementById("live-delay-value").textContent = NetEmUI.formatNumber(h.latency[i],1) + " ms · " + NetEmUI.formatNumber(h.jitter[i],1) + " ms";
-    document.getElementById("live-loss-value").textContent = NetEmUI.formatNumber(h.loss[i],2) + "% · " + Math.round(h.quality[i]) + "% quality";
-    document.querySelectorAll("[data-chart-empty]").forEach(el => el.style.display = h.down.length > 1 ? "none" : "grid");
-  }
-
-  document.getElementById("compare-latency").textContent = NetEmUI.formatNumber(link.effective?.delay_ms || 0,1) + " ms";
-  document.getElementById("compare-jitter").textContent = NetEmUI.formatNumber(link.effective?.jitter_ms || 0,1) + " ms";
-  document.getElementById("compare-loss").textContent = NetEmUI.formatNumber(link.effective?.loss_pct || 0,2) + "%";
-  document.getElementById("compare-sla").textContent = link.sla?.pass ? "PASS" : "FAIL";
+function historyFromSamples(samples) {
+  const h = {
+    down:[], up:[], rxpps:[], txpps:[],
+    latency:[], jitter:[], loss:[], quality:[], timestamps:[]
+  };
+  (samples || []).forEach(sample => {
+    h.down.push(Number(sample.down_mbps || 0));
+    h.up.push(Number(sample.up_mbps || 0));
+    h.rxpps.push(Number(sample.down_pps || 0));
+    h.txpps.push(Number(sample.up_pps || 0));
+    h.latency.push(Number(sample.delay_ms || 0));
+    h.jitter.push(Number(sample.jitter_ms || 0));
+    h.loss.push(Number(sample.loss_pct || 0));
+    h.quality.push(Number(sample.quality ?? 100));
+    h.timestamps.push(Number(sample.timestamp));
+  });
+  return h;
 }
 
-const client = NetEmUI.createLiveClient({
-  interval:1500,
-  maxPoints:200,
-  onStatus(ok) {
-    const el = document.getElementById("analytics-live");
-    el.textContent = ok ? "Live" : "Disconnected";
-    el.className = "stat-value " + (ok ? "good" : "bad");
-  },
-  onSample({state,history}) {
-    lastState = state;
-    (state.links || []).forEach(link => {
-      const sla = document.querySelector('[data-summary-sla="' + link.id + '"]');
-      const quality = document.querySelector('[data-summary-quality="' + link.id + '"]');
-      if (sla) {
-        sla.textContent = link.sla?.pass ? "PASS" : "FAIL";
-        sla.className = "stat-value " + (link.sla?.pass ? "good" : "bad");
+function mergeHistory(base, live) {
+  const result = {
+    down:[], up:[], rxpps:[], txpps:[],
+    latency:[], jitter:[], loss:[], quality:[], timestamps:[]
+  };
+  const keys = ["down","up","rxpps","txpps","latency","jitter","loss","quality"];
+  const points = [];
+
+  function add(source) {
+    if (!source?.timestamps) return;
+    source.timestamps.forEach((ts,index) => {
+      const row = {timestamp:Number(ts)};
+      keys.forEach(key => row[key]=Number(source[key]?.[index] ?? 0));
+      points.push(row);
+    });
+  }
+  add(base);
+  add(live);
+  points.sort((a,b) => a.timestamp-b.timestamp);
+
+  let lastTimestamp = -Infinity;
+  points.forEach(row => {
+    if (row.timestamp <= lastTimestamp + 0.05) {
+      // Prefer the newest/live sample if two samples represent the same instant.
+      if (result.timestamps.length) {
+        result.timestamps[result.timestamps.length-1]=row.timestamp;
+        keys.forEach(key => result[key][result[key].length-1]=row[key]);
       }
-      if (quality) quality.textContent = Number(link.quality ?? 100) + "%";
+      lastTimestamp=Math.max(lastTimestamp,row.timestamp);
+      return;
+    }
+    result.timestamps.push(row.timestamp);
+    keys.forEach(key => result[key].push(row[key]));
+    lastTimestamp=row.timestamp;
+  });
+
+  const maxPoints=1600;
+  if(result.timestamps.length>maxPoints){
+    const cut=result.timestamps.length-maxPoints;
+    result.timestamps=result.timestamps.slice(cut);
+    keys.forEach(key => result[key]=result[key].slice(cut));
+  }
+  return result;
+}
+
+async function loadPersistentHistory() {
+  const id=selector.value;
+  const minutes=Number(rangeSelector.value || 60);
+  const token=++historyToken;
+  try {
+    const response=await fetch("/api/v1/history?link_id="+encodeURIComponent(id)+"&minutes="+minutes+"&max_points=1200",{cache:"no-store"});
+    if(!response.ok) throw new Error("Persistent history unavailable");
+    const payload=await response.json();
+    if(token!==historyToken) return;
+    persistentByLink[id]=historyFromSamples(payload.samples || []);
+    if(lastState) render(client.history,lastState);
+  } catch (_) {
+    if(token!==historyToken) return;
+    persistentByLink[id]=historyFromSamples([]);
+  }
+}
+
+function renderProbeState(state, selectedLinkId) {
+  const probes=state.probes || [];
+  probes.forEach(probe => {
+    const latest=probe.latest;
+    const status=document.querySelector('[data-probe-status="'+probe.id+'"]');
+    const latency=document.querySelector('[data-probe-latency="'+probe.id+'"]');
+    const detail=document.querySelector('[data-probe-detail="'+probe.id+'"]');
+    if(status){
+      status.className="status "+(!latest?"info":latest.success?"good":"bad");
+      status.textContent=!latest?"WAITING":latest.success?"UP":"FAIL";
+    }
+    if(latency) latency.textContent=latest?.latency_ms != null ? Number(latest.latency_ms).toFixed(1)+" ms" : "—";
+    if(detail) detail.textContent=latest?.detail || "No sample yet";
+  });
+
+  const selected=probes.find(probe => probe.link_id===selectedLinkId && probe.enabled && probe.latest);
+  const measuredLatency=document.getElementById("compare-probe-latency");
+  const measuredState=document.getElementById("compare-probe-state");
+  if(!selected){
+    measuredLatency.textContent="No probe";
+    measuredState.textContent="No probe";
+    return;
+  }
+  measuredLatency.textContent=selected.latest.latency_ms != null
+    ? Number(selected.latest.latency_ms).toFixed(1)+" ms · "+selected.kind.toUpperCase()
+    : "— · "+selected.kind.toUpperCase();
+  measuredState.textContent=selected.latest.success ? "REACHABLE" : "FAILED";
+}
+
+function render(history,state) {
+  const id=selector.value;
+  const live=history[id] || historyFromSamples([]);
+  const h=mergeHistory(persistentByLink[id],live);
+  const link=(state.links || []).find(item => item.id===id);
+  if(!link) return;
+
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-down"),document.getElementById("chart-up")],
+    [h.down,h.up],
+    {axis:document.getElementById("axis-throughput-y"),timeAxis:document.getElementById("axis-throughput-x"),timestamps:h.timestamps,unit:" Mb/s"}
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-rxpps"),document.getElementById("chart-txpps")],
+    [h.rxpps,h.txpps],
+    {axis:document.getElementById("axis-pps-y"),timeAxis:document.getElementById("axis-pps-x"),timestamps:h.timestamps,unit:" pps"}
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-latency"),document.getElementById("chart-jitter")],
+    [h.latency,h.jitter],
+    {axis:document.getElementById("axis-delay-y"),timeAxis:document.getElementById("axis-delay-x"),timestamps:h.timestamps,unit:" ms"}
+  );
+  NetEmUI.renderSeries(
+    [document.getElementById("chart-loss"),document.getElementById("chart-quality")],
+    [h.loss,h.quality],
+    {fixedMax:100,fixedMin:0,axis:document.getElementById("axis-quality-y"),timeAxis:document.getElementById("axis-quality-x"),timestamps:h.timestamps,unit:"%"}
+  );
+
+  const i=h.down.length-1;
+  if(i>=0){
+    document.getElementById("live-throughput-value").textContent=NetEmUI.formatRate(h.down[i])+" ↓ · "+NetEmUI.formatRate(h.up[i])+" ↑";
+    document.getElementById("live-pps-value").textContent=Math.round(h.rxpps[i])+" down · "+Math.round(h.txpps[i])+" up";
+    document.getElementById("live-delay-value").textContent=NetEmUI.formatNumber(h.latency[i],1)+" ms · "+NetEmUI.formatNumber(h.jitter[i],1)+" ms";
+    document.getElementById("live-loss-value").textContent=NetEmUI.formatNumber(h.loss[i],2)+"% · "+Math.round(h.quality[i])+"% quality";
+    document.querySelectorAll("[data-chart-empty]").forEach(el => el.style.display=h.down.length>1?"none":"grid");
+  }
+
+  document.getElementById("compare-latency").textContent=NetEmUI.formatNumber(link.effective?.delay_ms||0,1)+" ms";
+  document.getElementById("compare-jitter").textContent=NetEmUI.formatNumber(link.effective?.jitter_ms||0,1)+" ms";
+  document.getElementById("compare-loss").textContent=NetEmUI.formatNumber(link.effective?.loss_pct||0,2)+"%";
+  document.getElementById("compare-sla").textContent=link.sla?.pass?"PASS":"FAIL";
+  renderProbeState(state,id);
+}
+
+const client=NetEmUI.createLiveClient({
+  interval:1500,
+  maxPoints:240,
+  onStatus(ok){
+    const el=document.getElementById("analytics-live");
+    el.textContent=ok?"Persistent + live":"Live disconnected";
+    el.className="stat-value "+(ok?"good":"bad");
+  },
+  onSample({state,history}){
+    lastState=state;
+    (state.links||[]).forEach(link => {
+      const sla=document.querySelector('[data-summary-sla="'+link.id+'"]');
+      const quality=document.querySelector('[data-summary-quality="'+link.id+'"]');
+      if(sla){
+        sla.textContent=link.sla?.pass?"PASS":"FAIL";
+        sla.className="stat-value "+(link.sla?.pass?"good":"bad");
+      }
+      if(quality) quality.textContent=Number(link.quality??100)+"%";
     });
     render(history,state);
   }
 });
-selector.addEventListener("change", () => { if (lastState) render(client.history,lastState); });
+
+selector.addEventListener("change", async () => {
+  await loadPersistentHistory();
+  if(lastState) render(client.history,lastState);
+});
+rangeSelector.addEventListener("change", async () => {
+  await loadPersistentHistory();
+  if(lastState) render(client.history,lastState);
+});
+loadPersistentHistory();
 </script>
 {% endblock %}
