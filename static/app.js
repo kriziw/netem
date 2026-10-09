@@ -85,11 +85,15 @@ window.NetEmUI = (() => {
       const first = Number(options.timestamps[0]);
       const last = Number(options.timestamps[options.timestamps.length - 1]);
       const spanSec = Math.max(0, last - first);
-      const left = spanSec >= 120
-        ? "−" + Math.round(spanSec / 60) + "m"
-        : spanSec >= 10
-          ? "−" + Math.round(spanSec) + "s"
-          : "Start";
+      const left = spanSec >= 172800
+        ? "−" + (spanSec / 86400).toFixed(spanSec >= 864000 ? 0 : 1) + "d"
+        : spanSec >= 7200
+          ? "−" + (spanSec / 3600).toFixed(spanSec >= 36000 ? 0 : 1) + "h"
+          : spanSec >= 120
+            ? "−" + Math.round(spanSec / 60) + "m"
+            : spanSec >= 10
+              ? "−" + Math.round(spanSec) + "s"
+              : "Start";
       options.timeAxis.innerHTML = '<span>' + left + '</span><span>Now</span>';
     }
 
