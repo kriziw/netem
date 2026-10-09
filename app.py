@@ -70,7 +70,12 @@ SCENARIO_STATE = {
     "link_id": None,
     "started_at": None,
     "step": 0,
+    "step_count": 0,
     "step_label": None,
+    "step_action": None,
+    "condition": None,
+    "result": None,
+    "error": None,
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
