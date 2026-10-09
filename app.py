@@ -327,7 +327,21 @@ DEFAULT_SCENARIOS = [
         "steps": [
             {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
             {"after": 10, "action": "fault", "value": "blackhole", "label": "Blackhole"},
+            {
+                "after": 0,
+                "action": "assert",
+                "condition": {"type": "sla", "state": "fail"},
+                "timeout": 5,
+                "label": "Expected SLA detects failure"
+            },
             {"after": 30, "action": "fault", "value": "normal", "label": "Connectivity restored"},
+            {
+                "after": 0,
+                "action": "assert",
+                "condition": {"type": "sla", "state": "pass"},
+                "timeout": 5,
+                "label": "Expected SLA recovers"
+            },
         ],
     },
     {
