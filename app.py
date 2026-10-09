@@ -375,8 +375,90 @@ def get_scenarios(cfg: dict):
     return scenarios
 
 
+def validate_condition(raw, step_index):
+    if not isinstance(raw, dict):
+        raise ValueError(f"Step {step_index}: condition must be an object.")
+
+    condition_type = str(raw.get("type") or "").strip().lower()
+    if condition_type not in ("sla", "probe", "traffic"):
+        raise ValueError(
+            f"Step {step_index}: condition type must be sla, probe or traffic."
+        )
+
+    condition = {"type": condition_type}
+    link_id = str(raw.get("link_id") or "").strip()
+    if link_id:
+        condition["link_id"] = link_id
+
+    if condition_type == "sla":
+        state = str(raw.get("state") or "").strip().lower()
+        if state not in ("pass", "fail"):
+            raise ValueError(
+                f"Step {step_index}: SLA condition state must be pass or fail."
+            )
+        condition["state"] = state
+
+    elif condition_type == "probe":
+        probe_id = str(raw.get("probe_id") or "").strip()
+        if not probe_id:
+            raise ValueError(f"Step {step_index}: probe_id is required.")
+        field = str(raw.get("field") or "success").strip().lower()
+        if field not in ("success", "latency_ms"):
+            raise ValueError(
+                f"Step {step_index}: probe field must be success or latency_ms."
+            )
+        op = str(raw.get("op") or "==").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        value = raw.get("value")
+        if field == "success":
+            if isinstance(value, str):
+                value = value.strip().lower() in ("1", "true", "yes", "pass", "up")
+            else:
+                value = bool(value)
+            if op not in ("==", "!="):
+                raise ValueError(
+                    f"Step {step_index}: success supports only == or !=."
+                )
+        else:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Step {step_index}: probe latency comparison needs a number."
+                )
+        condition.update(
+            {
+                "probe_id": probe_id,
+                "field": field,
+                "op": op,
+                "value": value,
+            }
+        )
+
+    elif condition_type == "traffic":
+        field = str(raw.get("field") or "down_mbps").strip().lower()
+        if field not in ("down_mbps", "up_mbps", "down_pps", "up_pps"):
+            raise ValueError(
+                f"Step {step_index}: traffic field must be down_mbps, up_mbps, "
+                "down_pps or up_pps."
+            )
+        op = str(raw.get("op") or ">=").strip()
+        if op not in ("==", "!=", "<", "<=", ">", ">="):
+            raise ValueError(f"Step {step_index}: unsupported comparison operator.")
+        try:
+            value = float(raw.get("value"))
+        except (TypeError, ValueError):
+            raise ValueError(
+                f"Step {step_index}: traffic comparison needs a numeric value."
+            )
+        condition.update({"field": field, "op": op, "value": value})
+
+    return condition
+
+
 def validate_scenario_steps(raw_steps):
-    """Validate a compact vendor-neutral scenario definition."""
+    """Validate a vendor-neutral timed + conditional scenario definition."""
     if not isinstance(raw_steps, list) or not raw_steps:
         raise ValueError("Scenario must contain at least one step.")
     if len(raw_steps) > 30:
@@ -388,9 +470,9 @@ def validate_scenario_steps(raw_steps):
             raise ValueError(f"Step {index} must be an object.")
 
         action = str(step.get("action", "")).strip()
-        if action not in ("quality", "fault", "mtu"):
+        if action not in ("quality", "fault", "mtu", "wait", "assert"):
             raise ValueError(
-                f"Step {index}: action must be quality, fault or mtu."
+                f"Step {index}: action must be quality, fault, mtu, wait or assert."
             )
 
         try:
@@ -398,13 +480,21 @@ def validate_scenario_steps(raw_steps):
         except (TypeError, ValueError):
             raise ValueError(f"Step {index}: after must be an integer.")
 
-        value = step.get("value")
+        validated_step = {
+            "after": after,
+            "action": action,
+            "label": str(step.get("label") or action)[:80],
+        }
+
         if action == "quality":
             try:
-                value = max(0, min(100, int(value)))
+                value = max(0, min(100, int(step.get("value"))))
             except (TypeError, ValueError):
                 raise ValueError(f"Step {index}: quality must be 0-100.")
+            validated_step["value"] = value
+
         elif action == "fault":
+            value = step.get("value")
             if value not in (
                 "normal",
                 "blackhole",
@@ -412,24 +502,44 @@ def validate_scenario_steps(raw_steps):
                 "upstream_blackhole",
             ):
                 raise ValueError(f"Step {index}: unsupported fault.")
+            validated_step["value"] = value
+
         elif action == "mtu":
             try:
-                value = int(value)
+                value = int(step.get("value"))
             except (TypeError, ValueError):
                 raise ValueError(f"Step {index}: MTU must be an integer.")
             if value != 0 and not 576 <= value <= 9000:
                 raise ValueError(
                     f"Step {index}: MTU must be 576-9000, or 0 to restore."
                 )
+            validated_step["value"] = value
 
-        validated.append(
-            {
-                "after": after,
-                "action": action,
-                "value": value,
-                "label": str(step.get("label") or action)[:80],
-            }
-        )
+        elif action in ("wait", "assert"):
+            validated_step["condition"] = validate_condition(
+                step.get("condition"), index
+            )
+            try:
+                timeout_s = max(1, min(600, int(step.get("timeout", 30))))
+                poll_s = max(0.25, min(5.0, float(step.get("poll", 0.5))))
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"Step {index}: timeout/poll must be numeric values."
+                )
+            on_fail = str(step.get("on_fail") or "stop").strip().lower()
+            if on_fail not in ("stop", "continue"):
+                raise ValueError(
+                    f"Step {index}: on_fail must be stop or continue."
+                )
+            validated_step.update(
+                {
+                    "timeout": timeout_s,
+                    "poll": poll_s,
+                    "on_fail": on_fail,
+                }
+            )
+
+        validated.append(validated_step)
     return validated
 
 
