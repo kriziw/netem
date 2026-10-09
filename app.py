@@ -14,6 +14,7 @@ import ssl
 import subprocess
 import threading
 import time
+import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
 from urllib import error as urllib_error
@@ -90,6 +91,8 @@ BACKGROUND_STOP = threading.Event()
 TELEMETRY_THREAD = None
 PROBE_THREAD = None
 TELEMETRY_PREVIOUS = {}
+TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
+NET_SYSFS = Path("/sys/class/net")
 PROBE_RUNTIME = {}
 CAPTURE_STATE = {
     "active": False,
@@ -892,6 +895,7 @@ def evaluate_sla(effective: dict, sla: dict, fault="normal"):
     return {
         "pass": all(checks.values()),
         "checks": checks,
+        "source": "impairment_model",
     }
 
 
@@ -1333,45 +1337,32 @@ def parse_qdisc_output(raw: str):
     if not raw.strip():
         return info
 
-    first_line = raw.splitlines()[0]
-
-    # Identify qdisc kind
-    m_kind = re.search(r"qdisc\s+(\S+)\s+\d+:", first_line)
-    if m_kind:
-        kind = m_kind.group(1)
-        info["parsed"]["kind"] = kind
-    else:
+    lines = raw.splitlines()
+    root = next((line for line in lines if " root " in line), lines[0])
+    kind = re.search(r"qdisc\s+(\S+)\s+[0-9a-fA-F]+:", root)
+    if not kind:
         return info
+    info["parsed"]["kind"] = kind.group(1)
+    netem = next((line for line in lines if re.match(r"qdisc\s+netem\s", line)), "")
+    if netem:
+        info["parsed"]["kind"] = "netem"
+        # tc prints us for sub-ms values and seconds for larger delays.
+        delay = re.search(r"delay\s+([0-9.]+)(us|ms|s)(?:\s+([0-9.]+)(us|ms|s))?", netem)
+        if delay:
+            units = {"us": 0.001, "ms": 1, "s": 1000}
+            info["parsed"]["delay_ms"] = float(delay.group(1)) * units[delay.group(2)]
+            info["parsed"]["jitter_ms"] = (float(delay.group(3)) * units[delay.group(4)]
+                                             if delay.group(3) else 0.0)
+        else:
+            info["parsed"]["delay_ms"] = info["parsed"]["jitter_ms"] = 0.0
+        loss = re.search(r"loss(?:\s+random)?\s+([0-9.]+)%", netem)
+        info["parsed"]["loss_pct"] = float(loss.group(1)) if loss else 0.0
 
-    if info["parsed"]["kind"] != "netem":
-        # we only parse details for netem; others are left with kind only
-        return info
-
-    # delay Xms / delay Xms Yms
-    m_delay = re.search(r"delay\s+([\d\.]+)ms", first_line)
-    if m_delay:
-        info["parsed"]["delay_ms"] = float(m_delay.group(1))
-
-    m_delay2 = re.search(r"delay\s+([\d\.]+)ms\s+([\d\.]+)ms", first_line)
-    if m_delay2:
-        info["parsed"]["jitter_ms"] = float(m_delay2.group(2))
-
-    # loss
-    m_loss = re.search(r"loss\s+([\d\.]+)%", first_line)
-    if m_loss:
-        info["parsed"]["loss_pct"] = float(m_loss.group(1))
-
-    # rate – usually appears in a tbf line
-    for line in raw.splitlines():
-        m_rate = re.search(r"tbf\s+.*rate\s+([\d\.]+)([KMG])bit", line)
-        if m_rate:
-            value = float(m_rate.group(1))
-            unit = m_rate.group(2).upper()
-            if unit == "K":
-                value = value / 1000.0
-            elif unit == "G":
-                value = value * 1000.0
-            info["parsed"]["rate_mbit"] = value
+    for line in lines:
+        rate = re.search(r"\btbf\b.*?\brate\s+([0-9.]+)([kKmMgG]?)bit", line)
+        if rate:
+            scale = {"": 0.000001, "k": 0.001, "m": 1, "g": 1000}
+            info["parsed"]["rate_mbit"] = float(rate.group(1)) * scale[rate.group(2).lower()]
             break
 
     return info
@@ -1630,24 +1621,24 @@ def get_link(cfg: dict, link_id: str):
 
 def interface_counters(ifname: str):
     result = {
-        "rx_bytes": 0,
-        "tx_bytes": 0,
-        "rx_packets": 0,
-        "tx_packets": 0,
-        "rx_dropped": 0,
-        "tx_dropped": 0,
-        "rx_errors": 0,
-        "tx_errors": 0,
+        "rx_bytes": None,
+        "tx_bytes": None,
+        "rx_packets": None,
+        "tx_packets": None,
+        "rx_dropped": None,
+        "tx_dropped": None,
+        "rx_errors": None,
+        "tx_errors": None,
     }
     if not ifname:
         return result
 
-    stats_dir = Path("/sys/class/net") / ifname / "statistics"
+    stats_dir = NET_SYSFS / ifname / "statistics"
     for key in result:
         try:
             result[key] = int((stats_dir / key).read_text().strip())
         except (OSError, ValueError):
-            result[key] = 0
+            result[key] = None
     return result
 
 
@@ -1657,12 +1648,14 @@ def interface_runtime_status(ifname: str):
             "available": False,
             "operstate": "unknown",
             "carrier": None,
+            "ifindex": None,
         }
 
-    base = Path("/sys/class/net") / ifname
+    base = NET_SYSFS / ifname
     available = base.exists()
     operstate = "unknown"
     carrier = None
+    ifindex = None
 
     if available:
         try:
@@ -1674,13 +1667,66 @@ def interface_runtime_status(ifname: str):
         except OSError:
             carrier = None
 
+        try:
+            ifindex = int((base / "ifindex").read_text().strip())
+        except (OSError, ValueError):
+            pass
+
     return {
         "available": available,
         "operstate": operstate,
         "carrier": carrier,
+        "ifindex": ifindex,
     }
 
 
+
+
+def traffic_snapshot(link: dict):
+    """Read directional counters and identify the devices behind a link mapping."""
+    sides = {}
+    identities = []
+    valid = True
+    for side in ("inner", "outer"):
+        ifname = link.get(side)
+        before = interface_runtime_status(ifname)
+        counters = interface_counters(ifname)
+        status = interface_runtime_status(ifname)
+        readable = (
+            status["available"] and status["ifindex"] is not None
+            and before["ifindex"] == status["ifindex"]
+            and all(counters[key] is not None and counters[key] >= 0
+                    for key in ("tx_bytes", "tx_packets"))
+        )
+        valid = valid and readable
+        sides[side] = {"interface": ifname, "counters": counters,
+                       **status, "counters_valid": bool(readable)}
+        identities.append((ifname, status["ifindex"]))
+    return {
+        **sides,
+        "identity": tuple(identities),
+        "valid": bool(valid),
+        "monotonic_timestamp": time.monotonic(),
+        "timestamp": time.time(),
+        "down_bytes": sides["inner"]["counters"]["tx_bytes"],
+        "up_bytes": sides["outer"]["counters"]["tx_bytes"],
+        "down_packets": sides["inner"]["counters"]["tx_packets"],
+        "up_packets": sides["outer"]["counters"]["tx_packets"],
+    }
+
+
+def traffic_rates(current: dict, previous: dict | None):
+    """Unknown intervals need a new baseline, never a manufactured idle rate."""
+    keys = ("down_bytes", "up_bytes", "down_packets", "up_packets")
+    if (not previous or not current["valid"] or not previous["valid"]
+            or current["identity"] != previous["identity"]):
+        return None
+    dt = current["monotonic_timestamp"] - previous["monotonic_timestamp"]
+    if dt <= 0 or any(current[key] < previous[key] for key in keys):
+        return None
+    deltas = [(current[key] - previous[key]) / dt for key in keys]
+    return (deltas[0] * 8 / 1_000_000, deltas[1] * 8 / 1_000_000,
+            deltas[2], deltas[3])
 
 
 # ---------- Persistent telemetry / active measurement ----------
@@ -1712,7 +1758,8 @@ def init_telemetry_db():
                 quality REAL NOT NULL,
                 sla_pass INTEGER NOT NULL,
                 fault TEXT NOT NULL,
-                session_id TEXT
+                session_id TEXT,
+                rate_valid INTEGER NOT NULL DEFAULT 1
             );
             CREATE INDEX IF NOT EXISTS idx_telemetry_link_time
                 ON telemetry_samples(link_id, timestamp);
@@ -1741,6 +1788,13 @@ def init_telemetry_db():
             """
         )
 
+        # Serialize the migration across concurrent workers on first upgrade.
+        conn.execute("BEGIN IMMEDIATE")
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(telemetry_samples)")}
+        if "rate_valid" not in columns:
+            # Preserve existing history; its original sampler did not record validity.
+            conn.execute("ALTER TABLE telemetry_samples ADD COLUMN rate_valid INTEGER NOT NULL DEFAULT 1")
+
 
 def active_session_id():
     with RUNTIME_LOCK:
@@ -1753,34 +1807,20 @@ def collect_telemetry_sample():
         item["id"]: item
         for item in build_link_states(cfg)
     }
-    now = time.time()
     rows = []
+    active_links = set()
 
     for link in cfg.get("wan_links", []):
         link_id = link.get("id") or link.get("bridge")
         state = states.get(link_id)
         if not state:
             continue
-
-        inner = interface_counters(link.get("inner"))
-        outer = interface_counters(link.get("outer"))
-        current = {
-            "timestamp": now,
-            "down_bytes": inner["tx_bytes"],
-            "up_bytes": outer["tx_bytes"],
-            "down_packets": inner["tx_packets"],
-            "up_packets": outer["tx_packets"],
-        }
-        previous = TELEMETRY_PREVIOUS.get(link_id)
-        down_mbps = up_mbps = down_pps = up_pps = 0.0
-        if previous:
-            dt = max(0.001, now - previous["timestamp"])
-            down_mbps = max(0, current["down_bytes"] - previous["down_bytes"]) * 8 / dt / 1_000_000
-            up_mbps = max(0, current["up_bytes"] - previous["up_bytes"]) * 8 / dt / 1_000_000
-            down_pps = max(0, current["down_packets"] - previous["down_packets"]) / dt
-            up_pps = max(0, current["up_packets"] - previous["up_packets"]) / dt
-
+        active_links.add(link_id)
+        current = traffic_snapshot(link)
+        rates = traffic_rates(current, TELEMETRY_PREVIOUS.get(link_id))
+        down_mbps, up_mbps, down_pps, up_pps = rates or (0.0, 0.0, 0.0, 0.0)
         TELEMETRY_PREVIOUS[link_id] = current
+        now = current["timestamp"]
         effective = state.get("effective", {})
         rows.append(
             (
@@ -1797,8 +1837,12 @@ def collect_telemetry_sample():
                 1 if state.get("sla", {}).get("pass") else 0,
                 state.get("fault", "normal"),
                 active_session_id(),
+                int(rates is not None),
             )
         )
+
+    for removed in set(TELEMETRY_PREVIOUS) - active_links:
+        TELEMETRY_PREVIOUS.pop(removed, None)
 
     if rows:
         with telemetry_connect() as conn:
@@ -1806,8 +1850,8 @@ def collect_telemetry_sample():
                 """
                 INSERT INTO telemetry_samples (
                     timestamp, link_id, down_mbps, up_mbps, down_pps, up_pps,
-                    delay_ms, jitter_ms, loss_pct, quality, sla_pass, fault, session_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    delay_ms, jitter_ms, loss_pct, quality, sla_pass, fault, session_id, rate_valid
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 rows,
             )
@@ -1825,16 +1869,16 @@ def telemetry_worker():
     init_telemetry_db()
     next_prune = time.time() + 300
     while not BACKGROUND_STOP.is_set():
-        started = time.time()
+        started = time.monotonic()
         try:
             collect_telemetry_sample()
-            if started >= next_prune:
+            if time.time() >= next_prune:
                 prune_telemetry_history()
-                next_prune = started + 300
+                next_prune = time.time() + 300
         except Exception as exc:
             # Telemetry persistence must never stop the control plane.
             log_event("telemetry", "Persistent telemetry sample failed", error=str(exc)[:240])
-        elapsed = time.time() - started
+        elapsed = time.monotonic() - started
         BACKGROUND_STOP.wait(max(0.2, TELEMETRY_SAMPLE_SECONDS - elapsed))
 
 
@@ -1848,10 +1892,10 @@ def query_telemetry_history(link_id: str, since: float, max_points=1200):
             """
             SELECT
                 AVG(timestamp) AS timestamp,
-                AVG(down_mbps) AS down_mbps,
-                AVG(up_mbps) AS up_mbps,
-                AVG(down_pps) AS down_pps,
-                AVG(up_pps) AS up_pps,
+                AVG(CASE WHEN rate_valid = 1 THEN down_mbps END) AS down_mbps,
+                AVG(CASE WHEN rate_valid = 1 THEN up_mbps END) AS up_mbps,
+                AVG(CASE WHEN rate_valid = 1 THEN down_pps END) AS down_pps,
+                AVG(CASE WHEN rate_valid = 1 THEN up_pps END) AS up_pps,
                 AVG(delay_ms) AS delay_ms,
                 AVG(jitter_ms) AS jitter_ms,
                 AVG(loss_pct) AS loss_pct,
@@ -1878,7 +1922,13 @@ def latest_telemetry_sample(link_id: str):
             """,
             (link_id,),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    sample = dict(row)
+    if not sample["rate_valid"]:
+        for key in ("down_mbps", "up_mbps", "down_pps", "up_pps"):
+            sample[key] = None
+    return sample
 
 
 def query_probe_history(probe_id=None, link_id=None, since=None, limit=1000):
@@ -2045,10 +2095,11 @@ def execute_probe(probe: dict, cfg: dict):
     started = time.perf_counter()
     status = None
     detail = ""
+    sock = None
 
     try:
         if kind == "icmp":
-            cmd = [PING, "-n", "-c", "1", "-W", str(max(1, math.ceil(timeout_s)))]
+            cmd = [PING, "-n", "-c", "1", "-W", str(timeout_s)]
             if ifname:
                 cmd += ["-I", ifname]
             cmd.append(target)
@@ -2057,11 +2108,18 @@ def execute_probe(probe: dict, cfg: dict):
                 capture_output=True,
                 text=True,
                 timeout=timeout_s + 1.5,
+                env={**os.environ, "LC_ALL": "C"},
             )
             if proc.returncode != 0:
                 raise OSError((proc.stderr or proc.stdout or "ICMP probe failed").strip())
-            match = re.search(r"time[=<]([0-9.]+)\s*ms", proc.stdout or "")
-            latency_ms = float(match.group(1)) if match else (time.perf_counter() - started) * 1000
+            match = re.search(r"time=([0-9.]+)\s*ms", proc.stdout or "")
+            if match:
+                latency_ms = float(match.group(1))
+            else:
+                summary = re.search(r"(?:rtt|round-trip).*?=\s*[0-9.]+/([0-9.]+)/", proc.stdout or "")
+                if not summary:
+                    raise OSError("ICMP reply did not contain a measurable RTT.")
+                latency_ms = float(summary.group(1))
             status = "reply"
             detail = "ICMP echo reply"
 
@@ -2122,16 +2180,24 @@ def execute_probe(probe: dict, cfg: dict):
             bind_socket_to_interface(sock, ifname)
             transaction_id = int(time.time_ns() & 0xFFFF)
             packet = dns_query_packet(target, transaction_id)
-            sock.sendto(packet, sockaddr)
-            response, _ = sock.recvfrom(4096)
+            # Connected UDP accepts replies only from the selected resolver.
+            sock.connect(sockaddr)
+            sock.send(packet)
+            response = sock.recv(4096)
             sock.close()
             latency_ms = (time.perf_counter() - started) * 1000
             if len(response) < 12 or int.from_bytes(response[:2], "big") != transaction_id:
                 raise OSError("DNS response did not match the query.")
+            if not response[2] & 0x80 or response[2] & 0x78:
+                raise OSError("DNS packet was not a standard query response.")
+            if response[2] & 0x02:
+                raise OSError("DNS response was truncated; resolution not verified.")
             rcode = response[3] & 0x0F
             if rcode != 0:
                 raise OSError(f"DNS response code {rcode}")
             answers = int.from_bytes(response[6:8], "big")
+            if answers == 0:
+                raise OSError("DNS response contained no answers.")
             status = f"{answers} answer" + ("" if answers == 1 else "s")
             detail = f"DNS via {resolver}"
 
@@ -2163,6 +2229,10 @@ def execute_probe(probe: dict, cfg: dict):
             "detail": str(exc)[:240],
             "source_interface": ifname,
         }
+
+    finally:
+        if sock is not None:
+            sock.close()
 
 
 def record_probe_result(result: dict):
@@ -2357,10 +2427,11 @@ def build_session_report(session_id: str, end_time=None):
             SELECT
                 link_id,
                 COUNT(*) AS samples,
-                AVG(down_mbps) AS avg_down_mbps,
-                MAX(down_mbps) AS max_down_mbps,
-                AVG(up_mbps) AS avg_up_mbps,
-                MAX(up_mbps) AS max_up_mbps,
+                SUM(rate_valid) AS valid_rate_samples,
+                AVG(CASE WHEN rate_valid = 1 THEN down_mbps END) AS avg_down_mbps,
+                MAX(CASE WHEN rate_valid = 1 THEN down_mbps END) AS max_down_mbps,
+                AVG(CASE WHEN rate_valid = 1 THEN up_mbps END) AS avg_up_mbps,
+                MAX(CASE WHEN rate_valid = 1 THEN up_mbps END) AS max_up_mbps,
                 AVG(delay_ms) AS avg_injected_delay_ms,
                 MAX(delay_ms) AS max_injected_delay_ms,
                 AVG(jitter_ms) AS avg_injected_jitter_ms,
@@ -2700,6 +2771,8 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         sample = latest_telemetry_sample(link_id)
         if not sample:
             return False, None, "No telemetry sample yet"
+        if not sample.get("rate_valid", True) or time.time() - sample["timestamp"] > TELEMETRY_SAMPLE_SECONDS * 3:
+            return False, None, "Traffic telemetry unavailable or stale"
         field = condition.get("field", "down_mbps")
         actual = sample.get(field)
         passed = compare_condition_value(
@@ -4290,25 +4363,19 @@ def api_telemetry():
         link_id = link.get("id") or link.get("bridge")
         inner_if = link.get("inner")
         outer_if = link.get("outer")
-        inner = interface_counters(inner_if)
-        outer = interface_counters(outer_if)
-        inner_status = interface_runtime_status(inner_if)
-        outer_status = interface_runtime_status(outer_if)
+        snapshot = traffic_snapshot(link)
+        inner = snapshot["inner"]["counters"]
+        outer = snapshot["outer"]["counters"]
 
         links.append(
             {
                 "id": link_id,
                 "name": link.get("name", "WAN"),
-                "inner": {
-                    "interface": inner_if,
-                    "counters": inner,
-                    **inner_status,
-                },
-                "outer": {
-                    "interface": outer_if,
-                    "counters": outer,
-                    **outer_status,
-                },
+                "timestamp": snapshot["timestamp"],
+                "monotonic_timestamp": snapshot["monotonic_timestamp"],
+                "counters_valid": snapshot["valid"],
+                "inner": snapshot["inner"],
+                "outer": snapshot["outer"],
                 "traffic": {
                     "download": {
                         "interface": inner_if,
@@ -4328,7 +4395,7 @@ def api_telemetry():
                 "fault": ACTIVE_FAULTS.get(link_id, "normal"),
             }
         )
-    return jsonify({"timestamp": time.time(), "links": links})
+    return jsonify({"timestamp": time.time(), "sampler_id": TELEMETRY_SAMPLER_ID, "links": links})
 
 
 @app.route("/api/v1/events")
@@ -4400,6 +4467,8 @@ def prometheus_metrics():
         for direction in ("inner", "outer"):
             ifname = link.get(direction)
             counters = interface_counters(ifname)
+            if counters["rx_bytes"] is None or counters["tx_bytes"] is None:
+                continue
             lines.append(
                 f'netem_interface_rx_bytes{{link="{link_id}",side="{direction}",interface="{ifname}"}} '
                 f'{counters["rx_bytes"]}'

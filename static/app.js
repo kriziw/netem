@@ -1,7 +1,7 @@
 window.NetEmUI = (() => {
   function formatRate(mbps) {
     const value = Number(mbps);
-    if (!Number.isFinite(value)) return "—";
+    if (mbps == null || !Number.isFinite(value)) return "—";
     if (value <= 0) return "0 bit/s";
     if (value >= 1000) return (value / 1000).toFixed(value >= 10000 ? 1 : 2) + " Gbit/s";
     if (value >= 1) return value.toFixed(value >= 100 ? 0 : value >= 10 ? 1 : 2) + " Mbit/s";
@@ -15,7 +15,7 @@ window.NetEmUI = (() => {
 
   function formatPps(pps) {
     const value = Number(pps);
-    if (!Number.isFinite(value)) return "—";
+    if (pps == null || !Number.isFinite(value)) return "—";
     if (value <= 0) return "0 pps";
     if (value >= 1000000) return (value / 1000000).toFixed(value >= 10000000 ? 1 : 2) + " Mpps";
     if (value >= 1000) return (value / 1000).toFixed(value >= 100000 ? 0 : value >= 10000 ? 1 : 2) + " kpps";
@@ -33,7 +33,7 @@ window.NetEmUI = (() => {
 
   function formatNumber(value, digits = 1) {
     const n = Number(value);
-    if (!Number.isFinite(n)) return "—";
+    if (value == null || !Number.isFinite(n)) return "—";
     return n.toFixed(digits);
   }
 
@@ -48,17 +48,28 @@ window.NetEmUI = (() => {
   }
 
   function pathFor(values, width = 100, height = 100, fixedMax = null) {
-    const clean = values.map(v => Number(v)).filter(Number.isFinite);
+    const clean = values.filter(v => v != null).map(Number).filter(Number.isFinite);
     if (!clean.length) return "";
     const max = fixedMax || Math.max(...clean, 1);
     const min = fixedMax ? 0 : Math.min(...clean, 0);
     const span = Math.max(.0001, max - min);
+    return seriesPath(values, width, height - 4, height - 8, min, span);
+  }
+
+  function seriesPath(values, width, baseline, height, min, span) {
+    let connected = false;
     return values.map((raw, index) => {
       const value = Number(raw);
+      if (raw == null || !Number.isFinite(value)) {
+        connected = false;
+        return "";
+      }
       const x = values.length === 1 ? 0 : index * width / (values.length - 1);
-      const y = height - ((value - min) / span) * (height - 8) - 4;
-      return (index ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2);
-    }).join(" ");
+      const y = baseline - ((value - min) / span) * height;
+      const command = connected ? "L" : "M";
+      connected = true;
+      return command + x.toFixed(2) + "," + y.toFixed(2);
+    }).filter(Boolean).join(" ");
   }
 
   function setPath(element, values, fixedMax = null) {
@@ -77,7 +88,7 @@ window.NetEmUI = (() => {
 
   function renderSeries(paths, series, options = {}) {
     const arrays = series.filter(Array.isArray);
-    const flat = arrays.flat().map(Number).filter(Number.isFinite);
+    const flat = arrays.flat().filter(v => v != null).map(Number).filter(Number.isFinite);
     const max = options.fixedMax != null
       ? Number(options.fixedMax)
       : niceMax(Math.max(...flat, 0));
@@ -87,12 +98,7 @@ window.NetEmUI = (() => {
     arrays.forEach((values, index) => {
       const element = paths[index];
       if (!element) return;
-      const path = values.map((raw, pointIndex) => {
-        const value = Number(raw);
-        const x = values.length === 1 ? 0 : pointIndex * 100 / (values.length - 1);
-        const y = 96 - ((value - min) / span) * 92;
-        return (pointIndex ? "L" : "M") + x.toFixed(2) + "," + y.toFixed(2);
-      }).join(" ");
+      const path = seriesPath(values, 100, 96, 92, min, span);
       element.setAttribute("d", path);
     });
 
@@ -123,6 +129,29 @@ window.NetEmUI = (() => {
     }
 
     return {min, max};
+  }
+
+  function trafficRates(link, previous, telemetry, previousTelemetry) {
+    const missing = {down: null, up: null, rxpps: null, txpps: null};
+    if (!previous || !previousTelemetry || telemetry.sampler_id !== previousTelemetry.sampler_id
+        || !link.counters_valid || !previous.counters_valid) return missing;
+    for (const side of ["inner", "outer"]) {
+      if (link[side]?.interface !== previous[side]?.interface
+          || link[side]?.ifindex !== previous[side]?.ifindex) return missing;
+    }
+    const dt = link.monotonic_timestamp - previous.monotonic_timestamp;
+    if (!Number.isFinite(dt) || dt <= 0) return missing;
+    const deltas = [];
+    for (const [direction, counter] of [["download", "bytes"], ["upload", "bytes"],
+                                      ["download", "packets"], ["upload", "packets"]]) {
+      const current = link.traffic?.[direction]?.[counter];
+      const before = previous.traffic?.[direction]?.[counter];
+      if (current == null || before == null || !Number.isFinite(current)
+          || !Number.isFinite(before) || current < before) return missing;
+      deltas.push((current - before) / dt);
+    }
+    return {down: deltas[0] * 8 / 1000000, up: deltas[1] * 8 / 1000000,
+            rxpps: deltas[2], txpps: deltas[3]};
   }
 
   function createLiveClient(options = {}) {
@@ -169,25 +198,7 @@ window.NetEmUI = (() => {
           const currentState = stateById[link.id];
           if (!currentState) return;
 
-          let down = 0, up = 0, rxpps = 0, txpps = 0;
-          if (prev) {
-            const dt = Math.max(.001, telemetry.timestamp - previousTelemetry.timestamp);
-
-            const currentDownBytes = Number(link.traffic?.download?.bytes ?? link.inner?.counters?.tx_bytes ?? 0);
-            const currentUpBytes = Number(link.traffic?.upload?.bytes ?? link.outer?.counters?.tx_bytes ?? 0);
-            const previousDownBytes = Number(prev.traffic?.download?.bytes ?? prev.inner?.counters?.tx_bytes ?? 0);
-            const previousUpBytes = Number(prev.traffic?.upload?.bytes ?? prev.outer?.counters?.tx_bytes ?? 0);
-
-            const currentDownPackets = Number(link.traffic?.download?.packets ?? link.inner?.counters?.tx_packets ?? 0);
-            const currentUpPackets = Number(link.traffic?.upload?.packets ?? link.outer?.counters?.tx_packets ?? 0);
-            const previousDownPackets = Number(prev.traffic?.download?.packets ?? prev.inner?.counters?.tx_packets ?? 0);
-            const previousUpPackets = Number(prev.traffic?.upload?.packets ?? prev.outer?.counters?.tx_packets ?? 0);
-
-            down = Math.max(0, currentDownBytes - previousDownBytes) * 8 / dt / 1000000;
-            up = Math.max(0, currentUpBytes - previousUpBytes) * 8 / dt / 1000000;
-            rxpps = Math.max(0, currentDownPackets - previousDownPackets) / dt;
-            txpps = Math.max(0, currentUpPackets - previousUpPackets) / dt;
-          }
+          const {down, up, rxpps, txpps} = trafficRates(link, prev, telemetry, previousTelemetry);
 
           const h = bucket(link.id);
           push(h.down, down);
@@ -198,7 +209,7 @@ window.NetEmUI = (() => {
           push(h.jitter, Number(currentState.effective?.jitter_ms || 0));
           push(h.loss, Number(currentState.effective?.loss_pct || 0));
           push(h.quality, Number(currentState.quality ?? 100));
-          push(h.timestamps, telemetry.timestamp);
+          push(h.timestamps, link.timestamp);
         });
 
         previousTelemetry = telemetry;
@@ -226,5 +237,5 @@ window.NetEmUI = (() => {
     return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
   }
 
-  return {formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
+  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime};
 })();

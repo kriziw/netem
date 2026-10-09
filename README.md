@@ -481,3 +481,36 @@ If you are looking for the original project or its appliance offering, please re
 The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
 The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI identifies this as a lab-use fork maintained and extended by Kristofer Wohlgang, while crediting Techkarma NetEm as the project foundation.
+
+### Telemetry accuracy and measurement scope
+
+- Download = inner-port TX; upload = outer-port TX. Rates use counter deltas
+  over monotonic elapsed time, in decimal Mbit/s and packets/s. They represent
+  traffic transmitted by the bridge ports, including background/control traffic,
+  rather than a capacity speed test or application goodput. Driver counters and
+  offloads can affect packet granularity; Ethernet FCS and physical-layer overhead
+  are not part of the standard byte counters.
+- The first observation, failed reads, counter resets, interface replacement or
+  remapping, and service restarts establish a baseline. They show missing rates
+  rather than artificial zero traffic or recovery spikes. Idle is a valid zero
+  delta; carrier-down is displayed as failed. Historical averages and session
+  summaries exclude newly recorded invalid rate intervals.
+- `/api/v1/telemetry` includes a process `sampler_id`, per-link monotonic timestamps,
+  interface indices and `counters_valid`. Unreadable raw counters are JSON `null`;
+  Prometheus omits unavailable byte counters. `/api/v1/history` returns `null`
+  rates for buckets without valid measurements. Existing database history is
+  retained, but validity cannot be recovered retrospectively for older samples.
+- Delay, jitter, loss, quality and model SLA are requested impairment-model
+  values, not measured path health and not proof that the kernel applied the
+  configuration. The Command Center labels these explicitly. The tc view reports
+  installed qdisc parameters; active probes report measured response times.
+- ICMP measures echo round-trip time. TCP measures resolution plus connection;
+  HTTP includes resolution, connection, TLS (for HTTPS) and the response status
+  line; DNS measures a resolver transaction. These have different meanings and
+  should not be combined into one latency metric. Automatic probes follow the
+  NetEm host routing table and can use management routing: assigning a WAN ID
+  does not establish that a probe crossed that transparent WAN. Verify the path
+  or use an endpoint behind the SD-WAN appliance for end-user measurements.
+
+Counter semantics: [Linux interface statistics](https://www.kernel.org/doc/html/latest/networking/statistics.html).
+ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping.8.html).
