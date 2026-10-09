@@ -1934,6 +1934,186 @@ def start_background_workers():
         PROBE_THREAD.start()
 
 
+
+def read_session_events(session_id: str):
+    events = []
+    if EVENT_LOG_PATH.exists():
+        try:
+            for line in EVENT_LOG_PATH.read_text().splitlines():
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if event.get("details", {}).get("session_id") == session_id:
+                    events.append(event)
+            return events
+        except OSError:
+            pass
+    return [
+        event for event in EVENT_LOG
+        if event.get("details", {}).get("session_id") == session_id
+    ]
+
+
+def percentile(values, pct):
+    clean = sorted(float(value) for value in values if value is not None)
+    if not clean:
+        return None
+    position = (len(clean) - 1) * float(pct)
+    lower = math.floor(position)
+    upper = math.ceil(position)
+    if lower == upper:
+        return clean[lower]
+    fraction = position - lower
+    return clean[lower] + (clean[upper] - clean[lower]) * fraction
+
+
+def build_session_report(session_id: str, end_time=None):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        return None
+
+    started_at = float(session.get("started_at") or 0)
+    ended_at = float(end_time or session.get("ended_at") or time.time())
+    events = read_session_events(session_id)
+    assertions = []
+    tests = []
+
+    for event in events:
+        details = event.get("details", {})
+        if event.get("kind") == "assertion":
+            assertions.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "message": event.get("message"),
+                    "label": details.get("label"),
+                    "passed": bool(details.get("passed")),
+                    "condition": details.get("condition"),
+                    "observed": details.get("observed"),
+                    "detail": details.get("detail"),
+                    "elapsed_s": details.get("elapsed_s"),
+                }
+            )
+        if (
+            event.get("kind") == "scenario"
+            and details.get("result") is not None
+        ):
+            tests.append(
+                {
+                    "timestamp": event.get("timestamp"),
+                    "scenario_id": details.get("scenario_id"),
+                    "message": event.get("message"),
+                    "result": details.get("result"),
+                    "duration_s": details.get("duration_s"),
+                    "error": details.get("error"),
+                }
+            )
+
+    telemetry = {}
+    probes = {}
+    init_telemetry_db()
+    with telemetry_connect() as conn:
+        telemetry_rows = conn.execute(
+            """
+            SELECT
+                link_id,
+                COUNT(*) AS samples,
+                AVG(down_mbps) AS avg_down_mbps,
+                MAX(down_mbps) AS max_down_mbps,
+                AVG(up_mbps) AS avg_up_mbps,
+                MAX(up_mbps) AS max_up_mbps,
+                AVG(delay_ms) AS avg_injected_delay_ms,
+                MAX(delay_ms) AS max_injected_delay_ms,
+                AVG(jitter_ms) AS avg_injected_jitter_ms,
+                MAX(jitter_ms) AS max_injected_jitter_ms,
+                MAX(loss_pct) AS max_injected_loss_pct,
+                MIN(quality) AS min_quality,
+                SUM(CASE WHEN sla_pass = 0 THEN 1 ELSE 0 END) AS sla_fail_samples
+            FROM telemetry_samples
+            WHERE session_id = ? AND timestamp BETWEEN ? AND ?
+            GROUP BY link_id
+            """,
+            (session_id, started_at, ended_at),
+        ).fetchall()
+        for row in telemetry_rows:
+            telemetry[row["link_id"]] = dict(row)
+
+        probe_rows = conn.execute(
+            """
+            SELECT
+                probe_id,
+                link_id,
+                kind,
+                target,
+                COUNT(*) AS samples,
+                SUM(success) AS success_samples,
+                AVG(CASE WHEN success = 1 THEN latency_ms END) AS avg_latency_ms,
+                MAX(CASE WHEN success = 1 THEN latency_ms END) AS max_latency_ms
+            FROM probe_samples
+            WHERE session_id = ? AND timestamp BETWEEN ? AND ?
+            GROUP BY probe_id, link_id, kind, target
+            """,
+            (session_id, started_at, ended_at),
+        ).fetchall()
+        for row in probe_rows:
+            item = dict(row)
+            latency_rows = conn.execute(
+                """
+                SELECT latency_ms
+                FROM probe_samples
+                WHERE session_id = ? AND probe_id = ? AND success = 1
+                  AND timestamp BETWEEN ? AND ?
+                ORDER BY latency_ms
+                """,
+                (session_id, row["probe_id"], started_at, ended_at),
+            ).fetchall()
+            values = [value["latency_ms"] for value in latency_rows]
+            item["p95_latency_ms"] = percentile(values, 0.95)
+            item["success_rate_pct"] = (
+                100.0 * float(item["success_samples"] or 0) / item["samples"]
+                if item["samples"]
+                else None
+            )
+            probes[row["probe_id"]] = item
+
+    failed_assertions = [item for item in assertions if not item["passed"]]
+    failed_tests = [item for item in tests if item.get("result") == "failed"]
+    if failed_assertions or failed_tests:
+        result = "failed"
+    elif assertions:
+        result = "passed"
+    else:
+        result = "unscored"
+
+    event_counts = {}
+    for event in events:
+        kind = event.get("kind") or "event"
+        event_counts[kind] = event_counts.get(kind, 0) + 1
+
+    return {
+        "session": {
+            "id": session_id,
+            "name": session.get("name"),
+            "started_at": started_at,
+            "ended_at": ended_at,
+            "duration_s": round(max(0, ended_at - started_at), 3),
+            "status": session.get("status"),
+        },
+        "generated_at": time.time(),
+        "result": result,
+        "assertions": assertions,
+        "tests": tests,
+        "telemetry": telemetry,
+        "probes": probes,
+        "event_counts": event_counts,
+        "event_count": len(events),
+        "events": events[-250:],
+    }
+
+
 def get_interface_mtu(ifname: str):
     if not ifname:
         return None
