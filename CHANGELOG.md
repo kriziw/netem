@@ -1,5 +1,36 @@
 # Changelog
 
+## [0.7.0](https://github.com/kriziw/netem/compare/v0.6.0...v0.7.0) (2026-10-09)
+
+
+### Features
+
+* add Traffic Simulator discovery and API-key integration UI ([785ca8e](https://github.com/kriziw/netem/commit/785ca8e15bdbf6c48a62ea47a265413b912d2dc5))
+* add Traffic Simulator discovery API client and secret storage ([15dc4b5](https://github.com/kriziw/netem/commit/15dc4b5a5e7eadc457d65e72f0f440b3368dc8f5))
+* allow scenario assertions against endpoint DEM ([7bc3559](https://github.com/kriziw/netem/commit/7bc3559a7f780923fe6e0c2537d068edfd756fa9))
+* auto-scale low-rate traffic and packet activity ([27dc141](https://github.com/kriziw/netem/commit/27dc141b560cfd108885d284eed67c61296a6127))
+* control corporate workloads and DEM from Tests ([c6c8bcf](https://github.com/kriziw/netem/commit/c6c8bcf3766b0d43ff681384572fd90325166ce9))
+* distinguish idle active failed and no-data WAN traffic ([fe527ef](https://github.com/kriziw/netem/commit/fe527ef717e87f85fcf241b9e2bf65360e226901))
+* expose WAN interface availability and carrier state ([d409f76](https://github.com/kriziw/netem/commit/d409f76ce3e61677e3f3d48a8c5b849df2593251))
+* integrate Corporate Traffic Simulator and endpoint DEM ([eaccd18](https://github.com/kriziw/netem/commit/eaccd1888fff03e738e3f81f2e5be8371dde66e2))
+* integrate Corporate Traffic Simulator control and discovery ([b27b00a](https://github.com/kriziw/netem/commit/b27b00a80adf776f20c348b614a0b09a9f43f9d3))
+* show corporate workload DEM in Command Center ([d3375be](https://github.com/kriziw/netem/commit/d3375be6446554bade7a02f9bc3a1462d0be0e92))
+* validate Traffic Simulator scenario actions ([897f8dc](https://github.com/kriziw/netem/commit/897f8dccbd1f579848ec581fb0b1565445a6a7db))
+
+
+### Bug Fixes
+
+* complete traffic simulator integration and scenario cleanup ([6862419](https://github.com/kriziw/netem/commit/6862419fd49ec649c168902b983cc1caa443cbf0))
+* complete traffic simulator integration and scenario cleanup ([9b42ca6](https://github.com/kriziw/netem/commit/9b42ca6c765ab13157a9aca3059ff76f9f0c14fa))
+* correct traffic telemetry rates and distinguish model values from measurements ([3d09fdb](https://github.com/kriziw/netem/commit/3d09fdb5f744d4c507f3d9955173643819a8105d))
+* make live traffic telemetry accurate across counter and clock changes ([244252d](https://github.com/kriziw/netem/commit/244252d56b4dba2a4e1493e3c49f584137740621))
+
+
+### Maintenance
+
+* merge main and resolve telemetry integration conflicts ([4324afb](https://github.com/kriziw/netem/commit/4324afbe685b35348cf0d3724f1b7d05da0a06be))
+* sync corporate traffic generator with v0.6.0 main ([e5007e0](https://github.com/kriziw/netem/commit/e5007e0109440170c33a078c76af7f88aab97d52))
+
 ## [0.6.0](https://github.com/kriziw/netem/compare/v0.5.0...v0.6.0) (2026-10-09)
 
 
