@@ -83,6 +83,7 @@ def protect_integration_forms():
     if request.method == "POST" and request.endpoint in (
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop",
+        "site_save", "site_apply_wan", "site_run", "site_stop",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -818,6 +819,14 @@ def validate_condition(raw, step_index):
         if traffic_class not in ("realtime", "interactive", "bulk"):
             raise ValueError(f"Step {step_index}: steering class must be realtime, interactive or bulk.")
         condition["class"] = traffic_class
+        if "within" in raw:
+            try:
+                within = float(raw["within"])
+                if not math.isfinite(within) or not 1 <= within <= 600:
+                    raise ValueError()
+            except (TypeError, ValueError):
+                raise ValueError(f"Step {step_index}: steering within must be 1-600 seconds.") from None
+            condition["within"] = within
 
     return condition
 
@@ -3661,13 +3670,19 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         return passed, actual, detail
 
     if kind == "steering":
-        steering = current_diagnosis().get("steering")
+        steering = current_diagnosis(max_age=0).get("steering")
         if not steering:
             return False, None, "Steering needs per-WAN data from Traffic Simulator v0.7 or later"
         item = next((entry for entry in steering["classes"] if entry["class"] == condition.get("class")), None)
         if not item:
             return False, None, "Unknown traffic class"
-        return item["verdict"] in ("steered", "unaffected", "balanced"), item["verdict"], item["text"]
+        passed = item["verdict"] in ("steered", "unaffected", "balanced")
+        within = condition.get("within")
+        if within is not None:
+            late = any(reaction.get("was_used") and reaction.get("steered_after_seconds") is not None
+                       and reaction["steered_after_seconds"] > within for reaction in item.get("reactions", []))
+            passed = passed and not late
+        return passed, item["verdict"], item["text"]
 
     return False, None, "Unsupported condition"
 
@@ -4139,6 +4154,14 @@ DOCS_PAGES = [
         "keywords": "diagnosis bottleneck cause queue drops saturation steering sd-wan failover reaction dem egress snat wan attribution media strict realistic",
     },
     {
+        "slug": "site-scenarios",
+        "title": "Site scenarios",
+        "category": "Operate",
+        "summary": "Model a client site with industry traffic, experience targets, WAN lines and an ordered test plan.",
+        "template": "docs/articles/site-scenarios.html",
+        "keywords": "industry sub-industry site function size criticality manufacturing automotive personas workload failover",
+    },
+    {
         "slug": "tests",
         "title": "Tests",
         "category": "Operate",
@@ -4268,6 +4291,7 @@ def overview():
         quality_curves=QUALITY_CURVES,
         traffic_generator=traffic_generator_snapshot(),
         site_plan=active_site_plan(cfg),
+        site_state=site_plan_snapshot(),
     )
 
 
@@ -5035,6 +5059,8 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
         link_id = link_for_role[test["role"]]
         scenario = {"id": f"site_{test['id']}", "name": test["name"], "steps": validate_scenario_steps(test["steps"])}
         with RUNTIME_LOCK:
+            if SITE_PLAN_STOP.is_set():
+                break
             SITE_PLAN_STATE["current"] = test["id"]
             for item in SITE_PLAN_STATE["tests"]:
                 if item["id"] == test["id"]:
@@ -5045,7 +5071,12 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                 "link_id": link_id, "started_at": time.time(), "step": 0, "step_count": len(scenario["steps"]),
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
             })
-        run_scenario(link_id, scenario)
+        try:
+            run_scenario(link_id, scenario)
+        except Exception as exc:
+            # Keep plan state recoverable even if the scenario runner fails before cleanup.
+            with RUNTIME_LOCK:
+                SCENARIO_STATE.update(active=False, result="failed", error=str(exc)[:240])
         finished = scenario_snapshot()
         result = finished.get("result") or "failed"
         with RUNTIME_LOCK:
@@ -5079,6 +5110,9 @@ def api_site_plan():
 
 @app.route("/site/save", methods=["POST"])
 def site_save():
+    if site_plan_snapshot().get("active") or scenario_snapshot().get("active"):
+        flash("Stop the site plan before changing its profile.", "error")
+        return redirect_after("tests")
     try:
         plan = site_catalog.build_site_plan({key: request.form.get(key) for key in SITE_FIELDS})
     except ValueError as exc:
@@ -5103,8 +5137,12 @@ def site_apply_wan():
     if not plan:
         flash("Save a site first.", "error")
         return redirect_after("tests")
-    if scenario_snapshot().get("active"):
+    if scenario_snapshot().get("active") or site_plan_snapshot().get("active"):
         flash("Wait for the running test to finish before changing WAN lines.", "error")
+        return redirect_after("tests")
+    role_ids = [request.form.get(f"{role}_link") or "" for role in ("primary", "backup")]
+    if len(set(role_ids)) != 2 or any(not get_link(cfg, link_id) for link_id in role_ids):
+        flash("Choose two different existing WANs for primary and backup.", "error")
         return redirect_after("tests")
     presets = get_presets(cfg)
     applied = []
@@ -5136,17 +5174,27 @@ def site_run():
     if not plan:
         flash("Save a site first.", "error")
         return redirect_after("tests")
+    if request.form.get("users"):
+        try:
+            users = int(request.form["users"])
+            if not 1 <= users <= site_catalog.MAX_SIMULATED_USERS:
+                raise ValueError()
+        except (TypeError, ValueError):
+            flash("Simulated users must be an integer from 1 to 5000.", "error")
+            return redirect_after("tests")
+        plan["start"]["users"] = users
+        plan["start"]["spawn_rate"] = max(5.0, round(users / 30.0, 1))
+        plan["tests"] = site_catalog.test_plan(plan["selection"], plan["start"])
     if not traffic_generator_snapshot().get("connected"):
         flash("Site tests need a connected Traffic Simulator.", "error")
         return redirect_after("tests")
     test_id = request.form.get("test_id") or "all"
     tests = [test for test in plan["tests"] if test_id in ("all", test["id"])]
     links = {role: request.form.get(f"{role}_link") or "" for role in ("primary", "backup")}
-    roles = {test["role"] for test in tests}
-    if not tests or any(not get_link(cfg, links[role]) for role in roles):
+    if not tests or any(not get_link(cfg, links[role]) for role in ("primary", "backup")):
         flash("Choose the site test and existing WANs for its primary/backup roles.", "error")
         return redirect_after("tests")
-    if "backup" in roles and links["primary"] == links["backup"]:
+    if links["primary"] == links["backup"]:
         flash("Primary and backup must be different WANs.", "error")
         return redirect_after("tests")
     with RUNTIME_LOCK:
@@ -5191,7 +5239,7 @@ def lab_scenario_start():
         return redirect_after("scenarios")
 
     with RUNTIME_LOCK:
-        if SCENARIO_STATE["active"]:
+        if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
             flash("A scenario is already running.", "error")
             return redirect_after("scenarios")
         SCENARIO_STOP.clear()
@@ -5223,6 +5271,8 @@ def lab_scenario_start():
 
 @app.route("/lab/scenario/stop", methods=["POST"])
 def lab_scenario_stop():
+    if site_plan_snapshot().get("active"):
+        SITE_PLAN_STOP.set()
     if scenario_snapshot().get("active"):
         SCENARIO_STOP.set()
         flash("Scenario stop requested. The configured WAN profile will be restored.", "info")

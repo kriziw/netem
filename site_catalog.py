@@ -345,6 +345,9 @@ def fit_to_simulator(load, catalog_payload):
         warnings.append("The connected Traffic Simulator lacks some site personas ("
                         + ", ".join(sorted(set(load["personas"]) - personas_known))
                         + "); update it for industry applications.")
+    missing_apps = set(load["application_weights"]) - apps_known
+    if missing_apps:
+        warnings.append("Update the simulator for industry applications: " + ", ".join(sorted(missing_apps)) + ".")
     if not personas:
         personas = {"knowledge_worker": load["users"]}
     payload = {
@@ -360,6 +363,9 @@ def fit_to_simulator(load, catalog_payload):
     }
     if catalog_payload is not None and "media_modes" not in catalog_payload:
         payload.pop("media_mode")
+    # Run labels shipped with the industry catalog; older start APIs reject them.
+    if catalog_payload is not None and "ot_telemetry" not in apps_known:
+        payload.pop("label", None)
     return payload, warnings
 
 
@@ -370,7 +376,7 @@ def _dem_assert(label, field, op, value, after=0, window=60, timeout=30):
 
 def _steering_assert(label, traffic_class, within):
     return {"after": 0, "action": "assert", "label": label, "on_fail": "continue", "timeout": within, "poll": 1,
-            "condition": {"type": "steering", "class": traffic_class}}
+            "condition": {"type": "steering", "class": traffic_class, "within": within - STEERING_WINDOW_S}}
 
 
 def test_plan(selection, start_value):
@@ -450,12 +456,25 @@ def build_site_plan(raw_selection, simulator_catalog=None):
     load = workload(selection)
     start, warnings = fit_to_simulator(load, simulator_catalog)
     criticality = CRITICALITY[selection["criticality"]]
+    application_mix = {}
+    persona_catalog = (simulator_catalog or {}).get("personas") or {}
+    persona_total = sum(start["personas"].values())
+    for name, share in start["personas"].items():
+        base = (persona_catalog.get(name) or {}).get("applications") or {}
+        weighted = {app: weight * base.get(app, 0) for app, weight in start["applications"].items()}
+        total = sum(weighted.values())
+        if not total:
+            continue
+        for app, weight in weighted.items():
+            if weight:
+                application_mix[app] = application_mix.get(app, 0) + weight / total * share / persona_total * 100
     return {
         "selection": selection,
         "label": load["label"],
         "workload": load,
         "start": start,
         "warnings": warnings,
+        "application_mix": application_mix,
         "targets": dict(criticality["targets"], media_mode=load["media_mode"]),
         "sla_profile": dict(criticality["sla"], name=load["label"][:80]),
         "wan_lines": wan_lines(selection),

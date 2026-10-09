@@ -1,0 +1,21 @@
+<h2 id="selection">Choose the client site</h2>
+<p>Open <a href="{{ url_for('tests') }}#site-scenario">Tests → Site scenario</a>. Select the industry, sub-industry, site function, size and criticality separately. For example: Manufacturing → Automotive → Manufacturing plant → Large → Mission-critical.</p>
+<p>The preview derives employees, concurrent staff and devices, persona shares, application emphasis, experience targets, typical primary/backup WAN lines and an ordered test plan. These are lab assumptions, not a capacity survey or production SLA. Adjust the simulated user count before running. Counts above 5,000 are capped while retaining the persona proportions.</p>
+<h2 id="save">Activate targets and WAN lines</h2>
+<p><strong>Save as active site</strong> activates the site badge and experience targets in the Command Center. Check the explicit SLA replacement option only if you also want to replace the current model WAN SLA thresholds. Saving a profile does not change WAN lines.</p>
+<p>Choose two different WANs as primary and backup, then use <strong>Apply WAN lines</strong> to replace their saved presets and bandwidth limits with the suggested lines. For a large mission-critical plant the suggestion is DIA 1,000/1,000 Mbit/s plus a diverse DIA 500/500 Mbit/s backup. Carrier diversity must be provided by your actual lab topology.</p>
+<h2 id="targets">Experience targets</h2>
+<table><thead><tr><th>Target</th><th>Standard</th><th>Business-critical</th><th>Mission-critical</th></tr></thead><tbody>
+<tr><td>Experience ≥</td><td>70</td><td>80</td><td>90</td></tr>
+<tr><td>Request success ≥</td><td>98%</td><td>99%</td><td>99.9%</td></tr>
+<tr><td>Interactive P95 ≤</td><td>800 ms</td><td>400 ms</td><td>200 ms</td></tr>
+<tr><td>Steering reaction ≤</td><td>60 s</td><td>30 s</td><td>10 s</td></tr>
+</tbody></table>
+<p>Active site indicators are green when the target is met and red when missed; absent measurements are gray. Interactive P95 excludes large transfers. Steering reaction is measured using a rolling ten-second traffic window, so assertions allow an additional ten seconds to observe the result, while still judging the reported reaction against the chosen target.</p>
+<p>Mission-critical sites use strict voice/video judging. Safety-sensitive sub-industries also use strict judging at lower criticality. OT telemetry remains intolerant of loss in either media mode.</p>
+<h2 id="run">Run and stop</h2>
+<p>Run an individual test or <strong>Run all</strong>. The plan includes baseline, primary brownout and primary outage; business-critical sites add backup outage and primary congestion; mission-critical sites add intermittent primary failures. Congestion is approximated by reducing primary quality to 30%, which also changes delay and loss; it is not a pure bandwidth saturation test.</p>
+<p>Tests start and stop their own site workload, record assertions and per-test results in the activity log, and restore the tested WAN to its saved configuration. <strong>Stop plan &amp; restore</strong> stops the current test and skips remaining tests. A failed assertion marks that test failed; later tests still run. Start a lab session before running to retain evidence in its report.</p>
+<h2 id="compatibility">Simulator and lab requirements</h2>
+<p>Connect the Traffic Simulator under Settings → Integrations. Industry applications and personas require the simulator’s industry-app update. Older catalogs remove unsupported applications/personas and show a warning; their reduced workload is not equivalent to the full industry simulation. Per-WAN steering also requires an updated target and appliance egress addresses mapped to the WANs.</p>
+<p>Before evaluating a customer appliance, validate both paths and the baseline. The site catalog does not configure appliance SD-WAN policies. Generic and custom tests remain available below the site selector.</p>

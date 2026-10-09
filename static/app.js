@@ -322,7 +322,7 @@ window.NetEmUI = (() => {
     return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
   }
 
-  function renderDemSummary(root, dem = {}, connected = true) {
+  function renderDemSummary(root, dem = {}, connected = true, targets = null) {
     if (!root) return;
     const hasData = connected && Number(dem.requests) > 0;
     const number = (value, max = Infinity) => value != null && Number.isFinite(Number(value)) && Number(value) >= 0 && Number(value) <= max ? Number(value) : null;
@@ -330,7 +330,7 @@ window.NetEmUI = (() => {
     const success = hasData ? number(dem.availability_pct, 100) : null;
     // Interactive P95 leaves out large transfers, whose time is mostly bandwidth.
     const interactive = hasData && dem.interactive_p95_ms != null;
-    const latency = hasData ? number(interactive ? dem.interactive_p95_ms : dem.p95_ms) : null;
+    const latency = hasData ? number(targets || interactive ? dem.interactive_p95_ms : dem.p95_ms) : null;
     const scope = interactive ? 'web, collaboration and DNS transactions' : 'timed transactions';
     const blended = interactive && number(dem.p95_ms) != null ? ' All applications including large transfers: '+number(dem.p95_ms).toFixed(0)+' ms.' : '';
     const missing = connected ? 'Waiting for measured transactions.' : 'Simulator unavailable; impact cannot be measured.';
@@ -345,13 +345,22 @@ window.NetEmUI = (() => {
         tone:latency == null ? 'unknown' : latency <= 400 ? 'good' : latency <= 1800 ? 'warn' : 'bad',
         explanation:latency == null ? (hasData ? 'No successful responses with timing data.' : missing) : '95% of successful '+scope+' finished within '+latency.toFixed(0)+' ms. '+(latency <= 400 ? 'Short waits for most requests.' : latency <= 1800 ? 'Users may notice waiting.' : 'Long waits for successful requests.')+blended}
     ];
+    if (targets) {
+      const checks = [[score, targets.experience_min, '≥', ' / 100'], [success, targets.success_min_pct, '≥', '%'], [latency, targets.interactive_p95_max_ms, '≤', ' ms']];
+      rows.forEach((row, index) => {
+        const [actual, target, op, unit] = checks[index];
+        row.tone = actual == null ? 'unknown' : (op === '≥' ? actual >= target : actual <= target) ? 'good' : 'bad';
+        const measurement = index === 0 ? 'The simulator combines request success and application response scores.' : index === 1 ? (100-actual).toFixed(2)+'% of simulated transactions failed.' : '95% of successful interactive application transactions finished within '+actual+' ms.'+blended;
+        row.explanation = actual == null ? (connected ? 'Waiting for the measurements required by the active site.' : missing) : 'Active site target: '+op+' '+target+unit+'. '+(row.tone === 'good' ? 'Target met. ' : 'Target missed. ')+measurement;
+      });
+    }
     for (const row of rows) {
       const element = root.querySelector('[data-dem-indicator="'+row.key+'"]');
       if (!element) continue;
       element.className = 'dem-indicator '+row.tone;
       element.querySelector('[data-dem-symbol]').textContent = {good:'✓',warn:'!',bad:'×',unknown:'—'}[row.tone];
       element.querySelector('[data-dem-value]').textContent = row.value;
-      element.querySelector('[data-dem-status]').textContent = {good:'Good',warn:'Degraded',bad:'Poor',unknown:'No data'}[row.tone];
+      element.querySelector('[data-dem-status]').textContent = (targets ? {good:'Target met',bad:'Target missed',unknown:'No data'} : {good:'Good',warn:'Degraded',bad:'Poor',unknown:'No data'})[row.tone];
       element.querySelector('[data-dem-explanation]').textContent = row.explanation;
     }
     const window = root.querySelector('[data-dem-window]');
@@ -408,7 +417,7 @@ window.NetEmUI = (() => {
   }
 
   // SD-WAN steering: per traffic class, where it goes now (bar segments colored by WAN health) and the verdict.
-  function steeringHtml(steering) {
+  function steeringHtml(steering, targets = null) {
     if (!steering) {
       return '<div class="diag-empty">Steering is assessed once the Traffic Simulator reports per-WAN traffic (v0.7 or later with its target updated) and NetEm can map the appliance WAN addresses.</div>';
     }
@@ -421,10 +430,11 @@ window.NetEmUI = (() => {
       const reactions = (item.reactions || []).filter(reaction => reaction.was_used).map(reaction =>
         reaction.steered_after_seconds != null ? 'moved off '+reaction.label+' ≈'+reaction.steered_after_seconds+' s after it became '+reaction.health
           : reaction.label+' '+reaction.health+' for '+reaction.impaired_for_seconds+' s');
+      const late = targets && (item.reactions || []).some(reaction => reaction.was_used && Number(reaction.steered_after_seconds ?? reaction.impaired_for_seconds) > targets.steering_max_s);
       return '<div class="steer-row"><div class="steer-head"><strong>'+escapeHtml(item.label)+'</strong>'+
-        '<span class="status '+({good:'good', warn:'warn', bad:'bad'}[item.severity] || 'info')+'">'+(verdicts[item.verdict] || escapeHtml(item.verdict))+'</span></div>'+
+        '<span class="status '+(late ? 'bad' : {good:'good', warn:'warn', bad:'bad'}[item.severity] || 'info')+'">'+(late ? 'Steering target missed' : verdicts[item.verdict] || escapeHtml(item.verdict))+'</span></div>'+
         '<div class="steer-bar">'+(segments || '<span class="steer-seg empty" style="width:100%"></span>')+'</div>'+
-        '<div class="steer-text">'+escapeHtml(item.text)+(reactions.length ? '<br>'+reactions.map(escapeHtml).join(' · ') : '')+'</div></div>';
+        '<div class="steer-text">'+escapeHtml(item.text)+(targets ? ' · target ≤ '+targets.steering_max_s+' s' : '')+(reactions.length ? '<br>'+reactions.map(escapeHtml).join(' · ') : '')+'</div></div>';
     }).join('');
   }
 
