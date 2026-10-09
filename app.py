@@ -3031,12 +3031,20 @@ def session_stop():
 
     log_event("session", f"Lab session completed: {session_name}")
 
+    ended_at = time.time()
     with RUNTIME_LOCK:
-        ended_at = time.time()
         for item in reversed(LAB_SESSIONS):
             if item.get("id") == session_id:
                 item["ended_at"] = ended_at
                 item["status"] = "completed"
+                break
+
+    report = build_session_report(session_id, end_time=ended_at)
+
+    with RUNTIME_LOCK:
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["report"] = report
                 break
         ACTIVE_SESSION.update(
             {
@@ -3048,8 +3056,48 @@ def session_stop():
         )
         save_session_history()
 
-    flash(f'Lab session "{session_name}" completed.', "success")
+    flash(
+        f'Lab session "{session_name}" completed'
+        + (
+            f' · result {report["result"].upper()}.'
+            if report
+            else "."
+        ),
+        "success",
+    )
     return redirect_after("sessions")
+
+
+@app.route("/sessions/<session_id>/report")
+def session_report(session_id):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        abort(404)
+    report = session.get("report") or build_session_report(session_id)
+    if not report:
+        abort(404)
+    return render_template(
+        "session_report.html",
+        page="sessions",
+        report=report,
+    )
+
+
+@app.route("/sessions/<session_id>/report.json")
+def session_report_json(session_id):
+    session = next(
+        (item for item in LAB_SESSIONS if item.get("id") == session_id),
+        None,
+    )
+    if not session:
+        abort(404)
+    report = session.get("report") or build_session_report(session_id)
+    if not report:
+        abort(404)
+    return jsonify(report)
 
 
 @app.route("/scenarios")
