@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.9.0](https://github.com/kriziw/netem/compare/v0.8.0...v0.9.0) (2026-10-09)
+
+
+### Features
+
+* clarify throughput charts and add visual DEM impact indicators ([323bc33](https://github.com/kriziw/netem/commit/323bc332c64a296719b78edcae36a671b5d1b56d))
+* clarify WAN charts and show visual DEM impact ([5c9ec62](https://github.com/kriziw/netem/commit/5c9ec626058eda825141dc3fb0d8c6c98a25769d))
+
 ## [0.8.0](https://github.com/kriziw/netem/compare/v0.7.2...v0.8.0) (2026-10-09)
 
 
