@@ -136,3 +136,40 @@ test('generic controls resolve relative URLs despite a named action input', asyn
   assert.equal(sent.options.method,'POST');
   assert.equal(sent.options.body.form,form);
 });
+
+test('diagnosis findings name the WAN and cause, escaped', () => {
+  const html = ui.diagnosisFindingsHtml({findings: [
+    {source:'experience', severity:'bad', title:'Video: <b>21</b> bursts lost packets', detail:'Packet loss 0.4%',
+     wans:[{label:'WAN2', affected:18, causes:['0.1% random loss injected on download']}], unattributed:3, candidates:['WAN2'], hint:null},
+    {source:'experience', severity:'warn', title:'Web waits', detail:'', wans:[{label:'WAN1', affected:4, causes:[]}], unattributed:0, candidates:[],
+     hint:'Check the appliance'}]});
+  assert.match(html, /&lt;b&gt;21&lt;\/b&gt;/);
+  assert.match(html, /WAN2<\/strong> · 18 affected ← 0\.1% random loss/);
+  assert.match(html, /3 without a reply to show the WAN · likely WAN2/);
+  assert.match(html, /WAN1<\/strong> · 4 affected · no NetEm impairment explains it/);
+  assert.match(html, /Check the appliance/);
+  assert.match(ui.diagnosisFindingsHtml({findings: []}), /No problems/);
+});
+
+test('link bottleneck view shows fill level, drops and user experience', () => {
+  const view = ui.linkBottleneck({directions:{down:{util_pct:12, limit_mbit:300, queue_drops_ps:0, injected_drops_ps:0.4},
+    up:{util_pct:96.4, limit_mbit:50, queue_drops_ps:120}}, experience:{availability_pct:82, worst_app:'video', worst_availability_pct:55}, full:['up']});
+  assert.equal(view.down.text, '↓ 12% of 300 Mbit/s');
+  assert.equal(view.up.tone, 'bad');
+  assert.equal(view.drops, 'Queue drops ↓ 0.0/s ↑ 120/s · injected loss 0.4/s');
+  assert.equal(view.experience, 'Users on this WAN: 82.0% success · worst video 55%');
+  assert.equal(view.badge, '↑ full');
+  assert.equal(ui.linkBottleneck({directions:{down:{util_pct:null, limit_mbit:null}}}).down.text, '↓ — · unshaped');
+});
+
+test('steering view colors WAN shares by health and reports reaction time', () => {
+  const html = ui.steeringHtml({classes:[{label:'Voice & video', verdict:'steered', severity:'good', text:'Steered to WAN1',
+    shares:[{label:'WAN1', health:'healthy', pct:95, health_reason:null}, {label:'WAN2', health:'degraded', pct:5, health_reason:'Model SLA fails on loss'}],
+    reactions:[{label:'WAN2', health:'degraded', was_used:true, steered_after_seconds:14, impaired_for_seconds:30}]}]});
+  assert.match(html, /steer-seg healthy" style="width:95%"/);
+  assert.match(html, />WAN1 95%</);
+  assert.match(html, /steer-seg degraded" style="width:5%" title="WAN2 · 5% · degraded \(Model SLA fails on loss\)"><\/span>/);
+  assert.match(html, /Steered away/);
+  assert.match(html, /moved off WAN2 ≈14 s after it became degraded/);
+  assert.match(ui.steeringHtml(null), /v0\.7 or later/);
+});
