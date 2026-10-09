@@ -11,7 +11,7 @@
   </div>
 </div>
 
-<div class="grid grid-3">
+<div class="grid grid-4">
   <section class="card">
     <div class="card-head">
       <div><div class="card-title">NetEm state API</div><div class="card-sub">Current configuration and runtime state</div></div>
@@ -20,7 +20,7 @@
     <div class="card-pad">
       <div class="api-row"><code>GET /api/v1/state</code></div>
       <div class="kv" style="margin-top:12px">
-        <div class="k">Includes</div><div class="v">WAN state, effective impairment, SLA, MTU, scenario, capture, version</div>
+        <div class="k">Includes</div><div class="v">WAN state, effective impairment, SLA, MTU, scenario, session, capture, probes, version</div>
         <div class="k">Purpose</div><div class="v">automation, dashboards, vendor adapters</div>
       </div>
     </div>
@@ -33,10 +33,26 @@
     </div>
     <div class="card-pad">
       <div class="api-row"><code>GET /api/v1/telemetry</code></div>
+      <div class="api-row"><code>GET /api/v1/history?link_id=wan1&amp;minutes=60</code></div>
+      <div class="api-row"><code>GET /api/v1/probes</code></div>
       <div class="api-row"><code>GET /api/v1/events</code></div>
       <div class="kv" style="margin-top:12px">
-        <div class="k">Sampling</div><div class="v">consumer-controlled</div>
-        <div class="k">Current UI</div><div class="v">1.5 second polling</div>
+        <div class="k">Live</div><div class="v">raw/directional counters · browser polling</div>
+        <div class="k">Persistent</div><div class="v">SQLite WAN + probe history · ~2 second sampling</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <div><div class="card-title">Session evidence API</div><div class="card-sub">Completed validation result export</div></div>
+      <span class="status good">Available</span>
+    </div>
+    <div class="card-pad">
+      <div class="api-row"><code>GET /sessions/&lt;id&gt;/report.json</code></div>
+      <div class="kv" style="margin-top:12px">
+        <div class="k">Includes</div><div class="v">assertions · tests · WAN stats · probe stats · events</div>
+        <div class="k">Use</div><div class="v">CI evidence · external reporting · archival</div>
       </div>
     </div>
   </section>
