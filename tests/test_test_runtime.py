@@ -84,11 +84,12 @@ class PauseRouteTests(unittest.TestCase):
         self.client = netem.app.test_client()
 
     def test_pause_and_resume_account_for_held_time(self):
-        with patch.object(netem.time, "time", return_value=500.0):
+        with patch.object(netem.time, "time", return_value=500.0), patch.object(netem.time, "monotonic", return_value=50.0):
             self.client.post("/lab/scenario/pause", data={"return_to": "tests"})
         self.assertTrue(self.state["paused"])
         self.assertTrue(netem.SCENARIO_PAUSE.is_set())
-        with patch.object(netem.time, "time", return_value=530.0):
+        # A wall-clock step during the pause does not change the held time.
+        with patch.object(netem.time, "time", return_value=100.0), patch.object(netem.time, "monotonic", return_value=80.0):
             self.client.post("/lab/scenario/resume", data={"return_to": "overview"})
         self.assertFalse(self.state["paused"])
         self.assertFalse(netem.SCENARIO_PAUSE.is_set())

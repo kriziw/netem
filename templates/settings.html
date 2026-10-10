@@ -73,6 +73,24 @@
     </div>
   </section>
 
+  <section class="card">
+    <div class="card-head"><div><div class="card-title">Time sync</div><div class="card-sub">NetEm, the Traffic Simulator and the target must agree on the time</div></div><span class="status {{ 'good' if clock_status.ok else 'warn' }}">{{ 'In sync' if clock_status.ok else 'Check clocks' }}</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        {% for item in clock_status.components %}
+        <div class="k">{{ item.name }}</div>
+        <div class="v">{% if item.offset_s is none %}{{ item.note or 'clock not compared' }}{% elif item.name == 'NetEm' %}reference clock{% else %}{{ '%+.1f'|format(item.offset_s) }} s{% endif %}{% if item.synchronized is sameas true %} · synchronized{% elif item.synchronized is sameas false %} · <strong>not synchronized</strong>{% endif %}{% if item.ntp is sameas false %} · time sync off{% endif %}{% if item.container %} · uses its Proxmox host's clock{% endif %}</div>
+        {% endfor %}
+      </div>
+      {% for issue in clock_status.issues %}<div class="field-help" style="color:var(--warning)">{{ issue }}</div>{% endfor %}
+      {% if clock_status.simulator_error %}<div class="field-help">Simulator clock not compared: {{ clock_status.simulator_error }}</div>{% endif %}
+      {% set netem_clock = clock_status.components[0] %}
+      {% if netem_clock.ntp is sameas false or netem_clock.synchronized is sameas false %}
+      <form method="post" action="{{ url_for('time_sync_enable') }}" style="margin-top:10px"><button class="btn btn-primary" type="submit">Turn on time sync for NetEm</button></form>
+      {% endif %}
+    </div>
+  </section>
+
   <section class="card future-card">
     <div class="card-head"><div><div class="card-title">System &amp; retention</div><div class="card-sub">Future appliance-level preferences</div></div><span class="future-tag">Planned</span></div>
     <div class="card-pad">
