@@ -71,6 +71,20 @@ class SnapshotTests(unittest.TestCase):
         for address in ("198.51.100.7", "2001:db8::7", "203.0.113.9", "192.0.2.44"):
             self.assertNotIn(address, str(result))
 
+    def test_announced_test_publishes_its_plan_without_addresses(self):
+        announced = {"active": True, "intro": True, "starts_in_s": 4.2, "scenario_name": "Outage", "link_id": "wan1",
+                     "description": "Blackholes 192.0.2.10 while the link stays up.", "intro_clock": 12.5,
+                     "phases": [{"name": "Outage", "planned_s": 60, "what": "Drop to 198.51.100.7", "internal": "x"}],
+                     "checks": ["Voice steered off 203.0.113.9"] + [f"Check {index}" for index in range(8)]}
+        with patch.object(netem, "scenario_snapshot", return_value=announced):
+            scenario = self.snapshot(None)["scenario"]
+        self.assertEqual((scenario["intro"], scenario["starts_in_s"]), (True, 4.2))
+        self.assertEqual(scenario["description"], "Blackholes [address] while the link stays up.")
+        self.assertEqual(scenario["phases"], [{"name": "Outage", "planned_s": 60, "what": "Drop to [address]"}])
+        self.assertEqual(len(scenario["checks"]), 6)
+        self.assertEqual(scenario["checks"][0], "Voice steered off [address]")
+        self.assertNotIn("intro_clock", scenario)
+
     def test_finished_test_report_is_published_only_between_tests(self):
         summary = {"name": "Brownout", "link": "WAN1", "result": "failed", "ended_at": 90, "duration_s": 240,
                    "link_id": "internal-link", "scenario_id": "internal-id",

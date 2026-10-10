@@ -10,7 +10,7 @@
     <div class="actions">
       <form method="post" action="{{ url_for('lab_scenario_resume' if scenario_state.paused else 'lab_scenario_pause') }}" data-run-pause-form>
         <input type="hidden" name="return_to" value="{{ return_to }}">
-        <button class="btn" type="submit" data-run-pause title="Hold the test in its current phase, impairment applied, until resumed">{{ "Resume" if scenario_state.paused else "Pause phase" }}</button>
+        <button class="btn" type="submit" data-run-pause title="Hold the test in its current phase, impairment applied, until resumed" {% if scenario_state.intro %}disabled{% endif %}>{{ "Resume" if scenario_state.paused else "Pause phase" }}</button>
       </form>
       <form method="post" action="{{ url_for('site_stop') if site_state and site_state.active else url_for('lab_scenario_stop') }}">
         <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">

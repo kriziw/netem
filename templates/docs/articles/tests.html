@@ -8,6 +8,9 @@
 <p>Every built-in and site test runs about 3–5 minutes in named phases, for example Baseline → Degradation → Severe brownout → Recovery. That is long enough for SD-WAN health checks to react and for the 60-second experience window to show the effect, and short enough to repeat. Each test card shows its planned length and phases.</p>
 <p>Change <strong>Length</strong> before starting to stretch or shrink a test (1–60 minutes). Delays between stages and DEM measurement windows scale with it; timeouts on conditions do not, so a check still gets the time it needs.</p>
 
+<h2 id="announce">Announced before it starts</h2>
+<p>Every test, including each test of a site test plan, is announced for 5 seconds before it changes anything. The <a href="{{ url_for('documentation_page', slug='showroom') }}#coming-up">showroom</a> shows what is coming: the test, its WAN, what each phase does and what is checked. The running-test bar counts down meanwhile. <strong>Stop &amp; restore</strong> during the announcement cancels the test without touching the WAN; pausing becomes available once the test runs. The test's clock and its report start when the announcement ends.</p>
+
 <h2 id="pause">Pause a phase</h2>
 <p><strong>Pause phase</strong> in the running-test bar on the Command Center or Tests page holds the test in its current phase, with its impairment still applied, until you select <strong>Resume</strong>. Use it to explain what is happening or to let a slow appliance react. Paused time does not count toward the test's length, and the showroom marks the test as paused. Stop &amp; restore still ends the test at any time.</p>
 

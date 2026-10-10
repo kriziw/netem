@@ -30,7 +30,8 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
   let nextPoll, rotate, failed = false;
-  win.setTimeout = (fn, ms) => { if (ms === 2000) nextPoll = fn; return 1; };
+  // The next poll: 1 s while nothing runs, 2 s during a test (5 s is the request timeout).
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) nextPoll = fn; return 1; };
   win.clearTimeout = () => {};
   win.setInterval = (fn, ms) => { if (ms === 12000) rotate = fn; };
   const snapshot = {timestamp: 100, scenario: {active: false}, session: {active: false},
@@ -45,6 +46,10 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   };
   win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
+  // No session and no test: the waiting screen covers the dashboard, which still renders underneath.
+  assert.equal(win.document.body.dataset.mode, 'waiting');
+  assert.equal(win.document.getElementById('waiting').hidden, false);
+  assert.equal(win.document.getElementById('waiting-site').hidden, true);
   assert.equal(win.document.querySelectorAll('.path').length, 2);
   assert.equal(win.document.querySelector('.path h3').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(win.document.querySelectorAll('.path img').length, 0);
@@ -137,7 +142,8 @@ test('screen shows the site, the running test with phases, then the report betwe
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window, doc = win.document;
   let nextPoll;
-  win.setTimeout = (fn, ms) => { if (ms === 2000) nextPoll = fn; return 1; };
+  // The next poll: 1 s while nothing runs, 2 s during a test (5 s is the request timeout).
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) nextPoll = fn; return 1; };
   win.clearTimeout = () => {};
   win.setInterval = () => {};
   const snapshot = {timestamp: 1100, links: [], scenario: running, session: {active: true, name: '<b>PoC</b>', site: 'Automotive plant'},
@@ -228,4 +234,43 @@ test('the live view shows the story, impacts with causes and where traffic goes'
   assert.equal(card.querySelector('[data-field="down"]').textContent, '47');
   assert.equal(card.querySelector('[data-field="carries"]').textContent, 'Carries file transfers');
   dom.window.close();
+});
+
+test('the screen waits before the session, announces each test, then shows the live dashboard', () => {
+  const report = {name: 'Brownout', ended_at: 90};
+  const data = (scenario, session = false, extra = {}) => Object.assign({timestamp: 100, scenario, session: {active: session}}, extra);
+  assert.equal(ui.stageMode(data({active: false})), 'waiting');
+  assert.equal(ui.stageMode(data({active: false}, true)), 'live');
+  assert.equal(ui.stageMode(data({active: true, intro: true})), 'intro');
+  assert.equal(ui.stageMode(data({active: true, intro: true}, true)), 'intro');
+  assert.equal(ui.stageMode(data({active: true})), 'live');
+  // A recent report and a running site plan count as activity; the waiting screen does not hide them.
+  assert.equal(ui.stageMode(data({active: false}, false, {last_test: report})), 'live');
+  assert.equal(ui.stageMode(data({active: false}, false, {last_test: {name: 'Old', ended_at: -5000}})), 'waiting');
+  assert.equal(ui.stageMode(data({active: false}, false, {plan: {active: true}})), 'live');
+  assert.deepEqual(plain(ui.waitingView(null)), {site: false, title: '', meta: ''});
+  assert.equal(ui.waitingView({sub_industry: 'Automotive', function: 'Manufacturing plant', industry: 'Manufacturing',
+    size: 'Large', criticality: 'Business-critical'}).title, 'Automotive · Manufacturing plant');
+});
+
+test('an announced test shows its plan, its checks and a countdown that ticks locally', () => {
+  const scenario = {active: true, intro: true, starts_in_s: 4.2, link: 'WAN1', planned_s: 245,
+    scenario_name: 'Automotive plant: Primary WAN outage', description: 'The primary fails.',
+    phases: [{name: 'Warm-up', planned_s: 60, what: 'Start site workload'}, {name: 'Outage', planned_s: 75, what: null}],
+    checks: ['Voice & video steered within 30 s']};
+  const plan = {active: true, label: 'Automotive plant', tests: [{status: 'passed'}, {status: 'running'}, {status: 'pending'}]};
+  const view = ui.introView(scenario, plan);
+  assert.equal(view.where, 'Coming up on WAN1');
+  assert.equal(view.name, 'Primary WAN outage');
+  assert.equal(view.countdown, '5');
+  assert.deepEqual(plain(view.phases), [{number: 1, name: 'Warm-up', duration: '1:00', what: 'Start site workload'},
+    {number: 2, name: 'Outage', duration: '1:15', what: ''}]);
+  assert.deepEqual(plain(view.checks), ['Voice & video steered within 30 s']);
+  assert.equal(view.meta, 'About 4:05 long · Site test plan · test 2 of 3');
+  // Outside a plan the full name stays; at zero the countdown says the test is starting.
+  const single = ui.introView(Object.assign({}, scenario, {starts_in_s: 0}), {active: false});
+  assert.equal(single.name, 'Automotive plant: Primary WAN outage');
+  assert.equal(single.countdown, 'Now');
+  assert.equal(ui.advance(scenario, 3).starts_in_s.toFixed(1), '1.2');
+  assert.equal(ui.advance(scenario, 9).starts_in_s, 0);
 });

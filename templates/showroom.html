@@ -21,6 +21,23 @@
     <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
   </header>
   <main>
+    <section class="stage" id="stage" aria-live="polite" hidden>
+      <div class="waiting" id="waiting" hidden>
+        <span class="eyebrow">Live SD-WAN demonstration</span>
+        <h2>Waiting for the session to start</h2>
+        <div class="waiting-site" id="waiting-site" hidden><span class="eyebrow">Client site</span><strong id="waiting-site-title"></strong><p id="waiting-site-meta"></p></div>
+        <p class="waiting-note">The live view starts as soon as the operator starts the session or a test.</p>
+      </div>
+      <div class="intro" id="intro" hidden>
+        <div class="intro-head">
+          <div><span class="eyebrow" id="intro-where">Coming up</span><h2 id="intro-name"></h2><p id="intro-description"></p></div>
+          <div class="countdown"><span>Starts in</span><strong id="intro-seconds"></strong></div>
+        </div>
+        <ol class="intro-phases" id="intro-phases"></ol>
+        <div class="intro-checks" id="intro-checks-block"><span class="eyebrow">What we check</span><ul id="intro-checks"></ul></div>
+        <p class="intro-meta" id="intro-meta"></p>
+      </div>
+    </section>
     <section class="site" aria-label="Client site">
       <div class="site-identity">
         <span class="eyebrow">Client site</span>

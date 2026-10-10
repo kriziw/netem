@@ -18,6 +18,12 @@
 <h2 id="brands">MSP and SD-WAN vendor</h2>
 <p>The header shows the MSP brand chosen in <a href="{{ url_for('branding_settings') }}">Settings → Branding</a> and, next to it, the SD-WAN vendor and model under test, so clients see at once who runs the lab and which appliance they are watching.</p>
 
+<h2 id="waiting">Waiting screen</h2>
+<p>With no lab session, no test or site test plan running and no recent report, the showroom shows a calm waiting screen: the MSP brand and the SD-WAN vendor in the header, "Waiting for the session to start" and, when a site is selected, the client site. The live dashboard appears as soon as the operator starts a session or a test.</p>
+
+<h2 id="coming-up">Coming up</h2>
+<p>For 5 seconds before each test starts, the screen shows what is coming: the test and its WAN, a short description, each phase with its length and what it does (for example "Primary blackholed"), the checks it makes, and a countdown. In a site test plan this happens before every test, with the test's place in the plan. Then the live dashboard returns and the test begins. The screen checks for news every second while no test runs, so the announcement appears within a second.</p>
+
 <h2 id="site">Client site band</h2>
 <p>The band at the top shows the site of the running lab session. Without a session it shows the active site profile from <a href="{{ url_for('tests') }}#site-scenario">Tests → Site scenario</a>. Choose the site when starting a session so the screen and the session report name the same client. With no site at all, the screen says so and judges results against the Command Center's lab thresholds.</p>
 
@@ -50,7 +56,7 @@
 <p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "[address]". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
 
 <h2 id="offline">Connection loss</h2>
-<p>The page polls every two seconds. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>
+<p>The page polls every two seconds during a test and every second otherwise. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>
 
 <h2 id="branding">Branding</h2>
 <p>The showroom uses the appliance brand: name, logo, favicon, font and colours. See <a href="{{ url_for('documentation_page', slug='branding') }}">Appliance branding</a>.</p>
