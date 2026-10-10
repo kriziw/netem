@@ -4888,6 +4888,8 @@ def inject_nav():
         "app_version": get_app_version(),
         "help_doc_slug": DOC_HELP_BY_ENDPOINT.get(request.endpoint),
         "global_links": build_link_states(cfg) if cfg.get("wan_links") else [],
+        # Stamped on the page, so it can tell when the lab has moved on.
+        "ui_version": ui_state_version(),
         "global_runtime": {
             "scenario": scenario_snapshot(),
             "session": session_snapshot(),
@@ -6508,6 +6510,38 @@ def lab_capture_download():
         flash("No packet capture is available.", "error")
         return redirect_after("scenarios")
     return send_file(path, as_attachment=True, download_name=Path(path).name)
+
+
+# ---------- Page freshness ----------
+#
+# Open pages follow the lab: they ask for this version every few seconds and refresh in
+# place when it changes. It covers what a page's own live widgets do not: sessions, tests
+# starting, pausing and ending, site plans moving on, impairments, captures, saved settings
+# and the simulator's run. Phase progress and measurements stay with the live widgets.
+# It reads only in-memory state, the config file's timestamp and the cached diagnosis.
+
+def ui_state_version():
+    with RUNTIME_LOCK:
+        parts = [
+            [SCENARIO_STATE.get(key) for key in ("active", "scenario_id", "intro", "paused")],
+            [SITE_PLAN_STATE.get(key) for key in ("active", "current", "result", "finished_at")],
+            [ACTIVE_SESSION.get("active"), ACTIVE_SESSION.get("id")],
+            sorted(ACTIVE_FAULTS.items()),
+            CAPTURE_STATE.get("active"),
+        ]
+    try:
+        parts.append(CONFIG_PATH.stat().st_mtime_ns)
+    except OSError:
+        parts.append(None)
+    simulator = ((DIAGNOSIS_CACHE.get("payload") or {}).get("traffic_generator") or {})
+    status = simulator.get("status") or {}
+    parts.append([simulator.get("connected"), status.get("status"), (status.get("run") or {}).get("run_id")])
+    return hashlib.sha256(json.dumps(parts, default=str).encode()).hexdigest()[:16]
+
+
+@app.route("/api/v1/ui-version")
+def api_ui_version():
+    return jsonify({"version": ui_state_version()})
 
 
 @app.route("/api/v1/state")

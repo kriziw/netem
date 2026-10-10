@@ -491,8 +491,12 @@ document.querySelectorAll('[data-wan-drawer] form').forEach(form => {
         method: "POST", body: new FormData(form), headers: {Accept: "application/json"}
       });
       const result = await response.json();
-      feedback.textContent = (result.messages || []).map(item => item.message).join(" ") || "Action completed.";
-      feedback.classList.toggle("error", !response.ok || !result.ok);
+      const message = (result.messages || []).map(item => item.message).join(" ") || "Action completed.";
+      const ok = response.ok && result.ok;
+      feedback.textContent = message;
+      feedback.classList.toggle("error", !ok);
+      // The WAN cards, top bar and impairment banner follow at once; the result stays as a toast.
+      if (ok) { window.NetEmActions?.notify(message); window.NetEmActions?.refresh(); }
     } catch (_) {
       feedback.textContent = "Could not confirm the change. Check the live status before retrying.";
       feedback.classList.add("error");
