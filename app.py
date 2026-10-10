@@ -6064,13 +6064,151 @@ def active_site_plan(cfg=None, catalog=None):
 
 def site_plan_snapshot():
     with RUNTIME_LOCK:
-        return copy.deepcopy(SITE_PLAN_STATE)
+        state = copy.deepcopy(SITE_PLAN_STATE)
+    # Once a plan has finished, its summary travels with its state (Tests page, API, showroom).
+    state["summary"] = None if state.get("active") else SITE_PLAN_SUMMARY
+    return state
+
+
+# ---------- Site test plan summary ----------
+#
+# After a run sequence, one summary of the whole plan: how many tests passed, one row per
+# test from its own test summary, and insights drawn from those rows.
+
+LAST_PLAN_SUMMARY_PATH = RUNTIME_DIR / "last-plan-summary.json"
+PLAN_INSIGHTS_MAX = 7
+
+
+def load_last_plan_summary():
+    try:
+        summary = json.loads(LAST_PLAN_SUMMARY_PATH.read_text())
+        return summary if isinstance(summary, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+SITE_PLAN_SUMMARY = load_last_plan_summary()
+
+
+def plan_test_row(test, summary):
+    """One test of the plan: its result and what users got, from the test's own summary."""
+    summary = summary or {}
+    phases = [phase for phase in summary.get("phases") or [] if phase.get("experience_score") is not None]
+    base = next((phase for phase in phases if phase["name"] in BASELINE_PHASES), phases[0] if phases else None)
+    low = min(phases, key=lambda phase: phase["experience_score"]) if phases else None
+    successes = [value for phase in phases for value in (phase.get("worst_success_pct"), phase.get("success_pct")) if value is not None]
+    p95s = [phase["interactive_p95_ms"] for phase in phases if phase.get("interactive_p95_ms") is not None]
+    moved = {item["traffic_class"] for item in summary.get("remediation") or []}
+    stuck = []
+    for phase in summary.get("phases") or []:
+        for label, verdict in (phase.get("steering") or {}).items():
+            if verdict in ("stuck", "stuck_impact") and label not in moved and all(item["traffic_class"] != label for item in stuck):
+                stuck.append({"traffic_class": label, "phase": phase["name"]})
+    checks = summary.get("assertions") or {}
+    return {
+        "id": test.get("id"), "name": test.get("name"), "role": test.get("role"), "result": test.get("status"),
+        "link": summary.get("link"), "duration_s": summary.get("duration_s"), "measured": bool(phases),
+        "checks": {"passed": checks.get("passed", 0), "total": checks.get("total", 0)},
+        "missed": [item.get("label") for item in checks.get("items") or [] if not item.get("passed")],
+        "experience": base["experience_score"] if base else None,
+        "success": base.get("success_pct") if base else None,
+        "experience_low": low["experience_score"] if low else None, "low_phase": low["name"] if low else None,
+        "success_low": min(successes) if successes else None, "p95_max": max(p95s) if p95s else None,
+        "moved": [{key: item.get(key) for key in ("traffic_class", "wan", "seconds", "within_target")}
+                  for item in summary.get("remediation") or []],
+        "stuck": stuck,
+    }
+
+
+def plan_insights(rows, targets):
+    """What the run showed, in a few sentences, each with a tone: pass, warn or fail."""
+    insights = []
+    experience_min = targets.get("experience_min")
+    steering_max = targets.get("steering_max_s")
+    measured = [row for row in rows if row["measured"]]
+    base = next((row for row in measured if row["id"] == "baseline"), measured[0] if measured else None)
+    if base and base["experience"] is not None:
+        healthy = experience_min is None or base["experience"] >= experience_min
+        success = f" and {base['success']:.2f}% of requests succeeded" if base["success"] is not None else ""
+        insights.append({"tone": "pass" if healthy else "warn",
+                         "text": f"With both WANs healthy, experience was {base['experience']:.0f}{success}."})
+    moves = {}
+    for row in rows:
+        for item in row["moved"]:
+            moves.setdefault(item["traffic_class"], []).append(item)
+    for label, items in moves.items():
+        seconds = sorted(item["seconds"] for item in items)
+        span = f"{seconds[0]} s" if seconds[0] == seconds[-1] else f"{seconds[0]}–{seconds[-1]} s"
+        missed = any(item["within_target"] is False for item in items)
+        target = "" if steering_max is None else (f", slower than the {steering_max} s target" if missed
+                                                  else f", within the {steering_max} s target")
+        insights.append({"tone": "fail" if missed else "pass",
+                         "text": f"The appliance moved {label[:1].lower() + label[1:]} off an impaired WAN in {span}{target}."})
+    for row in rows:
+        for item in row["stuck"]:
+            insights.append({"tone": "warn",
+                             "text": f"{item['traffic_class']} stayed on an impaired WAN during {item['phase']} ({row['name']})."})
+    lows = [row for row in measured if row["experience_low"] is not None]
+    if lows:
+        low = min(lows, key=lambda row: row["experience_low"])
+        if experience_min is not None and low["experience_low"] >= experience_min:
+            insights.append({"tone": "pass", "text": f"Experience stayed at or above the {experience_min} target in every test."})
+        else:
+            below = f", below the {experience_min} target" if experience_min is not None else ""
+            insights.append({"tone": "warn",
+                             "text": f"Lowest experience: {low['experience_low']:.0f} during {low['low_phase']} in {low['name']}{below}."})
+    unnoticed = [row["name"] for row in measured if row["id"] != "baseline" and row["result"] == "passed" and
+                 experience_min is not None and row["experience_low"] is not None and row["experience_low"] >= experience_min]
+    if unnoticed:
+        insights.append({"tone": "pass", "text": "Users did not notice: " + ", ".join(unnoticed) + "."})
+    for row in rows:
+        if row["missed"]:
+            insights.append({"tone": "fail", "text": f"{row['name']} missed: " + "; ".join(row["missed"][:3]) + "."})
+        elif not row["measured"] and row["result"] not in ("skipped", "pending"):
+            insights.append({"tone": "warn", "text": f"No simulated user traffic was measured in {row['name']}."})
+    # What needs attention comes first.
+    order = {"fail": 0, "warn": 1, "pass": 2}
+    return sorted(insights, key=lambda item: order[item["tone"]])[:PLAN_INSIGHTS_MAX]
+
+
+def summarize_plan(label, targets, tests, summaries, result, started_at, ended_at):
+    rows = [plan_test_row(test, summaries.get(test.get("id"))) for test in tests]
+    passed = sum(1 for row in rows if row["result"] == "passed")
+    ran = [row for row in rows if row["result"] not in ("skipped", "pending")]
+    title = f"{passed} of {len(rows)} test{'s' if len(rows) != 1 else ''} passed"
+    if result == "stopped":
+        title += f" · stopped after {len(ran)}"
+    return {
+        "label": label, "result": result, "title": title, "started_at": started_at, "ended_at": ended_at,
+        "duration_s": round(ended_at - started_at) if started_at else None,
+        "checks": {"passed": sum(row["checks"]["passed"] for row in rows), "total": sum(row["checks"]["total"] for row in rows)},
+        "targets": {key: targets.get(key) for key in ("experience_min", "success_min_pct", "interactive_p95_max_ms", "steering_max_s")},
+        "tests": rows, "insights": plan_insights(rows, targets),
+    }
+
+
+def finish_plan_summary(plan, summaries, result):
+    """Keep the finished plan's summary, on disk too, for the showroom, the Tests page and the event log."""
+    global SITE_PLAN_SUMMARY
+    with RUNTIME_LOCK:
+        state = copy.deepcopy(SITE_PLAN_STATE)
+    summary = summarize_plan(plan.get("label"), plan.get("targets") or {}, state.get("tests") or [], summaries, result,
+                             state.get("started_at"), state.get("finished_at") or time.time())
+    SITE_PLAN_SUMMARY = summary
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        LAST_PLAN_SUMMARY_PATH.write_text(json.dumps(summary))
+    except OSError:
+        pass
+    log_event("site-test", f"Site test plan summary · {summary['title']}", summary=summary)
+    return summary
 
 
 def run_site_plan(plan: dict, tests: list, link_for_role: dict):
     """Run site tests one after another; each is an ordinary scenario on its WAN."""
     log_event("site-test", f"Site test plan started · {plan['label']}", tests=[test["id"] for test in tests])
     results = []
+    summaries = {}
     for test in tests:
         if SITE_PLAN_STOP.is_set():
             break
@@ -6091,12 +6229,16 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                 "step_count": len(scenario["steps"]),
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
             })
+        before = LAST_TEST_SUMMARY
         try:
             run_scenario(link_id, scenario, TEST_INTRO_S)
         except Exception as exc:
             # Keep plan state recoverable even if the scenario runner fails before cleanup.
             with RUNTIME_LOCK:
                 SCENARIO_STATE.update(active=False, result="failed", error=str(exc)[:240])
+        # The test's own summary, when it ran far enough to record one.
+        if LAST_TEST_SUMMARY is not before and (LAST_TEST_SUMMARY or {}).get("scenario_id") == scenario["id"]:
+            summaries[test["id"]] = LAST_TEST_SUMMARY
         finished = scenario_snapshot()
         result = finished.get("result") or "failed"
         with RUNTIME_LOCK:
@@ -6117,6 +6259,10 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
         SITE_PLAN_STATE.update(active=False, current=None, finished_at=time.time(), result=overall)
     SITE_PLAN_STOP.clear()
     log_event("site-test", f"Site test plan finished — {overall.upper()} · {plan['label']}", result=overall)
+    try:
+        finish_plan_summary(plan, summaries, overall)
+    except Exception as exc:
+        log_event("site-test", "Site test plan summary could not be built", error=str(exc)[:240])
 
 
 @app.route("/api/v1/site-plan")
@@ -7303,6 +7449,9 @@ def showroom_snapshot():
             checks=[showroom_text(check, 120) for check in (scenario.get("checks") or [])[:6]]),
         # Once a test ends, its summary stays on screen until the next one starts.
         "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") else None,
+        # After a run sequence, the whole plan's results and insights.
+        "plan_summary": (showroom_plan_summary(SITE_PLAN_SUMMARY, now, lab_session)
+                         if not scenario.get("active") and not plan.get("active") else None),
         "session": {"active": bool(lab_session.get("active")), "name": lab_session.get("name"),
                     "site": (session_site or {}).get("label")},
         "site": showroom_site(site_plan),
@@ -7327,6 +7476,30 @@ def showroom_text(value, limit=240):
 def showroom_link_label(cfg, link_id):
     link = get_link(cfg, link_id or "") if link_id else None
     return (link or {}).get("name") or None
+
+
+# A finished plan's results stay on the showroom this long, unless a new session starts.
+SHOWROOM_PLAN_SUMMARY_S = 1800
+
+
+def showroom_plan_summary(summary, now, session):
+    """The finished site test plan without internal identifiers or addresses, while it is current."""
+    ended = (summary or {}).get("ended_at")
+    if not isinstance(ended, (int, float)) or not 0 <= now - ended < SHOWROOM_PLAN_SUMMARY_S:
+        return None
+    if session.get("active") and (session.get("started_at") or 0) > ended:
+        return None
+    return {
+        "label": showroom_text(summary.get("label")), "result": summary.get("result"),
+        "title": showroom_text(summary.get("title")), "ended_at": ended, "duration_s": summary.get("duration_s"),
+        "checks": summary.get("checks"), "targets": summary.get("targets"),
+        "tests": [{key: row.get(key) for key in ("name", "role", "result", "link", "measured", "checks", "experience",
+                                                  "experience_low", "low_phase", "success_low", "p95_max")}
+                  | {"moved": [{key: item.get(key) for key in ("traffic_class", "wan", "seconds", "within_target")}
+                               for item in row.get("moved") or []]}
+                  for row in summary.get("tests") or []],
+        "insights": [{"tone": item.get("tone"), "text": showroom_text(item.get("text"))} for item in summary.get("insights") or []],
+    }
 
 
 def showroom_summary(summary):

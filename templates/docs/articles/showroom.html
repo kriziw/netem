@@ -52,6 +52,15 @@
 </ul>
 <p>The same summary appears on the Tests page and, for tests run in a lab session, in the session report.</p>
 
+<h2 id="plan-results">Run sequence results</h2>
+<p>When a site test plan with <strong>Run all</strong> finishes, or is stopped, its results fill the screen for 30 minutes, until the next test starts or a new session begins:</p>
+<ul>
+<li>the verdict, for example "4 of 5 tests passed", the result, the total time and how many checks were met;</li>
+<li>one row per test: its result, WAN and checks, experience at baseline and its lowest point with the phase, the lowest request success, the slowest interactive response, and which traffic the appliance moved and how fast;</li>
+<li>what the run showed, up to seven sentences led by what needs attention: failover slower than the target, traffic left on an impaired WAN, missed checks, the lowest experience, then baseline experience, failover within the target and the tests users did not notice.</li>
+</ul>
+<p>The same verdict and sentences appear under the plan on the Tests page.</p>
+
 <h2 id="security">What it publishes</h2>
 <p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "[address]". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
 
