@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.15.0](https://github.com/kriziw/netem/compare/v0.14.0...v0.15.0) (2026-10-10)
+
+
+### Features
+
+* brand menu with private MSP brands and the SD-WAN vendor under test ([#51](https://github.com/kriziw/netem/issues/51)) ([614bf3c](https://github.com/kriziw/netem/commit/614bf3c38778f93678a57f81910094ca20250a96))
+* calmer showroom that tells what users get, why, and where traffic goes ([#50](https://github.com/kriziw/netem/issues/50)) ([e56fbb3](https://github.com/kriziw/netem/commit/e56fbb31c23daa269a60a975a28fc6e3c88dd210))
+
 ## [0.14.0](https://github.com/kriziw/netem/compare/v0.13.0...v0.14.0) (2026-10-10)
 
 
