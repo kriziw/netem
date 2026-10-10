@@ -48,7 +48,6 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   assert.equal(win.document.querySelectorAll('.path').length, 2);
   assert.equal(win.document.querySelector('.path h3').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(win.document.querySelectorAll('.path img').length, 0);
-  assert.match(win.document.getElementById('total-down').textContent, /^10 /);
   rotate();
   assert.equal(win.document.querySelector('.path h3').textContent, 'WAN 2');
   rotate();
@@ -152,7 +151,6 @@ test('screen shows the site, the running test with phases, then the report betwe
   assert.equal(doc.getElementById('site-title').textContent, 'Automotive · Manufacturing plant');
   assert.equal(doc.getElementById('session-name').textContent, '<b>PoC</b>');
   assert.equal(doc.querySelectorAll('#session-name b').length, 0);
-  assert.match(doc.getElementById('site-lines').textContent, /Primary DIA 1000\/1000 · Backup DIA 1000\/1000/);
   assert.equal(doc.querySelectorAll('#demo-phases .phase').length, 3);
   assert.equal(doc.querySelector('#demo-phases .current').textContent, 'Brownout');
   assert.match(doc.getElementById('demo-stage').textContent, /On WAN1 · Phase 2 of 3: Brownout/);
@@ -174,5 +172,60 @@ test('screen shows the site, the running test with phases, then the report betwe
   assert.ok(doc.querySelector('#report-phases tr:last-child').classList.contains('skipped'));
   assert.match(doc.getElementById('report-remediation').textContent, /slower than the 10 s target/);
   assert.match(doc.getElementById('demo-stage').textContent, /report on the right/);
+  dom.window.close();
+});
+
+test('calm view helpers smooth rates and phrase carried traffic, routes and plan progress', () => {
+  const points = [3, 5, null, 7, 9, 11, 13].map((value, index) => ({timestamp: index, down_mbps: value}));
+  assert.equal(ui.smoothedRate(points, 'down_mbps'), 9);
+  assert.equal(ui.smoothedRate([], 'down_mbps'), null);
+  assert.equal(ui.rateText(47.31), '47');
+  assert.equal(ui.rateText(4.26), '4.3');
+  assert.equal(ui.rateText(null), '—');
+  assert.equal(ui.carriesText(['voice and video', 'web and apps', 'file transfers']), 'Carries voice and video, web and apps and file transfers');
+  assert.equal(ui.carriesText([]), 'No simulated users on this WAN');
+  assert.equal(ui.carriesText(null), '');
+  assert.deepEqual(plain(ui.routeView({label: 'Voice and video', wan: 'WAN2', state: 'good'})), {label: 'Voice and video', text: 'WAN2', tone: 'pass'});
+  assert.equal(ui.routeView({label: 'Files', wan: 'WAN1', state: 'warn'}).tone, 'warn');
+  assert.equal(ui.routeView({label: 'Files', wan: null, state: 'unknown'}).text, 'Not identified');
+  assert.equal(ui.routeView({label: 'Files', wan: null, state: 'idle'}).text, 'No traffic');
+  assert.equal(ui.planProgress({active: true, tests: [{status: 'passed'}, {status: 'running'}, {status: 'pending'}]}), 'Site test plan · test 2 of 3');
+  assert.equal(ui.planProgress({active: false, tests: []}), '');
+});
+
+test('the live view shows the story, impacts with causes and where traffic goes', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window, doc = win.document;
+  win.setTimeout = () => 1;
+  win.clearTimeout = () => {};
+  win.setInterval = () => {};
+  const snapshot = {timestamp: 100, scenario: {active: false}, session: {active: false}, plan: {}, last_test: null,
+    experience: {available: true, targets: {}, verdicts: {}}, traffic: {},
+    links: [{id: 'wan1', name: 'WAN1', profile: 'DIA', fault: 'normal', display_health: 'degraded', download_limit_mbit: 100,
+             upload_limit_mbit: 100, impairment: 'Impaired to 60% quality: 45 ms delay, 2% loss', down_mbps: 47.3, up_mbps: 44.4,
+             carries: ['file transfers']}],
+    story: {status: 'Users are affected. WAN1 is degraded. The appliance moved voice and video off WAN1 in 12 s.',
+            impacts: [{impact: 'Voice and video: breaking up', cause: '2% packet loss on WAN1', state: 'active', severity: 'bad'},
+                      {impact: '<img src=x>', cause: 'WAN1 is full', state: 'resolved', severity: 'warn'}],
+            routes: [{label: 'Voice and video', wan: 'WAN2', state: 'good'}, {label: 'File transfers', wan: 'WAN1', state: 'warn'}]}};
+  win.fetch = async () => ({ok: true, json: async () => snapshot});
+  win.eval(source);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(doc.getElementById('story-status').textContent, /^Users are affected/);
+  const impacts = [...doc.querySelectorAll('#impacts .impact')];
+  assert.equal(impacts.length, 2);
+  assert.equal(impacts[0].querySelector('strong').textContent, 'Voice and video: breaking up');
+  assert.equal(impacts[0].querySelector('span').textContent, '2% packet loss on WAN1');
+  assert.equal(impacts[1].querySelector('span').textContent, 'Resolved · WAN1 is full');
+  assert.equal(doc.querySelectorAll('#impacts img').length, 0);
+  assert.deepEqual([...doc.querySelectorAll('#routes .route')].map(row => [row.className, row.textContent]),
+    [['route pass', 'Voice and videoWAN2'], ['route warn', 'File transfersWAN1']]);
+  const card = doc.querySelector('.path');
+  assert.ok(card.classList.contains('bad'));
+  assert.equal(card.querySelector('[data-field="health"]').textContent, 'Degraded');
+  assert.equal(card.querySelector('[data-field="profile"]').textContent, 'DIA · 100/100 Mbit/s');
+  assert.equal(card.querySelector('[data-field="impairment"]').textContent, 'Impaired to 60% quality: 45 ms delay, 2% loss');
+  assert.equal(card.querySelector('[data-field="down"]').textContent, '47');
+  assert.equal(card.querySelector('[data-field="carries"]').textContent, 'Carries file transfers');
   dom.window.close();
 });

@@ -2678,7 +2678,7 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
             # A full queue is the saturation's effect, so the saturation is explained with it.
             explained.update((link_id, "saturated", cause["direction"]) for cause in causes if cause["kind"] == "queue_drops")
             wans.append({"link_id": link_id, "label": by_link[link_id]["label"], "affected": affected,
-                         "causes": [cause["text"] for cause in causes]})
+                         "causes": [cause["text"] for cause in causes], "cause_kinds": [cause["kind"] for cause in causes]})
         candidates = [item["label"] for item in signals if matching(item["link_id"])] if unattributed else []
         hint = None
         if symptom.get("id") == "http_errors":
@@ -2689,6 +2689,7 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
             "source": "experience", "id": symptom.get("id"), "severity": symptom.get("severity", "warn"),
             "title": symptom.get("title", ""), "detail": symptom.get("detail", ""), "wans": wans,
             "unattributed": unattributed, "candidates": candidates, "hint": hint,
+            "applications": list(symptom.get("applications") or []),
         })
     for item in signals:
         for cause in item["causes"]:
@@ -7046,8 +7047,10 @@ def showroom_snapshot():
             "worst_app_success_pct": experience.get("worst_availability_pct"),
         })
     plan = site_plan_snapshot()
+    outcome = showroom_outcome(diagnosis, site_plan)
+    story = showroom_story(diagnosis, links, outcome)
     return {
-        "timestamp": now, "links": links,
+        "timestamp": now, "links": links, "story": story,
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phases", "phase_index", "phase",
             "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase")},
@@ -7060,7 +7063,7 @@ def showroom_snapshot():
         "plan": {"active": plan.get("active"), "label": plan.get("label"), "result": plan.get("result"),
                  "tests": [{"name": test.get("name"), "role": test.get("role"), "status": test.get("status")}
                            for test in plan.get("tests") or []]},
-        **showroom_outcome(diagnosis, site_plan),
+        **outcome,
     }
 
 
@@ -7192,6 +7195,172 @@ def showroom_outcome(diagnosis, site_plan):
                           for reaction in item.get("reactions") or [] if reaction.get("was_used")],
         } for item in steering.get("classes") or []],
     }
+
+
+# ---------- Showroom story ----------
+#
+# A live audience reads the showroom from across the room. It gets one stable sentence about
+# the site, the user impacts that persist with their cause in plain words, and where each kind
+# of traffic goes. A change shows only once it has lasted a few seconds; an impact that ends
+# stays a while, marked resolved, so the audience can follow what happened.
+
+STORY_SETTLE_S = 8
+STORY_HOLD_S = 30
+STORY_MAX_IMPACTS = 3
+SHOWROOM_STATE = {"values": {}, "impacts": {}}
+STORY_LOCK = threading.Lock()
+CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business apps", "bulk": "File transfers"}
+CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
+IMPACT_VERBS = {"media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
+                "connection_errors": "cannot connect", "slow_wait": "responding slowly",
+                "bandwidth_bound": "slowed by a full line", "http_errors": "getting errors"}
+HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "degraded": "Degraded", "failed": "Down"}
+FAULT_WORDS = {"blackhole": "Outage injected", "downstream_blackhole": "Download outage injected",
+               "upstream_blackhole": "Upload outage injected"}
+
+
+def settled(key, value, now, settle=STORY_SETTLE_S):
+    """The value to show for key: a new value replaces the shown one once it has lasted `settle` seconds."""
+    entry = SHOWROOM_STATE["values"].setdefault(key, {"shown": value, "candidate": value, "since": now})
+    if value != entry["candidate"]:
+        entry.update(candidate=value, since=now)
+    if value != entry["shown"] and now - entry["since"] >= settle:
+        entry["shown"] = value
+    return entry["shown"]
+
+
+def impairment_text(link):
+    """What NetEm is doing to this WAN, in words an audience understands."""
+    fault = link.get("fault") or "normal"
+    if fault != "normal":
+        return FAULT_WORDS.get(fault, fault.replace("_", " ").capitalize() + " injected")
+    quality = link.get("quality")
+    if quality is None or quality >= 100:
+        return "No impairment"
+    parts = [f"{link['delay_ms']:g} ms delay" if link.get("delay_ms") else None,
+             f"{link['loss_pct']:g}% loss" if link.get("loss_pct") else None]
+    parts = [part for part in parts if part]
+    return f"Impaired to {quality:g}% quality" + (": " + ", ".join(parts) if parts else "")
+
+
+def cause_text(kinds, link):
+    name = link["name"]
+    if "fault" in kinds:
+        return f"{name} is down"
+    if "injected_loss" in kinds:
+        return f"{link.get('loss_pct') or 0:g}% packet loss on {name}"
+    if "queue_drops" in kinds or "saturated" in kinds:
+        return f"{name} is full"
+    if "injected_delay" in kinds:
+        return f"{link.get('delay_ms') or 0:g} ms delay on {name}"
+    return None
+
+
+def current_impacts(diagnosis, by_id, by_label):
+    """User impacts in this diagnosis, keyed so the same impact keeps its identity while its numbers change."""
+    impacts = {}
+    for finding in diagnosis.get("findings") or []:
+        verb = IMPACT_VERBS.get(finding.get("id"))
+        if finding.get("source") != "experience" or not verb:
+            continue
+        # Transfers limited by the line speed are expected in a shaped lab unless users suffer badly.
+        if finding["id"] == "bandwidth_bound" and finding.get("severity") != "bad":
+            continue
+        classes = sorted({DEFAULT_APP_CLASSES.get(app) for app in finding.get("applications") or []} - {None},
+                         key=list(CLASS_NAMES).index)
+        subject = ", ".join(CLASS_NAMES[item] for item in classes) if classes else "Users"
+        wans = [wan for wan in finding.get("wans") or [] if wan.get("affected")]
+        top = wans[0] if wans else None
+        link = by_id.get(top["link_id"]) if top else None
+        if not top:
+            cause = "the WAN that carried it is not identified"
+        else:
+            cause = (cause_text(top.get("cause_kinds") or [], link) if link else None) or \
+                f"not explained by {top['label']}: check the appliance"
+        impacts[("experience", finding["id"], subject)] = {
+            "impact": f"{subject}: {verb}", "cause": cause, "wan": top["label"] if top else None,
+            "severity": "bad" if finding.get("severity") == "bad" else "warn"}
+    for item in (diagnosis.get("steering") or {}).get("classes") or []:
+        if item.get("verdict") != "stuck_impact":
+            continue
+        impaired = next((share for share in item.get("shares") or []
+                         if share.get("pct") and share.get("health") not in (None, "healthy")), None)
+        name = CLASS_NAMES.get(item.get("class"), item.get("label"))
+        impacts[("steering", item.get("class"))] = {
+            "impact": f"{name}: kept on an impaired WAN",
+            "cause": f"the appliance did not move it off {impaired['label']}" if impaired else "the appliance did not move it",
+            "wan": (impaired or {}).get("label"), "severity": "bad"}
+    return impacts
+
+
+def showroom_story(diagnosis, links, outcome, now=None):
+    """Stable presentation state: health per WAN, impacts with causes, where traffic goes, one status line."""
+    now = time.monotonic() if now is None else now
+    by_id = {link["id"]: link for link in links}
+    by_label = {link["name"]: link for link in links}
+    classes = (diagnosis.get("steering") or {}).get("classes") or []
+    with STORY_LOCK:
+        for link in links:
+            raw = "failed" if link.get("fault", "normal") != "normal" else (
+                link.get("health") or ("healthy" if link.get("sla_pass") else "degraded"))
+            # An outage shows at once; other health changes once they have lasted a few seconds.
+            link["display_health"] = settled(("health", link["id"]), raw, now, settle=0 if raw == "failed" else STORY_SETTLE_S)
+            link["impairment"] = impairment_text(link)
+        routes, carried = [], {link["name"]: set() for link in links}
+        for item in classes:
+            shares = [share for share in item.get("shares") or [] if share.get("pct")]
+            top = max(shares, key=lambda share: share["pct"]) if shares else None
+            route = "idle" if item.get("verdict") == "idle" else (top["label"] if top else "unknown")
+            shown = settled(("route", item.get("class")), route, now)
+            for share in shares:
+                if share["pct"] >= 25 and share["label"] in carried:
+                    carried[share["label"]].add(item.get("class"))
+            link = by_label.get(shown)
+            routes.append({"label": CLASS_NAMES.get(item.get("class"), item.get("label")),
+                           "wan": shown if link else None,
+                           "state": shown if shown in ("idle", "unknown") else
+                                    ("good" if link and link["display_health"] == "healthy" else "warn")})
+        known = any(route["wan"] for route in routes)
+        for link in links:
+            names = tuple(CLASS_SHORT[item] for item in CLASS_NAMES if item in carried[link["name"]])
+            link["carries"] = list(settled(("carries", link["id"]), names, now)) if known else None
+        seen = current_impacts(diagnosis, by_id, by_label)
+        store = SHOWROOM_STATE["impacts"]
+        for key, data in seen.items():
+            store.setdefault(key, {"first": now})
+            store[key].update(last=now, data=data)
+        impacts = []
+        for key, entry in list(store.items()):
+            active = key in seen
+            settled_long_enough = entry["last"] - entry["first"] >= STORY_SETTLE_S
+            if not active and (not settled_long_enough or now - entry["last"] > STORY_HOLD_S):
+                store.pop(key)
+                continue
+            if active and now - entry["first"] < STORY_SETTLE_S:
+                continue
+            impacts.append(dict(entry["data"], state="active" if active else "resolved"))
+        impacts.sort(key=lambda item: (item["state"] != "active", item["severity"] != "bad"))
+        experience = outcome.get("experience") or {}
+        active = [item for item in impacts if item["state"] == "active"]
+        if not experience.get("available"):
+            users = "Waiting for simulated users."
+        elif active:
+            users = "Users are affected."
+        else:
+            # Impacts and health are already settled; the live target verdicts settle here.
+            below = "fail" in (experience.get("verdicts") or {}).values()
+            users = "Users are below target." if settled(("below",), below, now) else "Users are fine."
+        unwell = [f"{link['name']} is {HEALTH_WORDS.get(link['display_health'], link['display_health']).lower()}"
+                  for link in links if link["display_health"] != "healthy"]
+        wans = ("; ".join(unwell) + ".") if unwell else ("All WANs are healthy." if len(links) > 1 else "")
+        moves = [f"The appliance moved {CLASS_SHORT.get(item.get('class'), item.get('label', '').lower())} off "
+                 f"{reaction['label']} in {reaction['steered_after_seconds']} s."
+                 for item in outcome.get("steering") or [] for reaction in item.get("reactions") or []
+                 if reaction.get("steered_after_seconds") is not None]
+        status = " ".join(part for part in (users, wans, moves[0] if moves else "") if part)
+    return {"status": showroom_text(status), "routes": routes,
+            "impacts": [dict(item, impact=showroom_text(item["impact"]), cause=showroom_text(item["cause"]))
+                        for item in impacts[:STORY_MAX_IMPACTS]]}
 
 
 showroom_app = create_showroom_app(showroom_snapshot, BRANDING_DIR)
