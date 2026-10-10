@@ -973,3 +973,4 @@ body.update-active{overflow:hidden}
 @keyframes update-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.55;transform:scale(.9)}}
 @keyframes update-fade{from{opacity:0}}
 @media(prefers-reduced-motion:reduce){.update-screen,.update-ring::before,.update-ring::after,.update-mark,.update-steps li.active::before{animation:none}}
+.traffic-path{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin:8px 0;padding:8px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);font-size:12px;color:var(--text-soft)}.traffic-path.good{border-color:color-mix(in srgb,var(--success) 40%,transparent);color:var(--success)}.traffic-path.bad{border-color:color-mix(in srgb,var(--danger) 45%,transparent);background:var(--danger-soft);color:var(--text)}.traffic-path.warn{border-color:color-mix(in srgb,var(--warning) 40%,transparent)}.traffic-path form[hidden]{display:none}

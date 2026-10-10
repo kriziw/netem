@@ -56,6 +56,25 @@
  "label":"Internet probe fails"}</pre>
 <p>Probe conditions reject stale results instead of treating an old success/failure as current evidence.</p>
 
+<h2 id="traffic-path">Traffic path readiness</h2>
+<p>Simulated users only measure the WANs when their traffic reaches the controlled target through the appliance. The Command Center and the Tests page show the <strong>traffic path</strong> the Traffic Simulator reports:</p>
+<ul>
+<li>its data interface is up with its address;</li>
+<li>its route to the target goes through the selected appliance;</li>
+<li>the target answers.</li>
+</ul>
+<p>Before NetEm starts a workload, either from the Corporate traffic controls or in a test, it checks this path:</p>
+<ul>
+<li>If the simulator can put the path right, NetEm asks it to and waits. The simulator brings the data interface back with its saved address and restores the selected appliance route.</li>
+<li>If the path still is not ready, NetEm refuses to start and says why. For example, with no appliance selected, the traffic would leave through the simulator's management interface and bypass the appliance and NetEm.</li>
+</ul>
+<p><strong>Repair traffic path</strong> does the same on demand. Older simulators are checked through their selected route and repaired by selecting it again.</p>
+<p>While a test runs, two findings flag measurements that cannot be trusted:</p>
+<ul>
+<li><em>The test's workload is not running on the Traffic Simulator</em>: the simulator restarted, or NetEm is connected to a different simulator.</li>
+<li><em>Simulated traffic is not crossing NetEm</em>: transactions complete, but no WAN carries them.</li>
+</ul>
+
 <h2 id="running">Running-test state</h2>
 <p>The running-test bar shows the test, its WAN, the current phase and stage, any condition it is waiting for with the latest observed value, the phase timeline, the elapsed time against the planned length and when the next phase starts. Stop &amp; restore interrupts both timed waits and conditional polling.</p>
 

@@ -19,7 +19,7 @@
 
 {% include "_site_scenario.html" %}
 
-{% with return_to='tests' %}{% include "_running_test.html" %}{% endwith %}
+{% with return_to='tests' %}{% include "_running_test.html" %}{% include "_traffic_path.html" %}{% endwith %}
 {% if last_test and not scenario_state.active %}{{ test_summary(last_test) }}{% endif %}
 
 <div class="section-title">Generic tests</div>

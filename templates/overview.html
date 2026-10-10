@@ -195,6 +195,7 @@
           {% set tg_dem = traffic_generator.status.dem or {} %}
           {{ metric_help("dem-overview", "Digital experience", "Colors describe measured simulator transactions in the displayed window. Green is good, amber degraded, red poor, and gray unknown. Open How to read these indicators for the exact lab thresholds.") }}
           <div class="dem-users">Simulated users: <strong data-tg-users>{{ traffic_generator.status.users }}</strong></div>
+          {% with return_to='overview' %}{% include "_traffic_path.html" %}{% endwith %}
           <div class="dem-summary" id="overview-dem">
             <p class="card-sub" data-dem-window>Waiting for measurements…</p>
             {% for metric, title in [('experience','Overall experience'),('success','Request success'),('response','Interactive response · P95')] %}
@@ -674,7 +675,8 @@ async function refreshDiagnosisOverview() {
     const payload=await response.json();
     renderDiagnosisCard(payload);
     (payload.links || []).forEach(renderLinkDiagnosis);
-    {% if traffic_generator.configured %}renderTrafficGeneratorOverview(payload.traffic_generator || {});{% endif %}
+    {% if traffic_generator.configured %}renderTrafficGeneratorOverview(payload.traffic_generator || {});
+    NetEmUI.renderTrafficPath(document.querySelector("[data-traffic-path]"), payload.traffic_path);{% endif %}
   } catch (_) {
     document.querySelectorAll("[data-diag-status]").forEach(el=>{el.textContent="Unavailable";el.className="status bad";});
     {% if traffic_generator.configured %}

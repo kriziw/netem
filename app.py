@@ -88,7 +88,7 @@ def integration_form_token():
 def protect_integration_forms():
     if request.method == "POST" and request.endpoint in (
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
-        "traffic_generator_adjust", "traffic_generator_stop",
+        "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
         "site_save", "site_apply_wan", "site_run", "site_stop",
     ):
         supplied = request.form.get("integration_csrf", "")
@@ -147,6 +147,8 @@ SCENARIO_STATE = {
     "paused_at": None,
     "paused_total_s": 0.0,
     "phase_started_s": None,
+    # The simulator run a test started, while it should be running.
+    "workload_run_id": None,
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
@@ -496,6 +498,138 @@ def traffic_generator_snapshot(include_catalog=False):
     except RuntimeError as exc:
         result["error"] = str(exc)
     return result
+
+
+# ---------- Traffic path readiness ----------
+#
+# Simulated users only measure the WANs when their traffic reaches the controlled target
+# through the appliance. The simulator checks and repairs that path; NetEm asks before it
+# starts traffic, repairs what the simulator can repair, and shows the result.
+
+TRAFFIC_PATH_CACHE = {"checked": None, "payload": None}
+TRAFFIC_PATH_CACHE_SECONDS = 15
+REPAIR_WAIT_SECONDS = 30
+
+
+def legacy_traffic_path():
+    """Simulators without the readiness API: judge the selected appliance route from the network state."""
+    network = traffic_generator_request("/api/v1/network", timeout=8.0)
+    selected = network.get("selected") or None
+    health = network.get("route_health") or {}
+    match = next((row for row in network.get("appliances") or []
+                  if selected and all(row.get(key) == selected.get(key) for key in ("interface", "gateway", "target"))), None)
+    if not selected:
+        return {"ready": None, "repairable": False, "legacy": True, "job": network.get("job") or {},
+                "message": "No appliance route is selected on the Traffic Simulator. This simulator version cannot tell "
+                           "whether its traffic bypasses the appliance; update it."}
+    ready = bool(health.get("active"))
+    return {"ready": ready, "repairable": not ready and match is not None, "legacy": True,
+            "appliance_id": (match or {}).get("id"), "job": network.get("job") or {},
+            "path": {key: selected.get(key) for key in ("interface", "gateway", "target", "source")},
+            "message": (f"Traffic to {selected.get('target')} goes through the appliance at {selected.get('gateway')} on "
+                        f"{selected.get('interface')}." if ready else health.get("message") or "The selected appliance route is not active.")}
+
+
+def traffic_path_summary(path):
+    if not path.get("available"):
+        return "Traffic path unknown: " + (path.get("message") or "the Traffic Simulator did not answer.")
+    if path.get("ready"):
+        route = path.get("path") or {}
+        target = path.get("target") or {}
+        return (f"Traffic path ready: via {route.get('gateway')} on {route.get('interface')}"
+                + (" · target answers" if target.get("ok") else "") + ".")
+    if path.get("ready") is None:
+        return path.get("message") or "Traffic path not checked."
+    return "Traffic path not ready: " + (path.get("message") or "simulated traffic would not cross the appliance.")
+
+
+def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS):
+    """Whether the simulator's traffic reaches the target through the appliance (cached briefly)."""
+    cached = dict(TRAFFIC_PATH_CACHE)
+    if max_age and cached["payload"] is not None and cached["checked"] is not None and time.monotonic() - cached["checked"] <= max_age:
+        return cached["payload"]
+    if not (traffic_generator_config(load_config()).get("host") and traffic_generator_api_key()):
+        payload = {"configured": False, "available": False, "ready": None, "repairable": False,
+                   "message": "Traffic Simulator is not configured."}
+    else:
+        try:
+            payload = dict(traffic_generator_request("/api/v1/network/readiness", timeout=8.0), legacy=False)
+        except RuntimeError as exc:
+            payload = None
+            if "HTTP 404" in str(exc):
+                try:
+                    payload = legacy_traffic_path()
+                except RuntimeError as inner:
+                    exc = inner
+            if payload is None:
+                payload = {"available": False, "ready": None, "repairable": False, "message": str(exc)}
+        payload.setdefault("available", True)
+        payload["configured"] = True
+    payload["summary"] = traffic_path_summary(payload)
+    payload["checked_at"] = time.time()
+    TRAFFIC_PATH_CACHE.update(checked=time.monotonic(), payload=payload)
+    return payload
+
+
+def repair_traffic_path(wait=REPAIR_WAIT_SECONDS):
+    """Ask the simulator to restore its traffic path, wait for its job and return the new readiness."""
+    readiness = traffic_path_readiness(max_age=0)
+    if readiness.get("ready"):
+        return readiness
+    if not readiness.get("repairable"):
+        raise RuntimeError(readiness.get("message") or "The traffic path cannot be repaired automatically.")
+    if readiness.get("legacy"):
+        job = traffic_generator_request("/api/v1/network/select", method="POST",
+                                        payload={"appliance_id": readiness["appliance_id"]}, timeout=8.0)
+    else:
+        job = traffic_generator_request("/api/v1/network/repair", method="POST", payload={}, timeout=8.0)
+        if job.get("repair") == "not_needed":
+            return traffic_path_readiness(max_age=0)
+    deadline = time.monotonic() + wait
+    while time.monotonic() < deadline and not SCENARIO_STOP.wait(2):
+        readiness = traffic_path_readiness(max_age=0)
+        state = readiness.get("job") or {}
+        if state.get("id") == job.get("id") and state.get("state") in ("completed", "failed"):
+            break
+    return readiness
+
+
+def ensure_traffic_path(context):
+    """Before NetEm starts simulated users: make sure their traffic will cross the appliance, repairing it if the
+    simulator can. Unknown readiness (older simulator, connection trouble) does not block: the start reports it."""
+    readiness = traffic_path_readiness(max_age=0)
+    if readiness.get("ready") is not False or not readiness.get("available"):
+        return readiness
+    if readiness.get("repairable"):
+        log_event("traffic-generator", f"{context}: traffic path not ready, repairing · {readiness.get('message')}", action="repair")
+        readiness = repair_traffic_path()
+        if readiness.get("ready"):
+            log_event("traffic-generator", f"{context}: traffic path repaired", action="repair")
+            return readiness
+    raise RuntimeError("Traffic path not ready: " + (readiness.get("message") or "simulated traffic would not cross the appliance."))
+
+
+def workload_finding(status, signals, expected_run=None):
+    """When the simulator's traffic and what NetEm measures cannot both be right."""
+    common = {"source": "platform", "severity": "bad", "wans": [], "unattributed": 0, "candidates": []}
+    run = (status or {}).get("run") or {}
+    if expected_run and ((status or {}).get("status") not in ("starting", "running") or run.get("run_id") != expected_run):
+        reported = (status or {}).get("status") or "no status"
+        return dict(common, id="workload_missing", title="The test's workload is not running on the Traffic Simulator",
+                    detail=f"NetEm started workload {expected_run} for this test, but the simulator reports {reported}"
+                           + (f" with run {run['run_id']}" if run.get("run_id") else "")
+                           + ". It may have restarted, or NetEm is connected to a different simulator.",
+                    hint="Check Settings → Integrations and the simulator's service log.")
+    dem = (status or {}).get("dem") or {}
+    measured = [sum((item.get("directions") or {}).get(direction, {}).get("rate_mbps") or 0 for direction in ("down", "up"))
+                for item in signals if any((item.get("directions") or {}).get(direction, {}).get("rate_mbps") is not None
+                                           for direction in ("down", "up"))]
+    if (status or {}).get("status") == "running" and (dem.get("requests") or 0) >= 20 and measured and max(measured) < 0.05:
+        return dict(common, id="workload_bypass", title="Simulated traffic is not crossing NetEm",
+                    detail=f"The Traffic Simulator completed {dem['requests']} transactions in the last {dem.get('window_seconds') or 60} s, "
+                           "but no WAN carried traffic: its route to the target bypasses the appliance and NetEm.",
+                    hint="Check the traffic path on the Command Center and repair it.")
+    return None
 
 
 def _management_broadcast_addresses(cfg=None):
@@ -2825,6 +2959,11 @@ def build_diagnosis():
     mapping = egress_mapping_finding(addresses, learn_state, tcpdump)
     if mapping:
         findings.append(mapping)
+    with RUNTIME_LOCK:
+        expected_run = SCENARIO_STATE.get("workload_run_id") if SCENARIO_STATE.get("active") else None
+    workload = workload_finding(status, signals, expected_run) if snapshot.get("configured") else None
+    if workload:
+        findings.insert(0, workload)
     track_diagnosis_events(findings)
     return {
         "timestamp": time.time(),
@@ -2839,6 +2978,7 @@ def build_diagnosis():
             "interactive_p95_ms": dem.get("interactive_p95_ms"),
         },
         "traffic_generator": snapshot,
+        "traffic_path": traffic_path_readiness() if snapshot.get("configured") else None,
     }
 
 
@@ -4206,6 +4346,8 @@ def run_scenario(link_id: str, scenario: dict):
             elif action == "traffic_generator":
                 payload = dict(step["value"])
                 operation = payload.pop("operation")
+                if operation == "start":
+                    ensure_traffic_path(scenario["name"])
                 result = traffic_generator_request(
                     f"/api/v1/workloads/{operation}", method="POST",
                     payload=payload, timeout=5.0,
@@ -4214,6 +4356,8 @@ def run_scenario(link_id: str, scenario: dict):
                     scenario_workload_id = (result.get("run") or {}).get("run_id")
                 elif operation == "stop":
                     scenario_workload_id = None
+                with RUNTIME_LOCK:
+                    SCENARIO_STATE["workload_run_id"] = scenario_workload_id
                 log_event("traffic-generator", f'{scenario["name"]}: {label}',
                           scenario_id=scenario.get("id"), link_id=link_id,
                           action=operation, run_id=(result.get("run") or {}).get("run_id"),
@@ -4325,6 +4469,7 @@ def run_scenario(link_id: str, scenario: dict):
                     "paused_at": None,
                     "paused_total_s": 0.0,
                     "phase_started_s": None,
+                    "workload_run_id": None,
                 }
             )
         SCENARIO_PAUSE.clear()
@@ -4699,6 +4844,7 @@ def overview():
         presets=get_presets(cfg),
         quality_curves=QUALITY_CURVES,
         traffic_generator=traffic_generator_snapshot(),
+        traffic_path=traffic_path_readiness() if traffic_generator_config(cfg).get("host") else None,
         site_plan=active_site_plan(cfg),
         site_state=site_plan_snapshot(),
     )
@@ -4745,6 +4891,7 @@ def tests():
         selected_scenario=scenario_id,
         traffic_generator=traffic_generator,
         site_options=site_catalog.catalog(),
+        traffic_path=traffic_path_readiness() if traffic_generator.get("configured") else None,
         site_plan=active_site_plan(cfg, traffic_generator.get("catalog")),
         site_state=site_plan_snapshot(),
         last_test=LAST_TEST_SUMMARY,
@@ -5142,6 +5289,7 @@ def traffic_generator_start():
         payload["media_mode"] = request.form.get("media_mode")
 
     try:
+        ensure_traffic_path("Corporate workload")
         status = traffic_generator_request(
             "/api/v1/workloads/start",
             method="POST",
@@ -5254,6 +5402,25 @@ def wan_egress():
               link_id=link_id, appliance_addresses=addresses)
     flash("Appliance WAN addresses saved." if addresses else "Appliance WAN addresses cleared.", "success")
     return redirect_after("wan_links")
+
+
+@app.route("/integrations/traffic-generator/repair", methods=["POST"])
+def traffic_generator_repair():
+    try:
+        readiness = repair_traffic_path()
+        if readiness.get("ready"):
+            log_event("traffic-generator", "Traffic path repaired", action="repair")
+            flash(readiness["summary"], "success")
+        else:
+            flash(readiness["summary"], "error")
+    except RuntimeError as exc:
+        flash(f"Traffic path not repaired: {exc}", "error")
+    return redirect_after("overview")
+
+
+@app.route("/api/v1/traffic-generator/path")
+def api_traffic_path():
+    return jsonify(traffic_path_readiness())
 
 
 @app.route("/api/v1/traffic-generator")
@@ -6830,7 +6997,7 @@ def showroom_outcome(diagnosis, site_plan):
             "wans": [{"label": wan.get("label"), "affected": wan.get("affected") or 0,
                       "causes": [showroom_text(cause) for cause in wan.get("causes") or []]}
                      for wan in item.get("wans") or []],
-        } for item in (diagnosis.get("findings") or []) if item.get("source") != "mapping"][:4],
+        } for item in (diagnosis.get("findings") or []) if item.get("source") not in ("mapping", "platform")][:4],
         "steering": [{
             "label": item.get("label"), "verdict": item.get("verdict"), "severity": item.get("severity"),
             "text": showroom_text(item.get("text")), "unattributed_pct": item.get("unattributed_pct"),
