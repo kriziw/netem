@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "_test_summary.html" import test_summary %}
 {% block title %}Session Report · {{ branding.name }}{% endblock %}
 {% block crumb %}Sessions / Report{% endblock %}
 
@@ -11,6 +12,7 @@
   <div>
     <div class="eyebrow">Validation evidence</div>
     <h1>{{ report.session.name }}</h1>
+    {% if report.session.site %}<p class="page-description"><strong>Site:</strong> {{ report.session.site.label }}</p>{% endif %}
     <p class="page-description">Session {{ report.session.id }} · generated from persisted telemetry, probes, runtime events and scenario assertions.</p>
   </div>
   <div class="page-actions">
@@ -42,6 +44,8 @@
     <div class="stat-sub">correlated runtime events</div>
   </div>
 </div>
+
+{% for summary in report.test_summaries %}{{ test_summary(summary, "Test") }}{% endfor %}
 
 {% if report.assertions %}
 <section class="card" style="margin-bottom:14px">

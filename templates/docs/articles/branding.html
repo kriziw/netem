@@ -1,0 +1,45 @@
+<h2 id="purpose">What branding changes</h2>
+<p>One brand per appliance sets the product name, subtitle, logo, favicon, font and colour palette. It applies to the operator interface, these help pages, printed session reports and the <a href="{{ url_for('documentation_page', slug='showroom') }}">showroom</a>. Project credits and technical NetEm references stay in place.</p>
+
+<h2 id="install">Install a brand pack</h2>
+<p>A brand pack is a folder with a <code>branding.json</code> manifest and an <code>assets/</code> folder. Keep it outside the Git checkout, for example in <code>/etc/netem/branding/</code>, so updates never touch it.</p>
+<pre><code>branding/
+  branding.json
+  assets/
+    logo.svg
+    favicon.png
+    regular.woff2
+    bold.woff2</code></pre>
+<p>Point the service at it with <code>sudo systemctl edit netem</code>:</p>
+<pre><code>[Service]
+Environment=NETEM_BRANDING_DIR=/etc/netem/branding</code></pre>
+<p>Then run <code>sudo systemctl daemon-reload</code> and <code>sudo systemctl restart netem</code>. The service user needs read access to the folder. Branding is read at startup, so restart after every change. Remove the setting to return to the default appearance.</p>
+<p>For local development, <code>runtime/branding/branding.json</code> is picked up when no environment setting is present. An explicit setting always wins, even when its pack is invalid.</p>
+
+<h2 id="manifest">Manifest</h2>
+<pre><code>{
+  "name": "Example Resilience Lab",
+  "subtitle": "Network validation platform",
+  "mark": "E",
+  "logo": "logo.svg",
+  "favicon": "favicon.png",
+  "font_family": "Example Sans",
+  "fonts": [{"file": "regular.woff2", "weight": 400}, {"file": "bold.woff2", "weight": 700}],
+  "tokens": {"accent": "#4050D0", "bg": "#08101C", "surface": "#0D1726", "text": "#EDF4FB"}
+}</code></pre>
+<p>Every field is optional; the text mark and the system font are the fallbacks. Asset names are relative to <code>assets/</code>. Images can be SVG, PNG, JPEG, WebP or ICO and fonts WOFF or WOFF2. Nothing is loaded from external sites.</p>
+
+<h2 id="tokens">Colour tokens</h2>
+<p>Colours are six-digit hex values:</p>
+<ul>
+<li>Backgrounds: <code>bg</code>, <code>bg-deep</code>, <code>surface</code>, <code>surface-2</code>, <code>surface-3</code>, <code>surface-hover</code></li>
+<li>Borders: <code>border</code>, <code>border-strong</code></li>
+<li>Text: <code>text</code>, <code>text-soft</code>, <code>muted</code>, <code>muted-2</code></li>
+<li>Brand: <code>accent</code>, <code>accent-strong</code>, <code>blue</code></li>
+<li>Status: <code>warning</code>, <code>danger</code>, <code>success</code></li>
+</ul>
+<p>Translucent variants and component colours are derived from these. Set the full palette for a consistent look, keep the status colours easy to tell apart, and check contrast, including white text on primary buttons and the showroom's health colours.</p>
+
+<h2 id="privacy">Privacy</h2>
+<p>Only the generated theme stylesheet and the assets listed in the manifest are served; the manifest itself is not downloadable. Anyone using the appliance or watching the showroom sees the brand, so branding does not keep it secret. Keep brand packs out of public repositories, release bundles, CI artifacts and screenshots.</p>
+<p>The full reference is <code>docs/BRANDING.md</code> in the repository.</p>

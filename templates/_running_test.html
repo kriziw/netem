@@ -1,0 +1,25 @@
+{% if scenario_state.active %}
+<section class="running-test-bar {{ 'paused' if scenario_state.paused else '' }}" id="running-test" data-pause-url="{{ url_for('lab_scenario_pause') }}" data-resume-url="{{ url_for('lab_scenario_resume') }}">
+  <div class="running-test-line">
+    <div>
+      <div class="eyebrow" style="margin:0 0 3px">Current test</div>
+      <strong data-run-name>{{ scenario_state.scenario_name }}</strong>
+      <span class="card-sub"> · {{ scenario_state.link_id }} · <span data-run-phase>{{ scenario_state.phase or "" }}</span> · <span data-run-step>{{ scenario_state.step_label }}</span></span>
+      <div class="field-help" data-run-condition>{% if scenario_state.condition %}Waiting for {{ scenario_state.condition.description }}{% endif %}</div>
+    </div>
+    <div class="actions">
+      <form method="post" action="{{ url_for('lab_scenario_resume' if scenario_state.paused else 'lab_scenario_pause') }}" data-run-pause-form>
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <button class="btn" type="submit" data-run-pause title="Hold the test in its current phase, impairment applied, until resumed">{{ "Resume" if scenario_state.paused else "Pause phase" }}</button>
+      </form>
+      <form method="post" action="{{ url_for('site_stop') if site_state and site_state.active else url_for('lab_scenario_stop') }}">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <button class="btn btn-danger" type="submit">Stop &amp; restore</button>
+      </form>
+    </div>
+  </div>
+  <div class="phase-track" data-run-phases></div>
+  <div class="field-help" data-run-time></div>
+</section>
+{% endif %}

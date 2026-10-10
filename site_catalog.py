@@ -111,131 +111,161 @@ def _line(preset, down, up):
 # the WAN lines such a site usually has (primary, backup).
 SITE_FUNCTIONS = {
     "headquarters": {
-        "label": "Headquarters / campus", "industries": ALL, "activity": "normal", "concurrency": 0.4,
+        "wan_class": "core", "label": "Headquarters / campus", "industries": ALL, "activity": "normal", "concurrency": 0.4,
         "staff": {"knowledge_worker": 50, "collaboration_user": 25, "developer": 8, "heavy_cloud": 12, "background": 5},
         "employees": _per_size(150, 500, 1500, 4000),
         "devices": {"camera": _per_size(10, 25, 60, 120), "guest": _per_size(5, 20, 50, 120)},
-        "wan": _per_size([_line("dia", 200, 200), _line("broadband", 300, 50)], [_line("dia", 500, 500), _line("broadband", 500, 50)],
-                         [_line("dia", 1000, 1000), _line("dia", 500, 500)], [_line("dia", 1000, 1000), _line("dia", 1000, 1000)]),
     },
     "regional_office": {
-        "label": "Regional office", "industries": ALL, "activity": "normal", "concurrency": 0.4,
+        "wan_class": "office", "label": "Regional office", "industries": ALL, "activity": "normal", "concurrency": 0.4,
         "staff": {"knowledge_worker": 55, "collaboration_user": 25, "heavy_cloud": 10, "background": 10},
         "employees": _per_size(40, 120, 300, 700),
         "devices": {"camera": _per_size(4, 8, 16, 30), "guest": _per_size(2, 5, 10, 20)},
-        "wan": _per_size([_line("broadband", 300, 50), _line("4g", 80, 20)], [_line("dia", 200, 200), _line("broadband", 300, 50)],
-                         [_line("dia", 500, 500), _line("broadband", 500, 50)], [_line("dia", 1000, 1000), _line("broadband", 500, 50)]),
     },
     "branch_office": {
-        "label": "Branch office", "industries": ALL, "activity": "normal", "concurrency": 0.45,
+        "wan_class": "office", "label": "Branch office", "industries": ALL, "activity": "normal", "concurrency": 0.45,
         "staff": {"knowledge_worker": 60, "collaboration_user": 25, "background": 15},
         "employees": _per_size(8, 25, 60, 120),
         "devices": {"camera": _per_size(2, 4, 6, 10)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("dia", 100, 100), _line("broadband", 300, 50)], [_line("dia", 200, 200), _line("broadband", 300, 50)]),
     },
     "plant": {
-        "label": "Manufacturing plant", "industries": ["manufacturing", "energy_utilities"], "activity": "busy", "concurrency": 0.5,
+        "wan_class": "core", "label": "Manufacturing plant", "industries": ["manufacturing", "energy_utilities"], "activity": "busy", "concurrency": 0.5,
         "staff": {"shop_floor": 55, "engineer": 12, "knowledge_worker": 18, "collaboration_user": 5, "background": 10},
         "employees": _per_size(80, 300, 1200, 3000),
         "devices": {"ot_device": _per_size(20, 80, 300, 700), "camera": _per_size(8, 20, 60, 150)},
-        "wan": _per_size([_line("dia", 100, 100), _line("4g", 80, 20)], [_line("dia", 500, 500), _line("broadband", 300, 50)],
-                         [_line("dia", 1000, 1000), _line("broadband", 500, 50)], [_line("dia", 1000, 1000), _line("dia", 1000, 1000)]),
     },
     "rnd_center": {
-        "label": "R&D / engineering center", "industries": ["manufacturing", "healthcare", "professional_services"],
+        "wan_class": "core", "label": "R&D / engineering center", "industries": ["manufacturing", "healthcare", "professional_services"],
         "activity": "busy", "concurrency": 0.5,
         "staff": {"engineer": 45, "developer": 20, "knowledge_worker": 20, "collaboration_user": 10, "heavy_cloud": 5},
         "employees": _per_size(30, 120, 400, 1000),
         "devices": {"camera": _per_size(3, 8, 20, 40)},
-        "wan": _per_size([_line("dia", 200, 200), _line("broadband", 300, 50)], [_line("dia", 500, 500), _line("broadband", 500, 50)],
-                         [_line("dia", 1000, 1000), _line("dia", 500, 500)], [_line("dia", 1000, 1000), _line("dia", 1000, 1000)]),
     },
     "warehouse": {
-        "label": "Warehouse / distribution center", "industries": ["manufacturing", "retail", "logistics"],
+        "wan_class": "frontline", "label": "Warehouse / distribution center", "industries": ["manufacturing", "retail", "logistics"],
         "activity": "busy", "concurrency": 0.6,
         "staff": {"warehouse_operator": 65, "knowledge_worker": 15, "collaboration_user": 5, "background": 15},
         "employees": _per_size(25, 80, 250, 600),
         "devices": {"camera": _per_size(10, 25, 60, 120), "ot_device": _per_size(5, 15, 40, 100)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("dia", 200, 200), _line("broadband", 300, 50)], [_line("dia", 500, 500), _line("broadband", 500, 50)]),
     },
     "retail_store": {
-        "label": "Retail store", "industries": ["retail"], "activity": "busy", "concurrency": 0.7,
+        "wan_class": "frontline", "label": "Retail store", "industries": ["retail"], "activity": "busy", "concurrency": 0.7,
         "staff": {"store_associate": 75, "knowledge_worker": 15, "background": 10},
         "employees": _per_size(6, 20, 60, 150),
         "devices": {"camera": _per_size(4, 10, 24, 48), "guest": _per_size(5, 20, 60, 150)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("broadband", 500, 50), _line("5g", 300, 50)], [_line("dia", 200, 200), _line("5g", 300, 50)]),
     },
     "restaurant": {
-        "label": "Restaurant", "industries": ["hospitality"], "activity": "busy", "concurrency": 0.7,
+        "wan_class": "frontline", "label": "Restaurant", "industries": ["hospitality"], "activity": "busy", "concurrency": 0.7,
         "staff": {"store_associate": 70, "knowledge_worker": 10, "background": 20},
         "employees": _per_size(5, 15, 30, 60),
         "devices": {"camera": _per_size(2, 4, 8, 12), "guest": _per_size(10, 30, 60, 100)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("broadband", 500, 50), _line("5g", 300, 50)], [_line("broadband", 500, 50), _line("5g", 300, 50)]),
     },
     "hotel": {
-        "label": "Hotel", "industries": ["hospitality"], "activity": "normal", "concurrency": 0.5,
+        "wan_class": "frontline", "label": "Hotel", "industries": ["hospitality"], "activity": "normal", "concurrency": 0.5,
         "staff": {"store_associate": 35, "knowledge_worker": 35, "collaboration_user": 10, "background": 20},
         "employees": _per_size(20, 60, 200, 500),
         "devices": {"camera": _per_size(10, 30, 80, 160), "guest": _per_size(30, 120, 400, 900)},
-        "wan": _per_size([_line("broadband", 300, 50), _line("4g", 80, 20)], [_line("dia", 200, 200), _line("broadband", 300, 50)],
-                         [_line("dia", 500, 500), _line("broadband", 500, 50)], [_line("dia", 1000, 1000), _line("broadband", 500, 50)]),
     },
     "hospital": {
-        "label": "Hospital", "industries": ["healthcare"], "activity": "busy", "concurrency": 0.45,
+        "wan_class": "core", "label": "Hospital", "industries": ["healthcare"], "activity": "busy", "concurrency": 0.45,
         "staff": {"clinician": 60, "knowledge_worker": 20, "collaboration_user": 10, "background": 10},
         "employees": _per_size(200, 600, 2000, 5000),
         "devices": {"ot_device": _per_size(20, 60, 200, 500), "camera": _per_size(20, 50, 150, 300), "guest": _per_size(20, 60, 200, 400)},
-        "wan": _per_size([_line("dia", 500, 500), _line("broadband", 300, 50)], [_line("dia", 1000, 1000), _line("broadband", 500, 50)],
-                         [_line("dia", 1000, 1000), _line("dia", 1000, 1000)], [_line("dia", 1000, 1000), _line("dia", 1000, 1000)]),
     },
     "clinic": {
-        "label": "Clinic", "industries": ["healthcare"], "activity": "normal", "concurrency": 0.55,
+        "wan_class": "frontline", "label": "Clinic", "industries": ["healthcare"], "activity": "normal", "concurrency": 0.55,
         "staff": {"clinician": 65, "knowledge_worker": 25, "background": 10},
         "employees": _per_size(8, 20, 50, 120),
         "devices": {"camera": _per_size(2, 4, 8, 12), "guest": _per_size(3, 8, 20, 40)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("dia", 200, 200), _line("broadband", 300, 50)], [_line("dia", 500, 500), _line("broadband", 300, 50)]),
     },
     "laboratory": {
-        "label": "Laboratory", "industries": ["healthcare"], "activity": "busy", "concurrency": 0.5,
+        "wan_class": "core", "label": "Laboratory", "industries": ["healthcare"], "activity": "busy", "concurrency": 0.5,
         "staff": {"clinician": 40, "engineer": 20, "knowledge_worker": 30, "background": 10},
         "employees": _per_size(15, 50, 150, 400),
         "devices": {"ot_device": _per_size(10, 30, 80, 200), "camera": _per_size(2, 6, 12, 24)},
-        "wan": _per_size([_line("dia", 200, 200), _line("broadband", 300, 50)], [_line("dia", 500, 500), _line("broadband", 300, 50)],
-                         [_line("dia", 1000, 1000), _line("broadband", 500, 50)], [_line("dia", 1000, 1000), _line("dia", 500, 500)]),
     },
     "bank_branch": {
-        "label": "Bank branch", "industries": ["financial_services"], "activity": "normal", "concurrency": 0.6,
+        "wan_class": "frontline", "label": "Bank branch", "industries": ["financial_services"], "activity": "normal", "concurrency": 0.6,
         "staff": {"banker": 70, "knowledge_worker": 20, "background": 10},
         "employees": _per_size(5, 12, 30, 60),
         "devices": {"camera": _per_size(4, 8, 12, 20), "guest": _per_size(2, 5, 10, 20)},
-        "wan": _per_size([_line("broadband", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)],
-                         [_line("dia", 100, 100), _line("broadband", 300, 50)], [_line("dia", 200, 200), _line("broadband", 300, 50)]),
     },
     "field_site": {
-        "label": "Field / remote site", "industries": ["energy_utilities", "logistics"], "activity": "normal", "concurrency": 0.5,
+        "wan_class": "remote", "label": "Field / remote site", "industries": ["energy_utilities", "logistics"], "activity": "normal", "concurrency": 0.5,
         "staff": {"knowledge_worker": 40, "shop_floor": 40, "background": 20},
         "employees": _per_size(2, 5, 15, 40),
         "devices": {"ot_device": _per_size(10, 40, 120, 300), "camera": _per_size(2, 4, 8, 16)},
-        "wan": _per_size([_line("satellite", 100, 20), _line("4g", 80, 20)], [_line("4g", 80, 20), _line("satellite", 100, 20)],
-                         [_line("dsl", 100, 20), _line("4g", 80, 20)], [_line("broadband", 300, 50), _line("4g", 80, 20)]),
-        "wired_backup": False,
     },
     "school": {
-        "label": "School / campus", "industries": ["public_education"], "activity": "normal", "concurrency": 0.5,
+        "wan_class": "office", "label": "School / campus", "industries": ["public_education"], "activity": "normal", "concurrency": 0.5,
         "staff": {"knowledge_worker": 30, "collaboration_user": 20, "guest": 50},
         "employees": _per_size(60, 200, 800, 2500),
         "devices": {"camera": _per_size(6, 15, 40, 80)},
-        "wan": _per_size([_line("broadband", 300, 50), _line("4g", 80, 20)], [_line("dia", 500, 500), _line("broadband", 300, 50)],
-                         [_line("dia", 1000, 1000), _line("broadband", 500, 50)], [_line("dia", 1000, 1000), _line("dia", 1000, 1000)]),
     },
 }
 
-WIRELESS_OR_THIN = {"4g", "5g", "satellite", "dsl"}
+# Typical lines by site category, size and criticality: (primary, backup). Core
+# sites (headquarters, plants, hospitals, labs, R&D) move to dual DIA once the
+# business depends on them; offices, frontline and remote sites step up gradually.
+# Dual DIA lines have matching bandwidth so either can carry the whole site.
+WAN_LINES = {
+    "core": {
+        "small": {"standard": (("dia", 200, 200), ("4g", 80, 20)),
+                  "business_critical": (("dia", 200, 200), ("broadband", 300, 50)),
+                  "mission_critical": (("dia", 200, 200), ("dia", 200, 200))},
+        "medium": {"standard": (("dia", 500, 500), ("broadband", 300, 50)),
+                   "business_critical": (("dia", 500, 500), ("dia", 500, 500)),
+                   "mission_critical": (("dia", 500, 500), ("dia", 500, 500))},
+        "large": {"standard": (("dia", 1000, 1000), ("broadband", 500, 50)),
+                  "business_critical": (("dia", 1000, 1000), ("dia", 1000, 1000)),
+                  "mission_critical": (("dia", 1000, 1000), ("dia", 1000, 1000))},
+        "very_large": {"standard": (("dia", 1000, 1000), ("dia", 1000, 1000)),
+                       "business_critical": (("dia", 1000, 1000), ("dia", 1000, 1000)),
+                       "mission_critical": (("dia", 1000, 1000), ("dia", 1000, 1000))},
+    },
+    "office": {
+        "small": {"standard": (("broadband", 100, 20), ("4g", 80, 20)),
+                  "business_critical": (("broadband", 300, 50), ("5g", 300, 50)),
+                  "mission_critical": (("dia", 100, 100), ("broadband", 300, 50))},
+        "medium": {"standard": (("broadband", 300, 50), ("4g", 80, 20)),
+                   "business_critical": (("dia", 200, 200), ("broadband", 300, 50)),
+                   "mission_critical": (("dia", 200, 200), ("dia", 200, 200))},
+        "large": {"standard": (("dia", 200, 200), ("broadband", 300, 50)),
+                  "business_critical": (("dia", 500, 500), ("broadband", 500, 50)),
+                  "mission_critical": (("dia", 500, 500), ("dia", 500, 500))},
+        "very_large": {"standard": (("dia", 500, 500), ("broadband", 500, 50)),
+                       "business_critical": (("dia", 1000, 1000), ("dia", 1000, 1000)),
+                       "mission_critical": (("dia", 1000, 1000), ("dia", 1000, 1000))},
+    },
+    "frontline": {
+        "small": {"standard": (("broadband", 100, 20), ("4g", 80, 20)),
+                  "business_critical": (("broadband", 300, 50), ("5g", 300, 50)),
+                  "mission_critical": (("dia", 100, 100), ("5g", 300, 50))},
+        "medium": {"standard": (("broadband", 300, 50), ("4g", 80, 20)),
+                   "business_critical": (("broadband", 500, 50), ("5g", 300, 50)),
+                   "mission_critical": (("dia", 200, 200), ("5g", 300, 50))},
+        "large": {"standard": (("broadband", 500, 50), ("5g", 300, 50)),
+                  "business_critical": (("dia", 200, 200), ("broadband", 500, 50)),
+                  "mission_critical": (("dia", 500, 500), ("dia", 500, 500))},
+        "very_large": {"standard": (("dia", 200, 200), ("broadband", 500, 50)),
+                       "business_critical": (("dia", 500, 500), ("broadband", 500, 50)),
+                       "mission_critical": (("dia", 1000, 1000), ("dia", 1000, 1000))},
+    },
+    "remote": {
+        "small": {"standard": (("satellite", 100, 20), ("4g", 80, 20)),
+                  "business_critical": (("5g", 300, 50), ("satellite", 100, 20)),
+                  "mission_critical": (("5g", 300, 50), ("satellite", 100, 20))},
+        "medium": {"standard": (("4g", 80, 20), ("satellite", 100, 20)),
+                   "business_critical": (("dsl", 100, 20), ("5g", 300, 50)),
+                   "mission_critical": (("broadband", 300, 50), ("5g", 300, 50))},
+        "large": {"standard": (("dsl", 100, 20), ("4g", 80, 20)),
+                  "business_critical": (("broadband", 300, 50), ("5g", 300, 50)),
+                  "mission_critical": (("dia", 100, 100), ("5g", 300, 50))},
+        "very_large": {"standard": (("broadband", 300, 50), ("4g", 80, 20)),
+                       "business_critical": (("dia", 200, 200), ("5g", 300, 50)),
+                       "mission_critical": (("dia", 200, 200), ("broadband", 300, 50))},
+    },
+}
 # Applications of Traffic Simulator v0.8; the connected simulator's catalog takes precedence.
 SIMULATOR_APPS = (
     "web_saas", "collaboration", "voice", "video", "file_sync", "developer", "updates", "backup", "dns",
@@ -285,18 +315,17 @@ def site_label(selection):
 
 
 def wan_lines(selection):
-    """Typical primary and backup lines; higher criticality asks for a sturdier backup."""
-    function = SITE_FUNCTIONS[selection["function"]]
-    primary, backup = (dict(line) for line in function["wan"][selection["size"]])
+    """Typical primary and backup lines for the site's category, size and criticality."""
+    category = SITE_FUNCTIONS[selection["function"]]["wan_class"]
+    primary, backup = (_line(*line) for line in WAN_LINES[category][selection["size"]][selection["criticality"]])
     notes = []
-    if selection["criticality"] != "standard" and backup["preset"] in WIRELESS_OR_THIN and function.get("wired_backup", True):
-        backup = _line("broadband", 500 if selection["size"] in ("large", "very_large") else 300, 50)
-        notes.append("Wired broadband backup instead of mobile/DSL for a business- or mission-critical site.")
-    if selection["criticality"] == "mission_critical" and selection["size"] in ("large", "very_large") and backup["preset"] != "dia":
-        backup = _line("dia", max(200, primary["download_mbit"] // 2), max(200, primary["upload_mbit"] // 2))
-        notes.append("Diverse second DIA from another carrier for a large mission-critical site.")
-    if not function.get("wired_backup", True) and selection["criticality"] != "standard":
-        notes.append("Remote sites rarely have a second wired line; expect mobile or satellite backup.")
+    if primary["preset"] == backup["preset"] == "dia":
+        notes.append("Dual DIA with matching bandwidth, so either line can carry the whole site; order the second "
+                     "line from a different carrier with a separate building entry.")
+    if category == "remote":
+        notes.append("Remote sites rarely have a second wired line; mobile or satellite backup is typical.")
+    elif backup["preset"] in ("4g", "5g"):
+        notes.append("Mobile backup keeps the site online but carries less traffic than the primary.")
     return {"primary": dict(primary, role="primary"), "backup": dict(backup, role="backup"), "notes": notes}
 
 
@@ -379,74 +408,119 @@ def _steering_assert(label, traffic_class, within):
             "condition": {"type": "steering", "class": traffic_class, "within": within - STEERING_WINDOW_S}}
 
 
+def _phase(phase, label, after=0):
+    return {"after": after, "action": "phase", "label": label, "phase": phase}
+
+
+def _in_phase(phase, *steps):
+    return [dict(step, phase=phase) for step in steps]
+
+
 def test_plan(selection, start_value):
-    """Ordered site tests as scenario definitions; each names the WAN role it runs on."""
+    """Ordered site tests as scenario definitions; each names the WAN role it runs on.
+
+    Every test runs about 3.5-4.5 minutes in named phases: the workload warms up, a
+    baseline is measured, the impairment holds long enough for SD-WAN health checks
+    and experience windows to react, and recovery is measured before stopping.
+    """
     targets = CRITICALITY[selection["criticality"]]["targets"]
     critical = selection["criticality"] != "standard"
     mission = selection["criticality"] == "mission_critical"
     react = targets["steering_max_s"] + STEERING_WINDOW_S
-    start = {"after": 0, "action": "traffic_generator", "label": "Start site workload", "value": dict(start_value)}
-    stop = {"after": 5, "action": "traffic_generator", "label": "Stop site workload", "value": {"operation": "stop"}}
     experience = f"Experience ≥ {targets['experience_min']}"
     success = f"Request success ≥ {targets['success_min_pct']:g}%"
     interactive = f"Interactive P95 ≤ {targets['interactive_p95_max_ms']} ms"
+    steered = f"steered within {targets['steering_max_s']} s"
+
+    def warm_up():
+        return [{"after": 0, "action": "traffic_generator", "label": "Start site workload",
+                 "value": dict(start_value), "phase": "Warm-up"}]
+
+    def baseline(hold=SETTLE_S):
+        return [_phase("Baseline", "Measuring normal experience", after=SETTLE_S),
+                *_in_phase("Baseline",
+                           _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=hold, window=hold),
+                           _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], window=hold))]
+
+    def stop(after=5, phase="Recovery"):
+        return [{"after": after, "action": "traffic_generator", "label": "Stop site workload",
+                 "value": {"operation": "stop"}, "phase": phase}]
+
     tests = [
         {"id": "baseline", "role": "primary", "name": "Baseline experience",
-         "description": "Both WANs healthy: the site workload must meet its targets.",
-         "steps": [start,
-                   _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=SETTLE_S),
-                   _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"]),
-                   _dem_assert(interactive, "interactive_p95_ms", "<=", targets["interactive_p95_max_ms"]),
-                   stop]},
+         "description": "Both WANs healthy: the site workload must meet its targets over a steady period.",
+         "steps": [*warm_up(),
+                   _phase("Steady state", "Measuring a steady site workload", after=SETTLE_S),
+                   *_in_phase("Steady state",
+                              _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=150, window=120),
+                              _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], window=120),
+                              _dem_assert(interactive, "interactive_p95_ms", "<=", targets["interactive_p95_max_ms"], window=120)),
+                   *stop(phase="Steady state")]},
         {"id": "primary_brownout", "role": "primary", "name": "Primary WAN brownout",
          "description": "The primary WAN degrades: targets must hold, or voice/video must move to the backup.",
-         "steps": [start,
-                   {"after": SETTLE_S, "action": "quality", "value": 60, "label": "Primary at 60% quality"},
-                   _steering_assert(f"Voice & video steered within {targets['steering_max_s']} s", "realtime", react),
-                   _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=20, window=30),
-                   {"after": 0, "action": "quality", "value": 100, "label": "Primary restored"},
-                   stop]},
+         "steps": [*warm_up(), *baseline(),
+                   *_in_phase("Brownout",
+                              {"after": 0, "action": "quality", "value": 60, "label": "Primary at 60% quality"},
+                              _steering_assert(f"Voice & video {steered}", "realtime", react),
+                              _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=60, window=60)),
+                   *_in_phase("Recovery",
+                              {"after": 30, "action": "quality", "value": 100, "label": "Primary restored"},
+                              _dem_assert(f"Recovered: {experience}", "experience_score", ">=", targets["experience_min"], after=45, window=30)),
+                   *stop()]},
         {"id": "primary_outage", "role": "primary", "name": "Primary WAN outage",
          "description": "The primary WAN fails with its link still up: the appliance must move traffic within the target.",
-         "steps": [start,
-                   {"after": SETTLE_S, "action": "fault", "value": "blackhole", "label": "Primary blackholed"},
-                   _steering_assert(f"Voice & video steered within {targets['steering_max_s']} s", "realtime", react),
-                   _steering_assert(f"Interactive apps steered within {targets['steering_max_s']} s", "interactive", react),
-                   _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], after=10, window=30),
-                   {"after": 0, "action": "fault", "value": "normal", "label": "Primary restored"},
-                   _dem_assert(f"Recovered: {success}", "availability_pct", ">=", targets["success_min_pct"], after=30, window=30),
-                   stop]},
+         "steps": [*warm_up(), *baseline(),
+                   *_in_phase("Outage",
+                              {"after": 0, "action": "fault", "value": "blackhole", "label": "Primary blackholed"},
+                              _steering_assert(f"Voice & video {steered}", "realtime", react),
+                              _steering_assert(f"Interactive apps {steered}", "interactive", react),
+                              _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], after=45, window=45)),
+                   *_in_phase("Recovery",
+                              {"after": 30, "action": "fault", "value": "normal", "label": "Primary restored"},
+                              _dem_assert(f"Recovered: {success}", "availability_pct", ">=", targets["success_min_pct"], after=45, window=30)),
+                   *stop()]},
     ]
     if critical:
         tests.append({
             "id": "backup_outage", "role": "backup", "name": "Backup WAN outage",
             "description": "The backup fails while the primary is healthy: users must not notice.",
-            "steps": [start,
-                      {"after": SETTLE_S, "action": "fault", "value": "blackhole", "label": "Backup blackholed"},
-                      _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=30, window=30),
-                      _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], window=30),
-                      {"after": 0, "action": "fault", "value": "normal", "label": "Backup restored"},
-                      stop]})
+            "steps": [*warm_up(), *baseline(),
+                      *_in_phase("Backup outage",
+                                 {"after": 0, "action": "fault", "value": "blackhole", "label": "Backup blackholed"},
+                                 _dem_assert(experience, "experience_score", ">=", targets["experience_min"], after=75, window=60),
+                                 _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], window=60)),
+                      *_in_phase("Recovery",
+                                 {"after": 15, "action": "fault", "value": "normal", "label": "Backup restored"},
+                                 _phase("Recovery", "Backup recovering", after=40)),
+                      *stop()]})
         tests.append({
             "id": "primary_saturation", "role": "primary", "name": "Primary WAN saturation",
             "description": "The primary is congested: voice/video and interactive apps must keep working while bulk traffic slows.",
-            "steps": [start,
-                      {"after": SETTLE_S, "action": "quality", "value": 30, "label": "Primary at 30% quality"},
-                      _dem_assert(f"Voice & video {success.lower()}", "realtime_availability_pct", ">=", targets["success_min_pct"], after=30, window=30),
-                      _dem_assert(interactive, "interactive_p95_ms", "<=", targets["interactive_p95_max_ms"], window=30),
-                      {"after": 0, "action": "quality", "value": 100, "label": "Primary restored"},
-                      stop]})
+            "steps": [*warm_up(), *baseline(),
+                      *_in_phase("Saturation",
+                                 {"after": 0, "action": "quality", "value": 30, "label": "Primary at 30% quality"},
+                                 _dem_assert(f"Voice & video {success.lower()}", "realtime_availability_pct", ">=", targets["success_min_pct"], after=75, window=60),
+                                 _dem_assert(interactive, "interactive_p95_ms", "<=", targets["interactive_p95_max_ms"], window=60)),
+                      *_in_phase("Recovery",
+                                 {"after": 15, "action": "quality", "value": 100, "label": "Primary restored"},
+                                 _phase("Recovery", "Primary recovering", after=40)),
+                      *stop()]})
     if mission:
+        flaps = []
+        for _cycle in range(2):
+            flaps += [{"after": 0 if not flaps else 15, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure"},
+                      {"after": 15, "action": "fault", "value": "normal", "label": "Recovered"},
+                      {"after": 15, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure"},
+                      {"after": 15, "action": "fault", "value": "normal", "label": "Recovered"}]
         tests.append({
             "id": "flaky_primary", "role": "primary", "name": "Flaky primary WAN",
             "description": "The primary fails one way, then the other, in short bursts: the site must stay within its success target.",
-            "steps": [start,
-                      {"after": SETTLE_S, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure"},
-                      {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
-                      {"after": 8, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure"},
-                      {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
-                      _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], after=15, window=60),
-                      stop]})
+            "steps": [*warm_up(), *baseline(hold=30),
+                      *_in_phase("Flapping", *flaps),
+                      *_in_phase("Recovery",
+                                 _dem_assert(success, "availability_pct", ">=", targets["success_min_pct"], after=30, window=150),
+                                 _phase("Recovery", "Primary stable", after=30)),
+                      *stop()]})
     return tests
 
 

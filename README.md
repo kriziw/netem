@@ -49,8 +49,12 @@ separate, read-only showroom dashboard on **8082**. Open
 `http://<netem-host>:8082/` on a showroom screen and use the browser's full-screen
 mode (F11). No login or external assets are required on the local lab network.
 
-The dashboard shows live WAN health, measured download/upload traffic, requested
-delay/jitter/loss, model SLA and the current scenario/session. It refreshes every
+The dashboard answers three questions: who the client site is (industry,
+sub-industry, function, size, criticality, targets and typical WAN lines, plus
+the lab session); what runs on the network (the current test with its phases and
+time to the next phase, the simulated workload and live traffic and health per
+WAN); and what users get (experience against the targets, where and why problems
+happen, SD-WAN steering, and a per-phase report when a test ends). It refreshes every
 two seconds, automatically rotates pages when there are more WANs than fit, and
 shows unavailable measurements as gaps rather than zero. Connection failures
 blank live rates and label retained state as last known; reconnection is automatic.

@@ -52,7 +52,7 @@ finding: symptom · WAN · cause</div>
   <li><strong>"Appears on several WANs"</strong>: the appliance is not translating per WAN. Enable SNAT to each WAN interface address.</li>
   <li><strong>"NetEm did not see these addresses on any WAN"</strong>: something between NetEm and the target, such as the upstream router, translates addresses. Enter the appliance's WAN addresses manually.</li>
 </ul>
-<p>Per-WAN attribution and steering need Traffic Simulator v0.7 or later with its controlled target updated to the same release. An older target is reported by the simulator as an outdated-target finding.</p>
+<p>Per-WAN attribution and steering need Traffic Simulator v0.7 or later with its controlled target updated to the same release. An older target is reported as an outdated-target finding. Update it from the simulator under <strong>Updates &amp; Appliance Routing → Controlled target updates</strong>: the simulator installs its own release on the target, checks it and rolls back if the target does not come back. Remote updates need a one-time setup on the target's console; the simulator's guide describes it. Keep the target on the simulator's version: older targets can answer voice/video probes from the wrong address, which shows up as failed voice and video bursts with no network cause.</p>
 
 <h2 id="media-modes">Voice/video judging</h2>
 <p>Choose per workload how much packet loss fails a voice or video burst. <strong>Strict</strong> fails a burst on any lost packet. <strong>Realistic</strong> accepts small random loss that codecs usually conceal: voice up to 2% (1 of 50 packets) and video up to 1% (2 of 200 packets) per burst. Media findings show how many bursts fail under each mode, so you can compare without rerunning.</p>

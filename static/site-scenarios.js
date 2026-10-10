@@ -20,17 +20,15 @@ window.NetEmSites = (() => {
     if (!state?.tests?.length) return '';
     return '<h4>'+escape(state.label)+' · '+escape(state.active ? 'Running' : state.result || '')+'</h4>'+state.tests.map(test => '<p><span class="status '+({passed:'good',failed:'bad',running:'info',stopped:'warn'}[test.status] || 'info')+'">'+escape(test.status.toUpperCase())+'</span> '+escape(test.name)+(test.error ? ' · '+escape(test.error) : '')+'</p>').join('');
   }
-  function mount(options, active, state) {
-    const form = document.getElementById('site-selection');
-    if (!form) return;
-    const fields = ['industry','sub_industry','function','size','criticality'];
-    const selects = Object.fromEntries(fields.map(field => [field, form.elements[field]]));
-    const run = document.getElementById('site-run');
-    const initial = active?.selection || {industry:'manufacturing',sub_industry:'automotive',function:'plant',size:'large',criticality:'business_critical'};
-    let serial = 0, controller, disposed = false, ready = false, preview;
-    const values = () => Object.fromEntries(fields.map(field => [field, selects[field].value]));
+  const FIELDS = ['industry','sub_industry','function','size','criticality'];
+  const DEFAULT_SELECTION = {industry:'manufacturing',sub_industry:'automotive',function:'plant',size:'large',criticality:'business_critical'};
+
+  // Fills the five site selects of a form; sub-industries and site functions follow the industry.
+  function selectors(form, options, initial, onChange) {
+    const selects = Object.fromEntries(FIELDS.map(field => [field, form.elements[field]]));
+    const values = () => Object.fromEntries(FIELDS.map(field => [field, selects[field].value]));
     const populate = (select, entries, preferred) => {
-      select.replaceChildren(...entries.map(([value, label]) => { const option = document.createElement('option'); option.value = value; option.textContent = label; return option; }));
+      select.replaceChildren(...entries.map(([value, label]) => { const option = select.ownerDocument.createElement('option'); option.value = value; option.textContent = label; return option; }));
       if (entries.some(([value]) => value === preferred)) select.value = preferred;
     };
     const cascade = preferred => {
@@ -38,10 +36,23 @@ window.NetEmSites = (() => {
       populate(selects.sub_industry, Object.entries(industry.sub_industries).map(([key,item]) => [key,item.label]), preferred.sub_industry);
       populate(selects.function, industry.functions.map(key => [key,options.functions[key].label]), preferred.function);
     };
-    populate(selects.industry, Object.entries(options.industries).map(([key,item]) => [key,item.label]), initial.industry);
-    cascade(initial);
-    populate(selects.size, Object.entries(options.sizes), initial.size);
-    populate(selects.criticality, Object.entries(options.criticality).map(([key,item]) => [key,item.label]), initial.criticality);
+    const start = initial || DEFAULT_SELECTION;
+    populate(selects.industry, Object.entries(options.industries).map(([key,item]) => [key,item.label]), start.industry);
+    cascade(start);
+    populate(selects.size, Object.entries(options.sizes), start.size);
+    populate(selects.criticality, Object.entries(options.criticality).map(([key,item]) => [key,item.label]), start.criticality);
+    selects.industry.addEventListener('change', () => { cascade(values()); onChange?.(); });
+    FIELDS.filter(field => field !== 'industry').forEach(field => selects[field].addEventListener('change', () => onChange?.()));
+    return {selects, values};
+  }
+
+  function mount(options, active, state) {
+    const form = document.getElementById('site-selection');
+    if (!form) return;
+    const fields = FIELDS;
+    const run = document.getElementById('site-run');
+    let serial = 0, controller, disposed = false, ready = false, preview;
+    const {selects, values} = selectors(form, options, active?.selection, () => refresh());
     function controls() {
       const saved = ready && active && fields.every(field => active.selection[field] === selects[field].value);
       const busy = run.dataset.busy === 'true';
@@ -71,13 +82,11 @@ window.NetEmSites = (() => {
         document.getElementById('site-preview').textContent = error.message;
       } finally { if (!disposed && revision === serial) { document.getElementById('site-preview').removeAttribute('aria-busy'); controls(); } }
     }
-    selects.industry.addEventListener('change', () => { cascade(values()); refresh(); });
-    fields.filter(field => field !== 'industry').forEach(field => selects[field].addEventListener('change', refresh));
     run.addEventListener('change', controls);
     document.getElementById('site-results').innerHTML = resultsHtml(state);
     window.NetEmActions?.trackClient({stop() { disposed = true; controller?.abort(); }});
     refresh();
     return {update(next) { document.getElementById('site-results').innerHTML = resultsHtml(next); }};
   }
-  return {previewHtml, testsHtml, resultsHtml, mount};
+  return {previewHtml, testsHtml, resultsHtml, mount, selectors};
 })();

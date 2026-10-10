@@ -1,0 +1,52 @@
+<h2 id="purpose">What the showroom is for</h2>
+<p>The showroom is a read-only live dashboard for a demo screen or a customer-facing display. It answers three questions without operator controls:</p>
+<ol>
+<li><strong>Who is this site?</strong> The client industry and sub-industry, site function, size and criticality, its people and devices, the experience targets and typical WAN lines, and the running lab session.</li>
+<li><strong>What is happening on the network?</strong> The test that is running, its phases and the time to the next phase, the simulated workload and application mix, and the measured traffic on every WAN.</li>
+<li><strong>What do users get?</strong> Experience, request success and interactive response against the targets, where a problem happens and why, whether the SD-WAN appliance steers traffic away from an impaired WAN, and a report once a test ends.</li>
+</ol>
+
+<h2 id="open">Open it</h2>
+<p>The showroom listens on its own port, <code>8082</code> by default, on every address of the appliance. <a href="{{ url_for('settings') }}">Settings</a> shows the address to open. Show it full screen in a browser on the display; it fits a 1080p screen without scrolling and scales up to 4K.</p>
+<p>Two environment variables change the listener (add <code>Environment=...</code> lines to the systemd service):</p>
+<ul>
+<li><code>NETEM_SHOWROOM_PORT=8082</code>: another port; <code>0</code> disables the showroom. It cannot use the operator port 8081.</li>
+<li><code>NETEM_SHOWROOM_HOST=0.0.0.0</code>: bind to one address only, such as a showroom-facing interface.</li>
+</ul>
+<p>Allow the port through the appliance firewall for the showroom network only.</p>
+
+<h2 id="site">Client site band</h2>
+<p>The band at the top shows the site of the running lab session. Without a session it shows the active site profile from <a href="{{ url_for('tests') }}#site-scenario">Tests → Site scenario</a>. Choose the site when starting a session so the screen and the session report name the same client. With no site at all, the screen says so and judges results against the Command Center's lab thresholds.</p>
+
+<h2 id="activity">Network &amp; activity</h2>
+<ul>
+<li><strong>Running now</strong>: the test name, the WAN it runs on, the current phase and step, the phase timeline and elapsed time against the planned length, and when the next phase starts. When the operator pauses a test, the panel turns amber and the countdown waits until the test resumes. Site test plans show each test's status.</li>
+<li><strong>Simulated users</strong>: users currently running in the Traffic Simulator, the activity level, the voice/video judging mode and the busiest applications.</li>
+<li><strong>WAN cards</strong>: measured download and upload, the share of each shaped limit in use, a two-minute traffic chart, the health of the path with the reason, the requested impairment and how the users on that WAN fare. With more WANs than fit the screen, the cards rotate every 12 seconds.</li>
+</ul>
+
+<h2 id="outcome">Experience outcome</h2>
+<ul>
+<li><strong>Result tiles</strong>: experience score, request success and interactive response (P95) over the last minute, green when the site target is met and red when missed.</li>
+<li><strong>Where it happens &amp; why</strong>: the top findings from the live diagnosis, each naming the WAN and the cause, such as a full queue or injected loss.</li>
+<li><strong>SD-WAN steering</strong>: for voice and video, web and collaboration, and file transfers, the share of traffic on each WAN coloured by that WAN's health, and how long the appliance took to move traffic away from an impaired WAN.</li>
+</ul>
+
+<h2 id="report">Test report</h2>
+<p>When a test ends, its report replaces the live findings for 30 minutes, or until the next test starts. The report shows:</p>
+<ul>
+<li>the result, the WAN, the site, the duration and how many checks passed;</li>
+<li>a short conclusion, for example how far experience fell and in which phase;</li>
+<li>one row per phase with experience, request success (and its lowest point), interactive P95, average traffic per WAN and the steering verdict per traffic class;</li>
+<li>SD-WAN remediation: which traffic the appliance moved, from which WAN, how fast, and whether that met the site's steering target.</li>
+</ul>
+<p>The same summary appears on the Tests page and, for tests run in a lab session, in the session report.</p>
+
+<h2 id="security">What it publishes</h2>
+<p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "an address". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
+
+<h2 id="offline">Connection loss</h2>
+<p>The page polls every two seconds. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>
+
+<h2 id="branding">Branding</h2>
+<p>The showroom uses the appliance brand: name, logo, favicon, font and colours. See <a href="{{ url_for('documentation_page', slug='branding') }}">Appliance branding</a>.</p>

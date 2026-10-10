@@ -122,6 +122,7 @@ jobs:
                   "/docs/getting-started",
                   "/docs/architecture",
                   "/docs/overview",
+                  "/docs/diagnosis",
                   "/docs/tests",
                   "/docs/site-scenarios",
                   "/docs/sessions",
@@ -129,8 +130,10 @@ jobs:
                   "/docs/scenarios",
                   "/docs/traffic-security",
                   "/docs/analytics-sla",
+                  "/docs/showroom",
                   "/docs/integrations-api",
                   "/docs/topology-profiles",
+                  "/docs/branding",
                   "/docs/updates-releases",
                   "/docs/troubleshooting",
                   "/docs/roadmap",
@@ -144,7 +147,9 @@ jobs:
 
               response = client.post(
                   "/sessions/start",
-                  data={"name": "CI validation session", "return_to": "sessions"},
+                  data={"name": "CI validation session", "return_to": "sessions",
+                        "industry": "manufacturing", "sub_industry": "automotive",
+                        "function": "plant", "size": "large", "criticality": "mission_critical"},
                   follow_redirects=True,
               )
               if response.status_code != 200:
@@ -152,6 +157,8 @@ jobs:
               state = client.get("/api/v1/state").get_json()
               if not state.get("session", {}).get("active"):
                   raise SystemExit("Session did not become active")
+              if state["session"].get("site", {}).get("industry") != "manufacturing":
+                  raise SystemExit("Session did not record its client site")
 
               response = client.post(
                   "/sessions/stop",

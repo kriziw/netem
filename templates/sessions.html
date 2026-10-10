@@ -22,6 +22,7 @@
       <div>
         <div class="eyebrow">Active lab session</div>
         <div class="wan-name">{{ active_session.name }}</div>
+        {% if active_session.site %}<div class="card-sub"><strong>Site:</strong> {{ active_session.site.label }}</div>{% endif %}
         <div class="card-sub">Started <span data-session-start="{{ active_session.started_at }}"></span> · new runtime events are automatically associated with this session.</div>
       </div>
       <form method="post" action="{{ url_for('session_stop') }}">
@@ -77,10 +78,17 @@
   <section class="card">
     <div class="card-head"><div><div class="card-title">Start a lab session</div><div class="card-sub">Name the objective rather than the individual test</div></div></div>
     <div class="card-pad">
-      <form method="post" action="{{ url_for('session_start') }}">
+      <form method="post" action="{{ url_for('session_start') }}" id="session-start">
         <input type="hidden" name="return_to" value="sessions">
         <label>Session name</label>
         <input type="text" name="name" maxlength="100" placeholder="FortiGate SD-WAN failover validation" required>
+        <div class="section-title">Client site</div>
+        <div class="site-selectors">
+          {% for field, title in [('industry','Industry'),('sub_industry','Sub-industry'),('function','Site function'),('size','Size'),('criticality','Criticality')] %}
+          <div><label for="session-{{ field }}">{{ title }}</label><select id="session-{{ field }}" name="{{ field }}" required></select></div>
+          {% endfor %}
+        </div>
+        <div class="field-help">The session records which site it validates; starting it also makes this the active site, so its experience targets judge the session. Tests → Site scenario shows the full site plan.</div>
         <div class="field-help">While active, scenario, fault, MTU, capture and security events are tagged with this session ID.</div>
         <button class="btn btn-primary" type="submit" style="margin-top:12px">Start session</button>
       </form>
@@ -112,6 +120,7 @@
       <div class="session-row" style="grid-template-columns:minmax(180px,1.4fr) 120px 100px 70px 120px">
         <div>
           <div class="session-name">{{ item.name }}</div>
+          {% if item.site %}<div class="session-meta">{{ item.site.label }}</div>{% endif %}
           <div class="session-meta mono">{{ item.id }}</div>
         </div>
         <div><div class="metric-label">Started</div><div class="session-meta" data-ts-full="{{ item.started_at }}"></div></div>
@@ -139,6 +148,8 @@
 
 {% block scripts %}
 <script>
+const sessionStartForm = document.getElementById("session-start");
+if (sessionStartForm) NetEmSites.selectors(sessionStartForm, {{ site_options|tojson }}, {{ site_selection|tojson }});
 function fullTime(ts) {
   return new Date(Number(ts)*1000).toLocaleString([], {dateStyle:"medium", timeStyle:"medium"});
 }
