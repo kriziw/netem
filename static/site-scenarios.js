@@ -18,7 +18,11 @@ window.NetEmSites = (() => {
   }
   function resultsHtml(state) {
     if (!state?.tests?.length) return '';
-    return '<h4>'+escape(state.label)+' · '+escape(state.active ? 'Running' : state.result || '')+'</h4>'+state.tests.map(test => '<p><span class="status '+({passed:'good',failed:'bad',running:'info',stopped:'warn'}[test.status] || 'info')+'">'+escape(test.status.toUpperCase())+'</span> '+escape(test.name)+(test.error ? ' · '+escape(test.error) : '')+'</p>').join('');
+    // A finished plan also shows its summary: the verdict and what the run showed, as on the showroom.
+    const summary = !state.active && state.summary ? state.summary : null;
+    const insights = summary ? '<p class="field-help"><strong>'+escape(summary.title)+'</strong>'+(summary.checks?.total ? ' · '+summary.checks.passed+' of '+summary.checks.total+' checks met' : '')+'</p>'+
+      (summary.insights || []).map(item => '<p><span class="status '+({pass:'good',warn:'warn',fail:'bad'}[item.tone] || 'info')+'">'+escape(({pass:'OK',warn:'Note',fail:'Missed'})[item.tone] || 'Note')+'</span> '+escape(item.text)+'</p>').join('') : '';
+    return '<h4>'+escape(state.label)+' · '+escape(state.active ? 'Running' : state.result || '')+'</h4>'+state.tests.map(test => '<p><span class="status '+({passed:'good',failed:'bad',running:'info',stopped:'warn'}[test.status] || 'info')+'">'+escape(test.status.toUpperCase())+'</span> '+escape(test.name)+(test.error ? ' · '+escape(test.error) : '')+'</p>').join('')+insights;
   }
   const FIELDS = ['industry','sub_industry','function','size','criticality'];
   const DEFAULT_SELECTION = {industry:'manufacturing',sub_industry:'automotive',function:'plant',size:'large',criticality:'business_critical'};

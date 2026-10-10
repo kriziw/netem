@@ -19,6 +19,12 @@ test('preview, tests and results escape dynamic content', () => {
   assert.ok(!ui.previewHtml(plan(selection)).includes('<img'));
   assert.ok(ui.testsHtml([{id:'x" onclick="bad',name:'<b>',description:'&',role:'primary'}]).includes('&quot;'));
   assert.ok(ui.resultsHtml({label:'<b>',tests:[{name:'<img>',status:'failed',error:'<script>'}]}).includes('&lt;script&gt;'));
+  // A finished plan shows its summary; a running one does not.
+  const summary = {title: '3 of 5 tests passed', checks: {passed: 4, total: 5}, insights: [{tone: 'fail', text: '<i>Missed</i> check'}, {tone: 'pass', text: 'Users did not notice'}]};
+  const finished = ui.resultsHtml({label: 'Plant', result: 'failed', tests: [{name: 'A', status: 'failed'}], summary});
+  assert.ok(finished.includes('3 of 5 tests passed') && finished.includes('4 of 5 checks met') && finished.includes('&lt;i&gt;Missed'));
+  assert.ok(finished.includes('<span class="status bad">Missed</span>') && finished.includes('<span class="status good">OK</span>'));
+  assert.ok(!ui.resultsHtml({label: 'Plant', active: true, tests: [{name: 'A', status: 'running'}], summary}).includes('3 of 5'));
 });
 test('cascade filters choices; an unsaved preview disables run and WAN apply', async () => {
   const dom = setup(async url => ({ok:true,json:async () => plan(Object.fromEntries(new URLSearchParams(url.split('?')[1])))}));

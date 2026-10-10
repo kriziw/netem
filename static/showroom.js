@@ -200,11 +200,16 @@
   const showReport = data => Boolean(data && data.last_test && !(data.scenario || {}).active &&
     number(data.last_test.ended_at) && data.timestamp - data.last_test.ended_at < REPORT_SECONDS);
 
+  // After a run sequence, the plan's results replace the dashboard for half an hour, until the next test.
+  const showPlanSummary = data => Boolean(data && data.plan_summary && !(data.scenario || {}).active &&
+    !(data.plan || {}).active && number(data.plan_summary.ended_at) && data.timestamp - data.plan_summary.ended_at < REPORT_SECONDS);
+
   // What fills the screen: a waiting screen before the session, a test's announcement for the
-  // few seconds before it starts, and otherwise the live dashboard.
+  // few seconds before it starts, a run sequence's results, and otherwise the live dashboard.
   function stageMode(data) {
     const scenario = (data && data.scenario) || {};
     if (scenario.active && scenario.intro) return 'intro';
+    if (showPlanSummary(data)) return 'summary';
     if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
     return 'live';
   }
@@ -233,8 +238,40 @@
     };
   }
 
+  const TEST_RESULTS = {passed: ['Passed', 'pass'], failed: ['Failed', 'fail'], stopped: ['Stopped', 'warn'], skipped: ['Not run', 'unknown']};
+
+  // The whole run: the verdict, one row per test with what users got, and what the run showed.
+  function planSummaryView(summary) {
+    const [result, tone] = RESULTS[summary.result] || [words(summary.result) || 'Finished', 'unknown'];
+    const checks = summary.checks || {};
+    return {
+      eyebrow: summary.label ? `Site test plan results · ${summary.label}` : 'Site test plan results',
+      title: summary.title || 'Site test plan finished', result, tone,
+      meta: [number(summary.duration_s) && `${clock(summary.duration_s)} in total`,
+        number(checks.total) && checks.total ? `${checks.passed} of ${checks.total} checks met` : null,
+        number(summary.ended_at) && `finished ${new Date(summary.ended_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`]
+        .filter(Boolean).join(' · '),
+      tests: (summary.tests || []).map(test => {
+        const [label, rowTone] = TEST_RESULTS[test.result] || [words(test.result) || '—', 'unknown'];
+        const dropped = number(test.experience) && number(test.experience_low) && test.experience_low < test.experience - 0.5;
+        const facts = !test.measured ? [test.result === 'skipped' ? 'Not run: the plan stopped before this test' : 'No simulated user traffic measured'] : [
+          dropped ? `Experience ${Math.round(test.experience)} → ${Math.round(test.experience_low)} in ${test.low_phase}`
+            : number(test.experience) ? `Experience ${Math.round(test.experience)}` : null,
+          // Above 99% the second decimal matters: 99.98% is not 100%.
+          number(test.success_low) ? `lowest success ${test.success_low.toFixed(test.success_low >= 99 ? 2 : 1)}%` : null,
+          number(test.p95_max) ? `slowest response ${Math.round(test.p95_max)} ms` : null];
+        return {name: test.name, result: label, tone: rowTone,
+          where: [test.link, test.checks && test.checks.total ? `${test.checks.passed}/${test.checks.total} checks` : null].filter(Boolean).join(' · '),
+          facts: facts.filter(Boolean).join(' · '),
+          moved: (test.moved || []).map(item => `${item.traffic_class} moved off ${item.wan} in ${item.seconds} s`)};
+      }),
+      insights: (summary.insights || []).map(item => ({text: item.text, tone: ['pass', 'warn', 'fail'].includes(item.tone) ? item.tone : 'pass'})),
+    };
+  }
+
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
-    phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView};
+    phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView,
+    showPlanSummary, planSummaryView};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -396,6 +433,26 @@
     document.getElementById('stage').hidden = mode === 'live';
     document.getElementById('waiting').hidden = mode !== 'waiting';
     document.getElementById('intro').hidden = mode !== 'intro';
+    document.getElementById('plan-summary').hidden = mode !== 'summary';
+    if (mode === 'summary') {
+      const view = planSummaryView(latest.plan_summary);
+      document.getElementById('plan-summary').className = `plan-summary ${view.tone}`;
+      text('ps-eyebrow', view.eyebrow);
+      text('ps-title', view.title);
+      text('ps-meta', view.meta);
+      const result = document.getElementById('ps-result');
+      result.className = `pill ${view.tone}`;
+      result.textContent = view.result;
+      document.getElementById('ps-tests').replaceChildren(...view.tests.map(test => {
+        const item = element('li');
+        const name = element('strong', '', test.name);
+        if (test.where) name.append(element('small', '', test.where));
+        item.append(element('span', `pill ${test.tone}`, test.result), name, element('p', '', test.facts));
+        for (const line of test.moved) item.append(element('p', 'moved', line));
+        return item;
+      }));
+      document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
+    }
     if (mode === 'waiting') {
       const view = waitingView(latest.site);
       document.getElementById('waiting-site').hidden = !view.site;

@@ -274,3 +274,35 @@ test('an announced test shows its plan, its checks and a countdown that ticks lo
   assert.equal(ui.advance(scenario, 3).starts_in_s.toFixed(1), '1.2');
   assert.equal(ui.advance(scenario, 9).starts_in_s, 0);
 });
+
+test('after a run sequence the results replace the dashboard until the next test', () => {
+  const summary = {label: 'Automotive plant', result: 'failed', title: '3 of 5 tests passed', ended_at: 100, duration_s: 1295,
+    checks: {passed: 4, total: 5},
+    tests: [{name: 'Primary WAN outage', result: 'failed', link: 'WAN1', measured: true, checks: {passed: 1, total: 2},
+      experience: 92, experience_low: 71, low_phase: 'Outage', success_low: 97.4, p95_max: 620,
+      moved: [{traffic_class: 'Voice & video', wan: 'WAN1', seconds: 9, within_target: true}]},
+      {name: 'Baseline experience', result: 'passed', link: 'WAN1', measured: true, checks: {passed: 3, total: 3},
+        experience: 92, experience_low: 92, low_phase: 'Steady state', success_low: 99.98, p95_max: 140, moved: []},
+      {name: 'Flaky primary WAN', result: 'skipped', measured: false, checks: {passed: 0, total: 0}, moved: []}],
+    insights: [{tone: 'fail', text: 'Primary WAN outage missed: Request success ≥ 99%.'}, {tone: 'odd', text: 'Unknown tone'}]};
+  const data = (extra = {}) => Object.assign({timestamp: 160, scenario: {active: false}, session: {active: false}, plan: {active: false}, plan_summary: summary}, extra);
+  assert.equal(ui.stageMode(data()), 'summary');
+  assert.equal(ui.stageMode(data({session: {active: true}})), 'summary');
+  assert.equal(ui.stageMode(data({scenario: {active: true, intro: true}})), 'intro');
+  assert.equal(ui.stageMode(data({scenario: {active: true}})), 'live');
+  assert.equal(ui.stageMode(data({plan: {active: true}})), 'live');
+  assert.equal(ui.stageMode(data({timestamp: 100 + 1800})), 'waiting');
+  const view = ui.planSummaryView(summary);
+  assert.equal(view.eyebrow, 'Site test plan results · Automotive plant');
+  assert.equal(view.title, '3 of 5 tests passed');
+  assert.equal(view.result, 'Failed');
+  assert.equal(view.tone, 'fail');
+  assert.match(view.meta, /^21:35 in total · 4 of 5 checks met · finished /);
+  assert.deepEqual(plain(view.tests[0]), {name: 'Primary WAN outage', result: 'Failed', tone: 'fail', where: 'WAN1 · 1/2 checks',
+    facts: 'Experience 92 → 71 in Outage · lowest success 97.4% · slowest response 620 ms', moved: ['Voice & video moved off WAN1 in 9 s']});
+  // No drop is not shown as one, and above 99% the second decimal stays.
+  assert.equal(view.tests[1].facts, 'Experience 92 · lowest success 99.98% · slowest response 140 ms');
+  assert.equal(view.tests[2].facts, 'Not run: the plan stopped before this test');
+  assert.equal(view.tests[2].tone, 'unknown');
+  assert.deepEqual(plain(view.insights.map(item => item.tone)), ['fail', 'pass']);
+});
