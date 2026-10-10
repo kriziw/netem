@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.12.0](https://github.com/kriziw/netem/compare/v0.11.2...v0.12.0) (2026-10-10)
+
+
+### Features
+
+* built-in and site tests run 3-5 minutes in named phases with adjustable length and pause ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+* lab sessions record the client site (industry, sub-industry, function, size, criticality) ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+* showroom and branding documentation; Settings shows the showroom address ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+* showroom shows the client site, the running test with phases and next-phase countdown, and a per-phase report after each test ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+* site WAN lines follow site category, size and criticality; dual DIA lines have matching bandwidth ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+* test summaries per phase with SD-WAN remediation on Tests and in session reports ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+
+
+### Bug Fixes
+
+* running-test Stop stops an active site plan and sends the form token ([6a6e88f](https://github.com/kriziw/netem/commit/6a6e88fe261caa1e6878dc9d4601b7261346e529))
+
 ## [0.11.2](https://github.com/kriziw/netem/compare/v0.11.1...v0.11.2) (2026-10-09)
 
 
