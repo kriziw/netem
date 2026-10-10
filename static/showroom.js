@@ -73,6 +73,7 @@
     if (number(moved.elapsed_s)) moved.elapsed_s += seconds;
     if (number(moved.phase_elapsed_s)) moved.phase_elapsed_s += seconds;
     if (number(moved.phase_remaining_s)) moved.phase_remaining_s = Math.max(0, moved.phase_remaining_s - seconds);
+    if (number(moved.starts_in_s)) moved.starts_in_s = Math.max(0, moved.starts_in_s - seconds);
     return moved;
   }
 
@@ -199,8 +200,41 @@
   const showReport = data => Boolean(data && data.last_test && !(data.scenario || {}).active &&
     number(data.last_test.ended_at) && data.timestamp - data.last_test.ended_at < REPORT_SECONDS);
 
+  // What fills the screen: a waiting screen before the session, a test's announcement for the
+  // few seconds before it starts, and otherwise the live dashboard.
+  function stageMode(data) {
+    const scenario = (data && data.scenario) || {};
+    if (scenario.active && scenario.intro) return 'intro';
+    if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
+    return 'live';
+  }
+
+  function waitingView(site) {
+    return site ? {site: true, title: `${site.sub_industry} · ${site.function}`, meta: `${site.industry} · ${site.size} · ${site.criticality}`}
+      : {site: false, title: '', meta: ''};
+  }
+
+  // The coming test: what each phase does, what is checked, and when it starts.
+  function introView(scenario, plan) {
+    const seconds = Math.ceil(Number(scenario.starts_in_s) || 0);
+    // A site plan's tests are named after the plan; the plan is named on the line below instead.
+    const prefix = plan && plan.active && plan.label ? `${plan.label}: ` : null;
+    const name = scenario.scenario_name || 'Next test';
+    return {
+      where: scenario.link ? `Coming up on ${scenario.link}` : 'Coming up',
+      name: prefix && name.startsWith(prefix) ? name.slice(prefix.length) : name,
+      description: scenario.description || '',
+      countdown: seconds > 0 ? String(seconds) : 'Now',
+      phases: (scenario.phases || []).map((phase, index) => ({
+        number: index + 1, name: phase.name, duration: clock(phase.planned_s), what: phase.what || ''})),
+      checks: scenario.checks || [],
+      meta: [number(scenario.planned_s) && scenario.planned_s > 0 ? `About ${clock(scenario.planned_s)} long` : null,
+        planProgress(plan)].filter(Boolean).join(' · '),
+    };
+  }
+
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
-    phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress};
+    phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -356,8 +390,42 @@
     }
   }
 
+  function renderStage() {
+    const mode = stageMode(latest);
+    document.body.dataset.mode = mode;
+    document.getElementById('stage').hidden = mode === 'live';
+    document.getElementById('waiting').hidden = mode !== 'waiting';
+    document.getElementById('intro').hidden = mode !== 'intro';
+    if (mode === 'waiting') {
+      const view = waitingView(latest.site);
+      document.getElementById('waiting-site').hidden = !view.site;
+      text('waiting-site-title', view.title);
+      text('waiting-site-meta', view.meta);
+    }
+    if (mode === 'intro') {
+      const scenario = advance(latest.scenario, online ? Math.min(5, (Date.now() - receivedAt) / 1000) : 0);
+      const view = introView(scenario, latest.plan);
+      text('intro-where', view.where);
+      text('intro-name', view.name);
+      text('intro-description', view.description);
+      text('intro-seconds', view.countdown);
+      text('intro-meta', view.meta);
+      document.getElementById('intro-phases').replaceChildren(...view.phases.map(phase => {
+        const item = element('li');
+        const head = element('div', 'intro-phase-head');
+        head.append(element('b', '', String(phase.number)), element('strong', '', phase.name), element('span', '', phase.duration));
+        item.append(head);
+        if (phase.what) item.append(element('p', '', phase.what));
+        return item;
+      }));
+      document.getElementById('intro-checks-block').hidden = !view.checks.length;
+      document.getElementById('intro-checks').replaceChildren(...view.checks.map(check => element('li', '', check)));
+    }
+  }
+
   function render() {
     if (!latest) return;
+    renderStage();
     renderSite();
     renderPartner();
     renderRunning();
@@ -405,11 +473,12 @@
       connection(false);
     } finally {
       clearTimeout(timeout);
-      setTimeout(poll, 2000);
+      // Poll faster while nothing runs, so an announced test appears within a second.
+      setTimeout(poll, latest && stageMode(latest) === 'live' && (latest.scenario || {}).active ? 2000 : 1000);
     }
   }
   setInterval(() => { if (latest) { page += 1; render(); } }, 12000);
-  setInterval(() => { if (latest && online && (latest.scenario || {}).active) renderRunning(); }, 1000);
+  setInterval(() => { if (latest && online && (latest.scenario || {}).active) { renderStage(); renderRunning(); } }, 1000);
   window.addEventListener('resize', render);
   poll();
 })();

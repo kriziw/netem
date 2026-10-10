@@ -187,7 +187,9 @@ class SiteRoutesTests(unittest.TestCase):
         def reset():
             netem.SITE_PLAN_STATE.update(active=True, tests=[dict(id=t["id"], status="pending") for t in tests])
         calls = []
-        def run(link, scenario):
+        def run(link, scenario, intro_s):
+            # Each test of the plan is announced on the showroom before it starts.
+            self.assertEqual(intro_s, netem.TEST_INTRO_S)
             calls.append(scenario["id"])
             netem.SCENARIO_STATE.update(active=False, result="passed", error=None)
         reset()
@@ -197,8 +199,8 @@ class SiteRoutesTests(unittest.TestCase):
         self.assertEqual(netem.SITE_PLAN_STATE["result"], "passed")
         calls.clear()
         reset()
-        def stop(link, scenario):
-            run(link, scenario)
+        def stop(link, scenario, intro_s):
+            run(link, scenario, intro_s)
             netem.SITE_PLAN_STOP.set()
         with patch.object(netem, "run_scenario", side_effect=stop):
             netem.run_site_plan(plan, tests, dict(primary="wan1", backup="wan2"))

@@ -158,7 +158,14 @@ SCENARIO_STATE = {
     # Monotonic origins: wall-clock steps (NTP corrections) must not bend test timing.
     "clock_start": None,
     "paused_clock": None,
+    # The announcement before a test changes anything: what it does, and when it starts.
+    "intro": False,
+    "intro_clock": None,
+    "description": None,
+    "checks": [],
 }
+# Every test is announced this long before it starts, so the showroom shows what is coming.
+TEST_INTRO_S = 5
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
 BACKGROUND_STOP = threading.Event()
@@ -3987,6 +3994,11 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
 def scenario_snapshot():
     with RUNTIME_LOCK:
         state = dict(SCENARIO_STATE)
+    if state.get("active") and state.get("intro"):
+        # Announced, not started: nothing has run yet.
+        state["elapsed_s"] = 0.0
+        state["starts_in_s"] = round(max(0.0, (state.get("intro_clock") or 0) - time.monotonic()), 1)
+        return state
     if state.get("active") and (state.get("clock_start") is not None or state.get("started_at")):
         held = state.get("paused_total_s") or 0.0
         if state.get("clock_start") is not None:
@@ -4442,6 +4454,89 @@ def step_phase_indexes(steps):
     return indexes
 
 
+def step_summary(step):
+    """What a step does to the WAN or the workload, in a few words; None for checks and waits."""
+    action, label = step.get("action"), step.get("label")
+    if action == "traffic_generator" and (step.get("value") or {}).get("operation") != "start":
+        return None
+    if action not in ("quality", "fault", "mtu", "phase", "traffic_generator"):
+        return None
+    if label:
+        return str(label)
+    return {"quality": f"Quality {step.get('value')}%", "fault": words_of(step.get("value")),
+            "mtu": f"MTU {step.get('value')}", "traffic_generator": "Start simulated users"}.get(action)
+
+
+def words_of(value):
+    return str(value or "").replace("_", " ").capitalize()
+
+
+def scenario_preview(steps):
+    """The plan announced before a test starts: each phase with what it does, and the checks."""
+    phases, planned_s = scenario_phases(steps)
+    indexes = step_phase_indexes(steps)
+    actions = [[] for _phase in phases]
+    for step, index in zip(steps, indexes):
+        text = step_summary(step)
+        if text and text != phases[index]["name"] and text not in actions[index]:
+            actions[index].append(text)
+    checks = []
+    for step in steps:
+        if step.get("action") == "assert" and step.get("label") and step["label"] not in checks:
+            checks.append(str(step["label"]))
+    return ([{"name": phase["name"], "planned_s": phase["planned_s"], "what": " → ".join(actions[index][:3])}
+             for index, phase in enumerate(phases)], planned_s, checks)
+
+
+def announce_test(scenario, seconds):
+    """Show what the test will do for a few seconds before it changes anything.
+    Returns False when the test was stopped during the announcement."""
+    phases, planned_s, checks = scenario_preview(scenario.get("steps", []))
+    with RUNTIME_LOCK:
+        SCENARIO_STATE.update(intro=True, intro_clock=time.monotonic() + seconds, step_label=f"Starting in {seconds:g} s",
+                              description=scenario.get("description"), checks=checks, phases=phases,
+                              phase_index=None, phase=None, planned_s=planned_s, phase_started_s=None)
+    log_event("scenario", f'{scenario["name"]} announced, starting in {seconds:g} s', scenario_id=scenario.get("id"))
+    return not SCENARIO_STOP.wait(seconds)
+
+
+def reset_scenario_state(result, error):
+    with RUNTIME_LOCK:
+        SCENARIO_STATE.update(
+            {
+                "active": False,
+                "scenario_id": None,
+                "scenario_name": None,
+                "link_id": None,
+                "started_at": None,
+                "step": 0,
+                "step_count": 0,
+                "step_label": None,
+                "step_action": None,
+                "condition": None,
+                "result": result,
+                "error": error,
+                "phases": [],
+                "phase_index": None,
+                "phase": None,
+                "planned_s": None,
+                "paused": False,
+                "paused_at": None,
+                "paused_total_s": 0.0,
+                "phase_started_s": None,
+                "workload_run_id": None,
+                "clock_start": None,
+                "paused_clock": None,
+                "intro": False,
+                "intro_clock": None,
+                "description": None,
+                "checks": [],
+            }
+        )
+    SCENARIO_PAUSE.clear()
+    SCENARIO_STOP.clear()
+
+
 def scale_scenario_steps(steps, length_s: float):
     """Stretch or shrink a test to about length_s seconds; DEM windows follow, timeouts do not."""
     planned = scenario_phases(steps)[1]
@@ -4469,7 +4564,7 @@ def requested_length_s(raw):
     return minutes * 60
 
 
-def run_scenario(link_id: str, scenario: dict):
+def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
     cfg = load_config()
     presets = get_presets(cfg)
     link = get_link(cfg, link_id)
@@ -4479,6 +4574,11 @@ def run_scenario(link_id: str, scenario: dict):
                 {"active": False, "result": "failed", "error": "Unknown WAN"}
             )
         return
+    if intro_s > 0 and not announce_test(scenario, intro_s):
+        log_event("scenario", f'{scenario["name"]} cancelled before it started', scenario_id=scenario.get("id"),
+                  link_id=link_id, result="stopped")
+        reset_scenario_state("stopped", None)
+        return
 
     original = copy.deepcopy(link)
     runtime_profile = copy.deepcopy(original)
@@ -4487,13 +4587,16 @@ def run_scenario(link_id: str, scenario: dict):
     scenario_error = None
     started_at = time.time()
     steps = scenario.get("steps", [])
-    phases, planned_s = scenario_phases(steps)
+    preview, planned_s, checks = scenario_preview(steps)
+    phases = scenario_phases(steps)[0]
     phase_indexes = step_phase_indexes(steps)
     with RUNTIME_LOCK:
-        SCENARIO_STATE.update(phases=[{"name": phase["name"], "planned_s": phase["planned_s"]} for phase in phases],
-                              phase_index=0 if phases else None, phase=phases[0]["name"] if phases else None,
+        # The test clock starts now, after any announcement.
+        SCENARIO_STATE.update(phases=preview, phase_index=0 if phases else None, phase=phases[0]["name"] if phases else None,
                               planned_s=planned_s, paused=False, paused_at=None, paused_total_s=0.0,
-                              phase_started_s=0.0 if phases else None)
+                              phase_started_s=0.0 if phases else None, intro=False, intro_clock=None,
+                              description=scenario.get("description"), checks=checks,
+                              started_at=started_at, clock_start=time.monotonic(), step_label="Starting")
     recorder_start(scenario, link_id, phases)
     if phases:
         recorder_note("phase_marks", {"name": phases[0]["name"], "at": time.time()})
@@ -4684,36 +4787,7 @@ def run_scenario(link_id: str, scenario: dict):
             recorder_finish(scenario_result, scenario_error)
         except Exception as exc:
             log_event("scenario", "Test summary could not be built", error=str(exc)[:240])
-        with RUNTIME_LOCK:
-            SCENARIO_STATE.update(
-                {
-                    "active": False,
-                    "scenario_id": None,
-                    "scenario_name": None,
-                    "link_id": None,
-                    "started_at": None,
-                    "step": 0,
-                    "step_count": 0,
-                    "step_label": None,
-                    "step_action": None,
-                    "condition": None,
-                    "result": scenario_result,
-                    "error": scenario_error,
-                    "phases": [],
-                    "phase_index": None,
-                    "phase": None,
-                    "planned_s": None,
-                    "paused": False,
-                    "paused_at": None,
-                    "paused_total_s": 0.0,
-                    "phase_started_s": None,
-                    "workload_run_id": None,
-                    "clock_start": None,
-                    "paused_clock": None,
-                }
-            )
-        SCENARIO_PAUSE.clear()
-        SCENARIO_STOP.clear()
+        reset_scenario_state(scenario_result, scenario_error)
 
 
 
@@ -6001,7 +6075,8 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
         if SITE_PLAN_STOP.is_set():
             break
         link_id = link_for_role[test["role"]]
-        scenario = {"id": f"site_{test['id']}", "name": test["name"], "steps": validate_scenario_steps(test["steps"])}
+        scenario = {"id": f"site_{test['id']}", "name": test["name"], "description": test.get("description"),
+                    "steps": validate_scenario_steps(test["steps"])}
         with RUNTIME_LOCK:
             if SITE_PLAN_STOP.is_set():
                 break
@@ -6017,7 +6092,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
             })
         try:
-            run_scenario(link_id, scenario)
+            run_scenario(link_id, scenario, TEST_INTRO_S)
         except Exception as exc:
             # Keep plan state recoverable even if the scenario runner fails before cleanup.
             with RUNTIME_LOCK:
@@ -6222,7 +6297,7 @@ def lab_scenario_start():
 
     threading.Thread(
         target=run_scenario,
-        args=(link_id, scenario),
+        args=(link_id, scenario, TEST_INTRO_S),
         daemon=True,
     ).start()
     flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
@@ -6233,7 +6308,8 @@ def lab_scenario_start():
 def lab_scenario_pause():
     """Hold the running test in its current phase, impairment applied, until resumed."""
     with RUNTIME_LOCK:
-        active = SCENARIO_STATE["active"] and not SCENARIO_STATE["paused"]
+        announced = SCENARIO_STATE["active"] and SCENARIO_STATE.get("intro")
+        active = SCENARIO_STATE["active"] and not SCENARIO_STATE["paused"] and not announced
         if active:
             SCENARIO_PAUSE.set()
             SCENARIO_STATE.update(paused=True, paused_at=time.time(), paused_clock=time.monotonic())
@@ -6241,6 +6317,8 @@ def lab_scenario_pause():
     if active:
         log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
         flash("Test paused. It stays in its current phase until you resume it.", "info")
+    elif announced:
+        flash("The test starts in a few seconds; pause it once it is running, or stop it now.", "info")
     return redirect_after("tests")
 
 
@@ -7215,9 +7293,14 @@ def showroom_snapshot():
         "timestamp": now, "links": links, "story": story,
         "appliance": {key: value for key, value in appliance_under_test().items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
-            "active", "scenario_name", "step", "step_count", "step_label", "phases", "phase_index", "phase",
-            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase")},
-            link=showroom_link_label(cfg, scenario.get("link_id"))),
+            "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
+            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s")},
+            link=showroom_link_label(cfg, scenario.get("link_id")),
+            # Shown while a test is announced: what each phase does and what is checked.
+            phases=[{"name": phase.get("name"), "planned_s": phase.get("planned_s"), "what": showroom_text(phase.get("what")) or None}
+                    for phase in scenario.get("phases") or []],
+            description=showroom_text(scenario.get("description")) or None,
+            checks=[showroom_text(check, 120) for check in (scenario.get("checks") or [])[:6]]),
         # Once a test ends, its summary stays on screen until the next one starts.
         "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") else None,
         "session": {"active": bool(lab_session.get("active")), "name": lab_session.get("name"),
