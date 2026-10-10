@@ -71,6 +71,18 @@ systemctl show techkarma-netem -p User -p AmbientCapabilities -p CapabilityBound
 <h2 id="sla-unexpected">Expected SLA result looks wrong</h2>
 <p>Remember that the generic SLA evaluates NetEm's injected values, not the firewall's measured probe. Verify the SLA thresholds in Analytics and the current effective delay/jitter/loss in <code>/api/v1/state</code>. Any active blackhole makes the data-plane check fail.</p>
 
+<h2 id="clocks">Showroom, DEM or diagnosis freeze while traffic flows</h2>
+<p>This happens when a clock is wrong or jumps. NetEm, the Traffic Simulator and the controlled target compare timestamps, so their clocks must agree and follow a time server.</p>
+<p><strong>Settings → Time sync</strong> shows:</p>
+<ul>
+<li>NetEm's own time-sync state;</li>
+<li>how far the simulator's clock is from NetEm's (measured over the simulator API);</li>
+<li>the target's offset, through the simulator.</li>
+</ul>
+<p>A clock that is off by more than 2 seconds, or not synchronized, also appears as a <em>Clocks out of sync</em> finding in the Command Center.</p>
+<p>NetEm turns on time sync for its own VM at startup if it is off. <strong>Turn on time sync for NetEm</strong> retries it, and <code>sudo timedatectl set-ntp true</code> does the same by hand. A simulator in a Proxmox LXC container uses the Proxmox host's clock, so keep the host on NTP. VMs such as the ISP router need their own time sync.</p>
+<p>When the clock moves back, NetEm discards telemetry samples dated in the future and logs it under <em>telemetry</em> in Activity. Its caches, worker schedules and test timers run on a monotonic clock, so they keep working through the step.</p>
+
 <h2 id="logs-paths">Useful paths</h2>
 <div class="docs-table"><table>
 <thead><tr><th>Path</th><th>Purpose</th></tr></thead>

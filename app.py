@@ -149,6 +149,9 @@ SCENARIO_STATE = {
     "phase_started_s": None,
     # The simulator run a test started, while it should be running.
     "workload_run_id": None,
+    # Monotonic origins: wall-clock steps (NTP corrections) must not bend test timing.
+    "clock_start": None,
+    "paused_clock": None,
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
@@ -686,8 +689,8 @@ def discover_traffic_generators(timeout=1.25):
             except OSError:
                 continue
 
-        deadline = time.time() + max(0.25, min(3.0, float(timeout)))
-        while time.time() < deadline:
+        deadline = time.monotonic() + max(0.25, min(3.0, float(timeout)))
+        while time.monotonic() < deadline:
             try:
                 data, peer = sock.recvfrom(8192)
             except socket.timeout:
@@ -2300,16 +2303,50 @@ def prune_telemetry_history():
         conn.execute("DELETE FROM probe_samples WHERE timestamp < ?", (cutoff,))
 
 
+# A wall clock that moves back further than this (an NTP correction of a clock that ran ahead)
+# leaves samples dated in the future; they would hide every newer sample.
+CLOCK_STEP_SECONDS = 5.0
+CLOCK_STEPS = []
+
+
+def discard_future_samples(now=None):
+    """Delete samples dated after now: they were recorded while the clock ran ahead."""
+    now = time.time() if now is None else now
+    with telemetry_connect() as conn:
+        removed = conn.execute("DELETE FROM telemetry_samples WHERE timestamp > ?", (now + 1,)).rowcount
+        removed += conn.execute("DELETE FROM probe_samples WHERE timestamp > ?", (now + 1,)).rowcount
+    return removed
+
+
+def note_clock_step(step_s, removed):
+    CLOCK_STEPS.append({"at": time.time(), "clock": time.monotonic(), "step_s": round(step_s, 1), "discarded": removed})
+    del CLOCK_STEPS[:-10]
+    log_event("telemetry", f"System clock moved {'back' if step_s < 0 else 'forward'} {abs(step_s):.0f} s"
+              + (f"; discarded {removed} samples dated in the future" if removed else ""),
+              step_s=round(step_s, 1), discarded=removed)
+
+
 def telemetry_worker():
     init_telemetry_db()
-    next_prune = time.time() + 300
+    removed = discard_future_samples()
+    if removed:
+        note_clock_step(0.0, removed)
+    next_prune = time.monotonic() + 300
+    wall, clock = time.time(), time.monotonic()
     while not BACKGROUND_STOP.is_set():
         started = time.monotonic()
         try:
+            # Wall time should advance with the monotonic clock; a difference is a clock step.
+            step = (time.time() - wall) - (time.monotonic() - clock)
+            wall, clock = time.time(), time.monotonic()
+            if step <= -CLOCK_STEP_SECONDS:
+                note_clock_step(step, discard_future_samples(wall))
+            elif step >= CLOCK_STEP_SECONDS * 12:
+                note_clock_step(step, 0)
             collect_telemetry_sample()
-            if time.time() >= next_prune:
+            if time.monotonic() >= next_prune:
                 prune_telemetry_history()
-                next_prune = time.time() + 300
+                next_prune = time.monotonic() + 300
         except Exception as exc:
             # Telemetry persistence must never stop the control plane.
             log_event("telemetry", "Persistent telemetry sample failed", error=str(exc)[:240])
@@ -2337,11 +2374,11 @@ def query_telemetry_history(link_id: str, since: float, max_points=1200):
                 AVG(quality) AS quality,
                 MIN(sla_pass) AS sla_pass
             FROM telemetry_samples
-            WHERE link_id = ? AND timestamp >= ?
+            WHERE link_id = ? AND timestamp >= ? AND timestamp <= ?
             GROUP BY CAST((timestamp - ?) / ? AS INTEGER)
             ORDER BY timestamp ASC
             """,
-            (link_id, since, since, bucket_seconds),
+            (link_id, since, now + 1, since, bucket_seconds),
         ).fetchall()
     return [dict(row) for row in rows]
 
@@ -2353,10 +2390,10 @@ def latest_telemetry_sample(link_id: str):
             row = conn.execute(
                 """
                 SELECT * FROM telemetry_samples
-                WHERE link_id = ?
+                WHERE link_id = ? AND timestamp <= ?
                 ORDER BY timestamp DESC LIMIT 1
                 """,
-                (link_id,),
+                (link_id, time.time() + 1),
             ).fetchone()
     except sqlite3.OperationalError:
         # No telemetry table until the worker's first start.
@@ -2384,11 +2421,13 @@ DIAGNOSIS_CLEAR_SECONDS = 30
 SATURATION_PCT = 90.0
 EGRESS_LEARN_INTERVAL_SECONDS = 60
 DIAGNOSIS_LOCK = threading.Lock()
-DIAGNOSIS_CACHE = {"timestamp": 0.0, "payload": None}
+# "checked" is monotonic: after the wall clock steps back, a wall-clock age turns negative
+# and the cache would never refresh.
+DIAGNOSIS_CACHE = {"timestamp": 0.0, "checked": None, "payload": None}
 DIAGNOSIS_ACTIVE = {}
 DIAGNOSIS_THREAD = None
 EGRESS_LEARNED = {}
-EGRESS_LEARN_STATE = {"running": False, "last_run": 0.0, "error": None, "target": None}
+EGRESS_LEARN_STATE = {"running": False, "last_run": 0.0, "last_clock": None, "error": None, "target": None}
 SEVERITY_ORDER = {"bad": 0, "warn": 1, "info": 2}
 # Path conditions that can explain each simulator symptom.
 SYMPTOM_CAUSES = {
@@ -2408,8 +2447,8 @@ def recent_telemetry_samples(link_id: str, seconds=DIAGNOSIS_WINDOW_SECONDS):
     try:
         with telemetry_connect() as conn:
             rows = conn.execute(
-                "SELECT * FROM telemetry_samples WHERE link_id = ? AND timestamp >= ? ORDER BY timestamp",
-                (link_id, time.time() - seconds),
+                "SELECT * FROM telemetry_samples WHERE link_id = ? AND timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
+                (link_id, time.time() - seconds, time.time() + 1),
             ).fetchall()
     except sqlite3.Error:
         return []
@@ -2568,7 +2607,7 @@ def learn_egress_addresses(cfg: dict, target_ip: str):
     with DIAGNOSIS_LOCK:
         for address, links in found.items():
             EGRESS_LEARNED[address] = {"links": links, "seen_at": now}
-        EGRESS_LEARN_STATE.update(running=False, last_run=now, target=target_ip,
+        EGRESS_LEARN_STATE.update(running=False, last_run=now, last_clock=time.monotonic(), target=target_ip,
                                   error="; ".join(errors)[:300] or None)
 
 
@@ -2580,7 +2619,8 @@ def maybe_learn_egress(cfg: dict, status, unmapped):
     if not shutil.which("tcpdump"):
         return
     with DIAGNOSIS_LOCK:
-        if EGRESS_LEARN_STATE["running"] or time.time() - EGRESS_LEARN_STATE["last_run"] < EGRESS_LEARN_INTERVAL_SECONDS:
+        last = EGRESS_LEARN_STATE.get("last_clock")
+        if EGRESS_LEARN_STATE["running"] or (last is not None and time.monotonic() - last < EGRESS_LEARN_INTERVAL_SECONDS):
             return
         EGRESS_LEARN_STATE["running"] = True
     try:
@@ -2588,7 +2628,8 @@ def maybe_learn_egress(cfg: dict, status, unmapped):
         target_ip = socket.getaddrinfo(host, None)[0][4][0]
     except (OSError, ValueError, IndexError) as exc:
         with DIAGNOSIS_LOCK:
-            EGRESS_LEARN_STATE.update(running=False, last_run=time.time(), error=f"Cannot resolve target: {exc}"[:200])
+            EGRESS_LEARN_STATE.update(running=False, last_run=time.time(), last_clock=time.monotonic(),
+                                      error=f"Cannot resolve target: {exc}"[:200])
         return
     threading.Thread(target=learn_egress_addresses, args=(cfg, target_ip),
                      name="netem-egress-learn", daemon=True).start()
@@ -2724,7 +2765,7 @@ def egress_mapping_finding(addresses: dict, learn_state: dict, tcpdump: bool):
 
 def track_diagnosis_events(findings: list, now=None):
     """Log when a problem appears and when it has been gone for a while."""
-    now = now or time.time()
+    now = now or time.monotonic()
     seen = set()
     for finding in findings:
         if finding["severity"] not in ("bad", "warn"):
@@ -2810,7 +2851,7 @@ def track_steering_reaction(cls: str, label: str, link: dict, pct, now: float):
 
 def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
     """Per traffic class: where it goes now, the health there, the user impact and a verdict."""
-    now = now or time.time()
+    now = now or time.monotonic()
     diagnosis = (dem or {}).get("diagnosis") or {}
     recent = diagnosis.get("egress_recent") or {}
     if not isinstance(recent.get("egress"), dict):
@@ -2964,6 +3005,9 @@ def build_diagnosis():
     workload = workload_finding(status, signals, expected_run) if snapshot.get("configured") else None
     if workload:
         findings.insert(0, workload)
+    clock = clock_finding(platform_clock_status())
+    if clock:
+        findings.append(clock)
     track_diagnosis_events(findings)
     return {
         "timestamp": time.time(),
@@ -2985,11 +3029,11 @@ def build_diagnosis():
 def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1):
     with DIAGNOSIS_LOCK:
         cached = dict(DIAGNOSIS_CACHE)
-    if cached["payload"] is not None and time.time() - cached["timestamp"] <= max_age:
+    if cached["payload"] is not None and cached.get("checked") is not None and time.monotonic() - cached["checked"] <= max_age:
         return cached["payload"]
     payload = build_diagnosis()
     with DIAGNOSIS_LOCK:
-        DIAGNOSIS_CACHE.update(timestamp=time.time(), payload=payload)
+        DIAGNOSIS_CACHE.update(timestamp=time.time(), checked=time.monotonic(), payload=payload)
     return payload
 
 
@@ -3017,6 +3061,9 @@ def query_probe_history(probe_id=None, link_id=None, since=None, limit=1000):
     if since is not None:
         clauses.append("timestamp >= ?")
         values.append(float(since))
+    # Samples recorded while the clock ran ahead must not mask newer ones.
+    clauses.append("timestamp <= ?")
+    values.append(time.time() + 1)
     where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
     values.append(max(1, min(5000, int(limit))))
     with telemetry_connect() as conn:
@@ -3375,7 +3422,8 @@ def probe_worker():
         probes = [item for item in get_probes(cfg) if item.get("enabled", True)]
         active_ids = {item.get("id") for item in probes}
         next_due = {key: value for key, value in next_due.items() if key in active_ids}
-        now = time.time()
+        # Monotonic: a wall-clock step back would postpone every probe by the size of the step.
+        now = time.monotonic()
 
         for probe in probes:
             probe_id = probe.get("id")
@@ -3393,10 +3441,115 @@ def probe_worker():
         BACKGROUND_STOP.wait(0.5)
 
 
+# ---------- Platform clocks ----------
+#
+# NetEm, the Traffic Simulator and the controlled target compare timestamps: events, telemetry
+# samples, DEM windows and test summaries. Their clocks must agree and follow a time server.
+
+CLOCK_TOLERANCE_S = 2.0
+CLOCK_CHECK_SECONDS = 60
+CLOCK_STATUS_CACHE = {"checked": None, "payload": None}
+TIMEDATECTL = shutil.which("timedatectl") or "/usr/bin/timedatectl"
+
+
+def describe_seconds(seconds):
+    seconds = round(abs(seconds))
+    if seconds < 120:
+        return f"{seconds} s"
+    if seconds < 3600:
+        return f"{seconds // 60} min"
+    return f"{seconds // 3600} h {seconds % 3600 // 60} min"
+
+
+def local_time_sync():
+    """This host's NTP state from systemd-timedated; None where it cannot be read."""
+    rc, out, _err = run_process([TIMEDATECTL, "show", "--property=NTP", "--property=NTPSynchronized"], timeout=5)
+    values = dict(line.split("=", 1) for line in out.splitlines() if "=" in line) if rc == 0 else {}
+    return {"ntp": values["NTP"] == "yes" if "NTP" in values else None,
+            "synchronized": values["NTPSynchronized"] == "yes" if "NTPSynchronized" in values else None}
+
+
+def ensure_time_sync():
+    """Turn on NTP for this host when it is off, so NetEm's clock cannot drift or be stepped later."""
+    if local_time_sync()["ntp"] is not False:
+        return False
+    rc, out, err = run_process([TIMEDATECTL, "set-ntp", "true"], timeout=10)
+    if rc == 0:
+        log_event("platform", "Turned on time sync (NTP) for NetEm")
+        return True
+    log_event("platform", "NetEm could not turn on time sync (NTP)", error=(err or out or "timedatectl failed")[:200])
+    return False
+
+
+def simulator_clock():
+    """The simulator's clock offset from NetEm (positive: ahead), its NTP state and its target's offset."""
+    sent = time.time()
+    health = traffic_generator_request("/api/v1/health", timeout=3.0)
+    received = time.time()
+    remote = health.get("time")
+    if not isinstance(remote, (int, float)) or not math.isfinite(remote):
+        return None
+    clock = health.get("clock") if isinstance(health.get("clock"), dict) else {}
+    return {"offset_s": round(remote - (sent + received) / 2, 2), "uncertainty_s": round((received - sent) / 2, 2),
+            "ntp": clock.get("ntp"), "synchronized": clock.get("synchronized"), "container": clock.get("container"),
+            "target_offset_s": clock.get("target_offset_s")}
+
+
+def platform_clock_status(max_age=CLOCK_CHECK_SECONDS):
+    """Whether NetEm, the simulator and the target agree on the time and follow a time server."""
+    cached = dict(CLOCK_STATUS_CACHE)
+    if cached["payload"] is not None and cached["checked"] is not None and time.monotonic() - cached["checked"] <= max_age:
+        return cached["payload"]
+    components = [dict(name="NetEm", offset_s=0.0, **local_time_sync())]
+    simulator_error = None
+    if traffic_generator_config(load_config()).get("host") and traffic_generator_api_key():
+        try:
+            remote = simulator_clock()
+        except RuntimeError as exc:
+            remote, simulator_error = None, str(exc)
+        if remote:
+            components.append({"name": "Traffic Simulator", "offset_s": remote["offset_s"], "ntp": remote["ntp"],
+                               "synchronized": remote["synchronized"], "container": remote["container"]})
+            if isinstance(remote["target_offset_s"], (int, float)):
+                components.append({"name": "Controlled target", "offset_s": round(remote["offset_s"] + remote["target_offset_s"], 2),
+                                   "ntp": None, "synchronized": None})
+        elif not simulator_error:
+            components.append({"name": "Traffic Simulator", "offset_s": None, "ntp": None, "synchronized": None,
+                               "note": "Update the simulator to compare clocks."})
+    issues = []
+    for item in components:
+        offset = item.get("offset_s")
+        if offset is not None and abs(offset) > CLOCK_TOLERANCE_S:
+            issues.append(f"The {item['name']} clock is {describe_seconds(offset)} {'ahead of' if offset > 0 else 'behind'} NetEm.")
+        if item.get("synchronized") is False:
+            issues.append(f"{item['name']} is not synchronized to a time server"
+                          + (": time sync is turned off." if item.get("ntp") is False else "."))
+    for step in [step for step in CLOCK_STEPS if time.monotonic() - step["clock"] <= 3600][-1:]:
+        when = time.strftime("%H:%M", time.localtime(step["at"]))
+        if step["step_s"]:
+            issues.append(f"NetEm's clock moved {'back' if step['step_s'] < 0 else 'forward'} {describe_seconds(step['step_s'])} at {when}"
+                          + (f"; {step['discarded']} samples dated in the future were discarded." if step["discarded"] else "."))
+        elif step["discarded"]:
+            issues.append(f"At {when} NetEm discarded {step['discarded']} samples dated in the future: its clock had run ahead.")
+    payload = {"ok": not issues, "issues": issues, "components": components, "simulator_error": simulator_error,
+               "tolerance_s": CLOCK_TOLERANCE_S, "checked_at": time.time()}
+    CLOCK_STATUS_CACHE.update(checked=time.monotonic(), payload=payload)
+    return payload
+
+
+def clock_finding(status):
+    if status["ok"]:
+        return None
+    return {"source": "platform", "id": "clock_sync", "severity": "warn", "title": "Clocks out of sync",
+            "detail": " ".join(status["issues"]), "wans": [], "unattributed": 0, "candidates": [],
+            "hint": "Keep every component on a time server: see Settings → Time sync."}
+
+
 def start_background_workers():
     global TELEMETRY_THREAD, PROBE_THREAD, DIAGNOSIS_THREAD
     init_telemetry_db()
     BACKGROUND_STOP.clear()
+    ensure_time_sync()
     if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
         TELEMETRY_THREAD = threading.Thread(
             target=telemetry_worker,
@@ -3758,12 +3911,18 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
 def scenario_snapshot():
     with RUNTIME_LOCK:
         state = dict(SCENARIO_STATE)
-    if state.get("active") and state.get("started_at"):
+    if state.get("active") and (state.get("clock_start") is not None or state.get("started_at")):
         held = state.get("paused_total_s") or 0.0
-        if state.get("paused") and state.get("paused_at"):
-            held += time.time() - state["paused_at"]
+        if state.get("clock_start") is not None:
+            if state.get("paused") and state.get("paused_clock") is not None:
+                held += time.monotonic() - state["paused_clock"]
+            ran = time.monotonic() - state["clock_start"]
+        else:
+            if state.get("paused") and state.get("paused_at"):
+                held += time.time() - state["paused_at"]
+            ran = time.time() - state["started_at"]
         # Elapsed test time excludes pauses so progress matches the planned phases.
-        state["elapsed_s"] = round(max(0.0, time.time() - state["started_at"] - held), 1)
+        state["elapsed_s"] = round(max(0.0, ran - held), 1)
         phases, index = state.get("phases") or [], state.get("phase_index")
         if index is not None and index < len(phases) and state.get("phase_started_s") is not None:
             # Counted from when the phase really began, since waits on conditions can stretch a phase.
@@ -3948,7 +4107,8 @@ def wait_for_scenario_condition(
     poll_s: float,
 ):
     started = time.time()
-    deadline = started + max(1.0, float(timeout_s))
+    clock = time.monotonic()
+    deadline = clock + max(1.0, float(timeout_s))
     last_observed = None
     last_detail = None
 
@@ -3960,13 +4120,13 @@ def wait_for_scenario_condition(
             "observed": None,
         }
 
-    while time.time() <= deadline:
+    while time.monotonic() <= deadline:
         if SCENARIO_STOP.is_set():
-            return False, last_observed, "stopped", time.time() - started
+            return False, last_observed, "stopped", time.monotonic() - clock
         if SCENARIO_PAUSE.is_set():
-            paused = time.time()
+            paused = time.monotonic()
             SCENARIO_STOP.wait(0.25)
-            deadline += time.time() - paused
+            deadline += time.monotonic() - paused
             continue
 
         passed, observed, detail = evaluate_scenario_condition(
@@ -3980,13 +4140,13 @@ def wait_for_scenario_condition(
                 SCENARIO_STATE["condition"]["detail"] = detail
 
         if passed:
-            return True, observed, detail, time.time() - started
+            return True, observed, detail, time.monotonic() - clock
         SCENARIO_STOP.wait(max(0.25, min(5.0, float(poll_s))))
 
     passed, observed, detail = evaluate_scenario_condition(
         condition, default_link_id
     )
-    return passed, observed, detail or last_detail, time.time() - started
+    return passed, observed, detail or last_detail, time.monotonic() - clock
 
 
 # ---------- Test recording and summary ----------
@@ -4282,8 +4442,10 @@ def run_scenario(link_id: str, scenario: dict):
             with RUNTIME_LOCK:
                 previous_phase = SCENARIO_STATE.get("phase_index")
                 if phase_index is not None and phase_index != previous_phase:
-                    SCENARIO_STATE["phase_started_s"] = round(max(0.0, time.time() - (SCENARIO_STATE.get("started_at") or started_at)
-                                                                  - (SCENARIO_STATE.get("paused_total_s") or 0.0)), 1)
+                    origin = SCENARIO_STATE.get("clock_start")
+                    ran = (time.monotonic() - origin if origin is not None
+                           else time.time() - (SCENARIO_STATE.get("started_at") or started_at))
+                    SCENARIO_STATE["phase_started_s"] = round(max(0.0, ran - (SCENARIO_STATE.get("paused_total_s") or 0.0)), 1)
                 SCENARIO_STATE.update(
                     {
                         "step": index,
@@ -4470,6 +4632,8 @@ def run_scenario(link_id: str, scenario: dict):
                     "paused_total_s": 0.0,
                     "phase_started_s": None,
                     "workload_run_id": None,
+                    "clock_start": None,
+                    "paused_clock": None,
                 }
             )
         SCENARIO_PAUSE.clear()
@@ -5441,7 +5605,21 @@ def settings():
         preset_count=len(get_presets(cfg)),
         update_status=git_update_status(fetch=False),
         showroom_url=showroom_url(),
+        clock_status=platform_clock_status(),
     )
+
+
+@app.route("/settings/time-sync", methods=["POST"])
+def time_sync_enable():
+    rc, out, err = run_process([TIMEDATECTL, "set-ntp", "true"], timeout=10)
+    if rc == 0:
+        log_event("platform", "Turned on time sync (NTP) for NetEm")
+        flash("Time sync is on for NetEm. Synchronizing can take a minute.", "success")
+    else:
+        flash(f"NetEm could not turn on time sync ({(err or out or 'timedatectl failed')[:160]}). "
+              "Run sudo timedatectl set-ntp true on the NetEm VM.", "error")
+    CLOCK_STATUS_CACHE.update(checked=None)
+    return redirect_after("settings")
 
 
 @app.route("/docs")
@@ -5619,13 +5797,13 @@ def lab_fault():
 SITE_PLAN_STATE = {"active": False, "label": None, "tests": [], "current": None,
                    "started_at": None, "finished_at": None, "result": None}
 SITE_PLAN_STOP = threading.Event()
-SIMULATOR_CATALOG_CACHE = {"timestamp": 0.0, "catalog": None}
+SIMULATOR_CATALOG_CACHE = {"timestamp": 0.0, "checked": None, "catalog": None}
 SITE_FIELDS = ("industry", "sub_industry", "function", "size", "criticality")
 
 
 def simulator_catalog(max_age=60):
     """The connected simulator's catalog, briefly cached; None when unavailable."""
-    if time.time() - SIMULATOR_CATALOG_CACHE["timestamp"] <= max_age:
+    if SIMULATOR_CATALOG_CACHE.get("checked") is not None and time.monotonic() - SIMULATOR_CATALOG_CACHE["checked"] <= max_age:
         return SIMULATOR_CATALOG_CACHE["catalog"]
     catalog = None
     if traffic_generator_config().get("host") and traffic_generator_api_key():
@@ -5633,7 +5811,7 @@ def simulator_catalog(max_age=60):
             catalog = traffic_generator_request("/api/v1/catalog", timeout=2.0)
         except RuntimeError:
             catalog = None
-    SIMULATOR_CATALOG_CACHE.update(timestamp=time.time(), catalog=catalog)
+    SIMULATOR_CATALOG_CACHE.update(timestamp=time.time(), checked=time.monotonic(), catalog=catalog)
     return catalog
 
 
@@ -5671,7 +5849,8 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
             SCENARIO_STOP.clear()
             SCENARIO_STATE.update({
                 "active": True, "scenario_id": scenario["id"], "scenario_name": f"{plan['label']}: {test['name']}",
-                "link_id": link_id, "started_at": time.time(), "step": 0, "step_count": len(scenario["steps"]),
+                "link_id": link_id, "started_at": time.time(), "clock_start": time.monotonic(), "step": 0,
+                "step_count": len(scenario["steps"]),
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
             })
         try:
@@ -5867,6 +6046,7 @@ def lab_scenario_start():
                 "scenario_name": scenario["name"],
                 "link_id": link_id,
                 "started_at": time.time(),
+                "clock_start": time.monotonic(),
                 "step": 0,
                 "step_count": len(scenario.get("steps", [])),
                 "step_label": "Starting",
@@ -5893,7 +6073,7 @@ def lab_scenario_pause():
         active = SCENARIO_STATE["active"] and not SCENARIO_STATE["paused"]
         if active:
             SCENARIO_PAUSE.set()
-            SCENARIO_STATE.update(paused=True, paused_at=time.time())
+            SCENARIO_STATE.update(paused=True, paused_at=time.time(), paused_clock=time.monotonic())
             name, phase = SCENARIO_STATE["scenario_name"], SCENARIO_STATE.get("phase")
     if active:
         log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
@@ -5906,8 +6086,9 @@ def lab_scenario_resume():
     with RUNTIME_LOCK:
         active = SCENARIO_STATE["active"] and SCENARIO_STATE["paused"]
         if active:
-            held = time.time() - (SCENARIO_STATE["paused_at"] or time.time())
-            SCENARIO_STATE.update(paused=False, paused_at=None,
+            started = SCENARIO_STATE.get("paused_clock")
+            held = time.monotonic() - started if started is not None else time.time() - (SCENARIO_STATE["paused_at"] or time.time())
+            SCENARIO_STATE.update(paused=False, paused_at=None, paused_clock=None,
                                   paused_total_s=SCENARIO_STATE["paused_total_s"] + held)
             SCENARIO_PAUSE.clear()
             name = SCENARIO_STATE["scenario_name"]
