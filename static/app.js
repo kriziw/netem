@@ -499,5 +499,15 @@ window.NetEmUI = (() => {
     }
   }
 
-  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml, phaseTimeline, phaseCountdown, renderRunningTest};
+  // Whether simulated traffic will cross the appliance; the repair form shows when the simulator can fix it.
+  function renderTrafficPath(root, path) {
+    if (!root || !path) return;
+    root.className = 'traffic-path ' + (path.ready ? 'good' : path.ready === false ? 'bad' : 'warn');
+    const text = root.querySelector('[data-traffic-path-text]');
+    if (text) text.textContent = path.summary || path.message || '';
+    const repair = root.querySelector('[data-traffic-path-repair]');
+    if (repair) repair.hidden = Boolean(path.ready) || !path.repairable;
+  }
+
+  return {renderTrafficPath, trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml, phaseTimeline, phaseCountdown, renderRunningTest};
 })();

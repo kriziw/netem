@@ -215,3 +215,18 @@ test('running test shows phases, countdown and the pause or resume action', () =
   assert.equal(nodes['[data-run-pause-form]'].action, '/lab/scenario/resume');
   assert.ok(!nodes['[data-run-phases]'].innerHTML.includes('<img>'));
 });
+
+test('traffic path line shows readiness and offers repair only when the simulator can fix it', () => {
+  const nodes = {'[data-traffic-path-text]': {textContent: ''}, '[data-traffic-path-repair]': {hidden: true}};
+  const root = {className: '', querySelector: selector => nodes[selector] || null};
+  ui.renderTrafficPath(root, {ready: false, repairable: true, summary: 'Traffic path not ready: eth1 is down.'});
+  assert.equal(root.className, 'traffic-path bad');
+  assert.equal(nodes['[data-traffic-path-text]'].textContent, 'Traffic path not ready: eth1 is down.');
+  assert.equal(nodes['[data-traffic-path-repair]'].hidden, false);
+  ui.renderTrafficPath(root, {ready: true, repairable: false, summary: 'Traffic path ready: via 10.250.10.1 on eth1.'});
+  assert.equal(root.className, 'traffic-path good');
+  assert.equal(nodes['[data-traffic-path-repair]'].hidden, true);
+  ui.renderTrafficPath(root, {ready: null, summary: 'Update the simulator.'});
+  assert.equal(root.className, 'traffic-path warn');
+  ui.renderTrafficPath(null, {ready: true});
+});

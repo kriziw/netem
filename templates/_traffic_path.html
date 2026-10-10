@@ -1,0 +1,11 @@
+{# Whether simulated traffic will cross the appliance, with a repair when the simulator can fix it. #}
+{% if traffic_path and traffic_path.configured %}
+<div class="traffic-path {{ 'good' if traffic_path.ready else ('bad' if traffic_path.ready is sameas false else 'warn') }}" data-traffic-path>
+  <span data-traffic-path-text>{{ traffic_path.summary }}</span>
+  <form method="post" action="{{ url_for('traffic_generator_repair') }}" data-traffic-path-repair{% if traffic_path.ready or not traffic_path.repairable %} hidden{% endif %}>
+    <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+    <input type="hidden" name="return_to" value="{{ return_to or 'overview' }}">
+    <button class="btn btn-sm" type="submit">Repair traffic path</button>
+  </form>
+</div>
+{% endif %}
