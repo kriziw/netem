@@ -46,10 +46,10 @@ def create_showroom_app(snapshot, branding_source=None):
     def javascript():
         return send_from_directory(root / "static", "showroom.js")
 
-    @viewer.get("/assets/vendors/<vendor>.svg")
+    @viewer.get("/assets/vendors/<vendor>.png")
     def vendor_mark(vendor):
-        if not re.fullmatch(r"[a-z0-9-]{1,40}", vendor) or not (root / "static" / "vendors" / f"{vendor}.svg").is_file():
+        if not re.fullmatch(r"[a-z0-9-]{1,40}", vendor) or not (root / "static" / "vendors" / f"{vendor}.png").is_file():
             abort(404)
-        return send_from_directory(root / "static" / "vendors", f"{vendor}.svg")
+        return send_from_directory(root / "static" / "vendors", f"{vendor}.png")
 
     return viewer

@@ -111,11 +111,11 @@ class ListenerTests(unittest.TestCase):
     def test_surface_is_only_presentation_routes(self):
         allowed = {"/", "/api/snapshot", "/assets/showroom.css", "/assets/showroom.js"}
         # Brand and vendor assets are the only other routes; without a brand they return 404.
-        assets = {"/branding/theme.css", "/branding/assets/<path:filename>", "/assets/vendors/<vendor>.svg"}
+        assets = {"/branding/theme.css", "/branding/assets/<path:filename>", "/assets/vendors/<vendor>.png"}
         self.assertEqual({rule.rule for rule in self.viewer.url_map.iter_rules()}, allowed | assets)
         self.assertEqual(self.client.get("/branding/theme.css").status_code, 404)
-        self.assertEqual(self.client.get("/assets/vendors/fortinet.svg").status_code, 200)
-        for path in ("/assets/vendors/..%2Fapp.svg", "/assets/vendors/unknown.svg", "/assets/vendors/FORTINET.svg"):
+        self.assertEqual(self.client.get("/assets/vendors/fortinet.png").status_code, 200)
+        for path in ("/assets/vendors/..%2Fapp.png", "/assets/vendors/unknown.png", "/assets/vendors/FORTINET.png", "/assets/vendors/fortinet.svg"):
             self.assertEqual(self.client.get(path).status_code, 404)
         for rule in netem.app.url_map.iter_rules():
             path = rule.rule.replace("<", "").replace(">", "")

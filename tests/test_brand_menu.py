@@ -132,7 +132,7 @@ class ApplianceTests(unittest.TestCase):
                                 ("Other", None), ("", None)):
             self.assertEqual(netem.vendor_id(label), expected)
         for vendor in netem.SDWAN_VENDORS:
-            self.assertTrue((Path(netem.BASE_DIR) / "static" / "vendors" / f"{vendor}.svg").is_file(), vendor)
+            self.assertTrue((Path(netem.BASE_DIR) / "static" / "vendors" / f"{vendor}.png").is_file(), vendor)
 
     def test_vendor_comes_from_the_simulator_unless_set(self):
         route = {"interface": "eth1", "gateway": "10.250.10.1", "target": "198.18.0.1"}

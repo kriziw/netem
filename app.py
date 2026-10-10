@@ -644,8 +644,8 @@ def workload_finding(status, signals, expected_run=None):
 # ---------- Appliance under test ----------
 #
 # Clients see the SD-WAN vendor next to the MSP brand. NetEm takes the vendor of the appliance
-# selected in the Traffic Simulator; Settings can name it instead. The vendor marks are part of
-# the application (static/vendors), unlike private MSP brand packs.
+# selected in the Traffic Simulator; Settings can name it instead. The vendor logos are part of
+# the application (static/vendors, sources in its README), unlike private MSP brand packs.
 
 SDWAN_VENDORS = {
     "fortinet": {"name": "Fortinet", "product": "FortiGate Secure SD-WAN", "aliases": ("fortinet", "fortigate")},

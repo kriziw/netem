@@ -221,7 +221,7 @@
     partner.hidden = !appliance.vendor_name;
     const logo = document.getElementById('partner-logo');
     logo.hidden = !appliance.vendor;
-    if (appliance.vendor && logo.getAttribute('src') !== `/assets/vendors/${appliance.vendor}.svg`) logo.setAttribute('src', `/assets/vendors/${appliance.vendor}.svg`);
+    if (appliance.vendor && logo.getAttribute('src') !== `/assets/vendors/${appliance.vendor}.png`) logo.setAttribute('src', `/assets/vendors/${appliance.vendor}.png`);
     logo.alt = appliance.vendor_name || '';
     text('partner-name', [appliance.vendor ? null : appliance.vendor_name, appliance.model || appliance.product].filter(Boolean).join(' · '));
   }
