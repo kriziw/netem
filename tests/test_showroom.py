@@ -67,7 +67,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(result["session"]["site"], "Automotive plant")
         self.assertEqual(result["site"]["sub_industry"], "Automotive")
         self.assertEqual(result["experience"]["targets"]["steering_max_s"], 30)
-        self.assertEqual([item["title"] for item in result["findings"]], ["Voice fails via an address"])
+        self.assertEqual([item["title"] for item in result["findings"]], ["Voice fails via [address]"])
         for address in ("198.51.100.7", "2001:db8::7", "203.0.113.9", "192.0.2.44"):
             self.assertNotIn(address, str(result))
 

@@ -155,6 +155,8 @@ TELEMETRY_THREAD = None
 PROBE_THREAD = None
 TELEMETRY_PREVIOUS = {}
 TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
+# Identifies this process, so the update screen can tell when the restarted service answers.
+PROCESS_INSTANCE = uuid.uuid4().hex
 BOTTLENECK_COLUMNS = tuple(
     f"{direction}_{name}" for direction in ("down", "up")
     for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes")
@@ -2186,16 +2188,20 @@ def query_telemetry_history(link_id: str, since: float, max_points=1200):
 
 
 def latest_telemetry_sample(link_id: str):
-    init_telemetry_db()
-    with telemetry_connect() as conn:
-        row = conn.execute(
-            """
-            SELECT * FROM telemetry_samples
-            WHERE link_id = ?
-            ORDER BY timestamp DESC LIMIT 1
-            """,
-            (link_id,),
-        ).fetchone()
+    # A plain read: schema setup takes a write lock and the telemetry worker already did it.
+    try:
+        with telemetry_connect() as conn:
+            row = conn.execute(
+                """
+                SELECT * FROM telemetry_samples
+                WHERE link_id = ?
+                ORDER BY timestamp DESC LIMIT 1
+                """,
+                (link_id,),
+            ).fetchone()
+    except sqlite3.OperationalError:
+        # No telemetry table until the worker's first start.
+        return None
     if not row:
         return None
     sample = dict(row)
@@ -6228,7 +6234,16 @@ def updates():
         page="settings",
         update_status=status,
         restarting=restarting,
+        process_instance=PROCESS_INSTANCE,
     )
+
+
+@app.route("/updates/status")
+def updates_status():
+    """Which NetEm process answers and its version, polled while an update restarts the service."""
+    response = jsonify({"version": get_app_version(), "instance": PROCESS_INSTANCE})
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
 
 @app.route("/setup", methods=["GET", "POST"])
@@ -6609,8 +6624,11 @@ def showroom_snapshot():
     links = []
     for state in build_link_states(cfg):
         sample = latest_telemetry_sample(state["id"])
+        # Judge age when the sample is read: a sample written while the snapshot is being
+        # built is newer than the snapshot's start, not from the future.
+        age = time.time() - sample["timestamp"] if sample else None
         fresh = bool(sample and sample.get("rate_valid") and
-                     0 <= now - sample["timestamp"] <= TELEMETRY_SAMPLE_SECONDS * 3 and
+                     0 <= age <= TELEMETRY_SAMPLE_SECONDS * 3 and
                      all(isinstance(sample.get(key), (int, float)) and
                          math.isfinite(sample[key]) and sample[key] >= 0
                          for key in ("down_mbps", "up_mbps")))
@@ -6679,7 +6697,7 @@ SHOWROOM_LAB_TARGETS = {"experience_min": 75, "success_min_pct": 99.0, "interact
 
 
 def showroom_text(value, limit=240):
-    return SHOWROOM_ADDRESS.sub("an address", str(value or ""))[:limit]
+    return SHOWROOM_ADDRESS.sub("[address]", str(value or ""))[:limit]
 
 
 def showroom_link_label(cfg, link_id):

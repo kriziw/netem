@@ -25,6 +25,7 @@
   <li>Git fetch/merge fails.</li>
 </ul>
 <p>On success, NetEm performs <code>git merge --ff-only origin/main</code>, then exits intentionally. A correctly configured systemd unit with <code>Restart=on-failure</code> starts the updated application again.</p>
+<p>While this happens, a progress screen steps through <strong>Installing update</strong>, <strong>Restarting NetEm</strong> and <strong>Reconnecting</strong>, then reloads the page on the new version. It knows the restart has finished when a new NetEm process answers, so it also works when an update does not change the version number. If the update is refused, for example because of local changes, the screen says why and nothing restarts. If NetEm takes more than two minutes to come back, it suggests checking <code>journalctl -u netem -n 50</code> on the appliance.</p>
 
 <h2 id="permissions">Repository ownership</h2>
 <p>The service runs as <code>techkarma</code>, so that user must be able to write the repository when the in-app updater fetches and fast-forwards. If manual Git commands are run as root, root-owned objects can be created under <code>.git/objects</code> and later block the service user.</p>
