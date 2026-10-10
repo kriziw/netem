@@ -66,7 +66,9 @@
           <input type="hidden" name="action" value="check">
           <button class="btn" type="submit">Check stable channel</button>
         </form>
-        <form method="post" action="{{ url_for('updates') }}" onsubmit="return confirm('Install the available stable update and restart NetEm?');">
+        <form method="post" action="{{ url_for('updates') }}" data-update-form
+              data-from="{{ update_status.installed_version or app_version }}" data-to="{{ update_status.remote_version or '' }}"
+              data-mark="{{ branding.mark }}" data-instance="{{ process_instance }}" data-status-url="{{ url_for('updates_status') }}">
           <input type="hidden" name="action" value="update">
           <button class="btn btn-primary" type="submit"
             {% if not update_status.ok or update_status.dirty or update_status.behind == 0 or (update_status.ahead > 0 and update_status.behind > 0) %}disabled{% endif %}>
@@ -107,9 +109,20 @@
   </div>
 </section>
 
+{% if restarting %}<div id="update-restarting" data-instance="{{ process_instance }}" data-version="{{ update_status.installed_version }}" hidden></div>{% endif %}
 {% endblock %}
 {% block scripts %}
+<script>
+const updateForm = document.querySelector("[data-update-form]");
+if (updateForm) updateForm.addEventListener("submit", event => {
+  // Handled here instead of the generic form handler, so progress shows while NetEm installs and restarts.
+  event.preventDefault();
+  if (confirm("Install the available stable update and restart NetEm?")) window.NetEmUpdate.run(updateForm);
+});
 {% if restarting %}
-<script>setTimeout(() => window.NetEmActions.refresh(), 3500);</script>
+// Reached without the update screen (for example after a reload): follow the restart from here.
+window.NetEmUpdate.show({from: "", to: {{ update_status.installed_version|tojson }}, mark: {{ branding.mark|tojson }},
+  instance: {{ process_instance|tojson }}, statusUrl: {{ url_for('updates_status')|tojson }}})?.installed();
 {% endif %}
+</script>
 {% endblock %}

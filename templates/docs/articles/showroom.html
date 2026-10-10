@@ -43,7 +43,7 @@
 <p>The same summary appears on the Tests page and, for tests run in a lab session, in the session report.</p>
 
 <h2 id="security">What it publishes</h2>
-<p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "an address". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
+<p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "[address]". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
 
 <h2 id="offline">Connection loss</h2>
 <p>The page polls every two seconds. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>

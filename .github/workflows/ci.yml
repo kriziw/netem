@@ -71,6 +71,7 @@ jobs:
               "session_report_json",
               "documentation",
               "documentation_page",
+              "updates_status",
           }
           missing = required - endpoints
           if missing:
@@ -269,6 +270,8 @@ jobs:
           node --check static/showroom.js
           node --test tests/site-scenarios.test.js
           node --check static/site-scenarios.js
+          node --test tests/update-screen.test.js
+          node --check static/update-screen.js
           node --check static/simulator-dialog.js
 
       - name: Validate release configuration
