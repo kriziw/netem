@@ -1,11 +1,16 @@
 window.NetEmActions = (() => {
   let cleanups = [];
   let busy = false;
+  // Unsaved edits in a form on the page; an automatic refresh would throw them away.
+  let dirty = false;
+  let watching = false;
+  const WATCH_MS = 3000;
   function trackClient(client) { cleanups.push(() => client.stop()); }
   function cleanup() {
     cleanups.splice(0).forEach(stop => stop());
   }
   function mount() {
+    watch();
     const template = document.getElementById('page-scripts');
     if (!template) return;
     const scopedDocument = new Proxy(document, {
@@ -65,6 +70,12 @@ window.NetEmActions = (() => {
     });
     document.querySelector('main.page').replaceWith(page);
     document.getElementById('page-scripts').replaceWith(scripts);
+    // The top bar's session, test and impairment pills and the impairment banner follow too.
+    for (const id of ['top-status', 'global-alert-slot']) {
+      const fresh = next.getElementById(id), current = document.getElementById(id);
+      if (fresh && current) current.replaceWith(fresh);
+    }
+    dirty = false;
     const url = new URL(response.url || location.href);
     if (url.origin === location.origin) history.replaceState(null, '', url.pathname + url.search + location.hash);
     document.title = next.title;
@@ -79,6 +90,72 @@ window.NetEmActions = (() => {
     try { await update(await fetch(location.href, {cache:'no-store'})); }
     catch (error) { displayError(error.message); }
     finally { busy = false; }
+  }
+  // A short message that outlives the page refresh an action triggers.
+  function notify(message, tone = 'success') {
+    let stack = document.getElementById('action-toasts');
+    if (!stack) {
+      stack = document.createElement('div');
+      stack.id = 'action-toasts';
+      stack.className = 'action-toasts';
+      stack.setAttribute('role', 'status');
+      stack.setAttribute('aria-live', 'polite');
+      document.body.append(stack);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'flash ' + tone;
+    toast.textContent = message;
+    stack.append(toast);
+    window.setTimeout(() => toast.remove(), 6000);
+  }
+  // Pages follow the lab: when a session, test, plan step, impairment or saved setting changes
+  // anywhere, the server's state version changes and the page refreshes in place. While the
+  // operator is typing or has unsaved edits, a notice offers the refresh instead.
+  const editing = () => {
+    const active = document.activeElement;
+    return Boolean(active?.closest?.('main.page') && active.matches?.('input:not([type="button"]):not([type="submit"]),select,textarea,[contenteditable="true"]'));
+  };
+  function staleNotice() {
+    const page = document.querySelector('main.page');
+    if (!page || document.getElementById('stale-notice')) return;
+    const notice = document.createElement('div');
+    notice.id = 'stale-notice';
+    notice.className = 'flash info stale-notice';
+    notice.setAttribute('role', 'status');
+    notice.append('The lab changed since this page loaded. ');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.className = 'btn btn-sm';
+    button.textContent = 'Refresh';
+    button.addEventListener('click', () => { dirty = false; refresh(); });
+    notice.append(button);
+    page.prepend(notice);
+  }
+  async function check() {
+    const current = document.querySelector('main.page')?.dataset.uiVersion;
+    if (!current || busy || document.visibilityState === 'hidden') return;
+    const response = await fetch('/api/v1/ui-version', {cache:'no-store'});
+    if (!response.ok) return;
+    const {version} = await response.json();
+    if (!version || version === document.querySelector('main.page')?.dataset.uiVersion) return;
+    if (dirty || editing() || document.querySelector('dialog[open]')) staleNotice();
+    else await refresh();
+  }
+  function watch() {
+    if (watching) return;
+    watching = true;
+    const edited = event => { if (event.target.closest?.('main.page form')) dirty = true; };
+    document.addEventListener('input', edited);
+    document.addEventListener('change', edited);
+    // Submitting is the end of an edit, whichever script handles the form.
+    document.addEventListener('submit', () => { dirty = false; }, true);
+    // A background tab is not checked; coming back to it catches up at once.
+    document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') check().catch(() => {}); });
+    const loop = async () => {
+      try { await check(); } catch (_) { /* The next check retries; live widgets show connection problems. */ }
+      window.setTimeout(loop, WATCH_MS);
+    };
+    window.setTimeout(loop, WATCH_MS);
   }
   document.addEventListener('submit', async event => {
     const form = event.target;
@@ -102,5 +179,5 @@ window.NetEmActions = (() => {
       busy = false;
     }
   });
-  return {mount, refresh, trackClient};
+  return {mount, refresh, trackClient, notify};
 })();

@@ -78,11 +78,13 @@
         <div class="breadcrumb"><span>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
-        {% if global_runtime.session.active %}
-          <a class="top-pill scenario" href="{{ url_for('sessions') }}">Session · {{ global_runtime.session.name }}</a>
-        {% endif %}
         {% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
+        {% endif %}
+        {# Refreshed with the page after actions and lab changes. #}
+        <span class="top-status" id="top-status">
+        {% if global_runtime.session.active %}
+          <a class="top-pill scenario" href="{{ url_for('sessions') }}">Session · {{ global_runtime.session.name }}</a>
         {% endif %}
         {% if global_runtime.scenario.active %}
           <span class="top-pill scenario">Scenario · {{ global_runtime.scenario.scenario_name }}</span>
@@ -90,12 +92,14 @@
         {% if global_runtime.active_fault_count %}
           <span class="top-pill alert">{{ global_runtime.active_fault_count }} active impairment{{ '' if global_runtime.active_fault_count == 1 else 's' }}</span>
         {% endif %}
+        </span>
         <button class="top-pill top-action-button" type="button" id="activity-toggle">Activity</button>
         <button class="top-pill top-action-button" type="button" id="command-toggle" title="Quick actions (Ctrl+K)">Ctrl+K</button>
         <span class="live-pill"><span class="live-dot"></span>Live</span>
       </div>
     </header>
 
+    <div id="global-alert-slot">
     {% if global_runtime.active_fault_count %}
       <div class="global-alert">
         <strong>Active runtime impairment</strong>
@@ -103,8 +107,9 @@
         <a class="btn btn-sm btn-danger" href="{{ url_for('overview') }}">Review</a>
       </div>
     {% endif %}
+    </div>
 
-    <main class="page">
+    <main class="page" data-ui-version="{{ ui_version }}">
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="flash-stack">

@@ -39,5 +39,8 @@
 <h2 id="sessions">Session awareness</h2>
 <p>If a lab session is active, the top bar shows its name and all newly written runtime events are tagged with that session ID. This lets you operate normally while preserving context for later review.</p>
 
+<h2 id="up-to-date">Pages stay up to date</h2>
+<p>Every page follows the lab without reloading. Actions update the page, the top bar's session, test and impairment indicators and the impairment banner at once; WAN controls in the drawer show their result as a short message. Changes made elsewhere, such as a test ending, the next test of a site plan starting, a session started in another tab, an impairment, a saved setting or the Traffic Simulator starting or finishing a run, appear within about 3 seconds. Measurements, phases and countdowns update continuously as before. While you are typing or have unsaved changes in a form, the page keeps them and shows <em>The lab changed since this page loaded</em> with a <strong>Refresh</strong> button instead. A tab in the background catches up as soon as you return to it.</p>
+
 <h2 id="live-data">What is live</h2>
 <p>Throughput and packet-rate values come from Linux interface counters. Latency, jitter, loss and quality are the conditions NetEm is injecting, not remote active-probe measurements. The expected SLA therefore reflects the injected state. Future vendor adapters are intended to add observed appliance SLA/path-selection data alongside it.</p>
