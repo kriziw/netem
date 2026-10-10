@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.13.0](https://github.com/kriziw/netem/compare/v0.12.0...v0.13.0) (2026-10-10)
+
+
+### Features
+
+* show update progress with the same screen as the Traffic Simulator ([edcd102](https://github.com/kriziw/netem/commit/edcd10201ddb7778a4f6b61b6f8b567e55b437c1))
+
+
+### Bug Fixes
+
+* reading the latest telemetry sample no longer takes a database write lock ([edcd102](https://github.com/kriziw/netem/commit/edcd10201ddb7778a4f6b61b6f8b567e55b437c1))
+* showroom replaces hidden addresses with [address] ([edcd102](https://github.com/kriziw/netem/commit/edcd10201ddb7778a4f6b61b6f8b567e55b437c1))
+* showroom shows measured WAN traffic when a sample arrives while the snapshot is built ([edcd102](https://github.com/kriziw/netem/commit/edcd10201ddb7778a4f6b61b6f8b567e55b437c1))
+
 ## [0.12.0](https://github.com/kriziw/netem/compare/v0.11.2...v0.12.0) (2026-10-10)
 
 
