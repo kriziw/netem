@@ -925,3 +925,18 @@ pre {
 .brand-logo { max-width:160px; max-height:42px; object-fit:contain; }
 .report-brand { display:none; }
 @media print { .report-brand { display:flex; align-items:center; gap:12px; margin-bottom:20px; color:#111; } }
+
+/* Running test: phase track, pause state and test length inputs. */
+.running-test-bar.paused { border-color:rgba(243,184,75,.45); }
+.running-test-bar .actions { display:flex; gap:8px; flex-wrap:wrap; }
+.phase-track { display:flex; gap:3px; margin-top:10px; }
+.phase-track .phase { position:relative; min-width:0; height:22px; border-radius:6px; background:var(--surface-3); overflow:hidden; }
+.phase-track .phase i { position:absolute; inset:0 auto 0 0; background:var(--accent-soft); border-right:2px solid var(--accent); transition:width .6s linear; }
+.phase-track .phase.done i { background:rgba(84,216,137,.18); border-right:0; }
+.phase-track .phase.upcoming i { border-right:0; }
+.phase-track .phase b { position:relative; display:block; padding:3px 7px; font-size:10.5px; font-weight:600; color:var(--text-soft); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.phase-track .phase.current b { color:var(--text); }
+.running-test-bar.paused .phase-track .phase.current i { border-right-color:var(--warning); background:var(--warning-soft); }
+.length-field { display:flex; align-items:center; gap:6px; font-size:11px; color:var(--muted); white-space:nowrap; }
+.length-field input { width:64px; margin:0; }
+.summary-lines{margin:0 0 12px;padding-left:18px;display:grid;gap:4px;color:var(--text)}.muted-row td{color:var(--muted)}

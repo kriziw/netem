@@ -187,3 +187,31 @@ test('steering distinguishes unknown and partial attribution from idle traffic',
   assert.match(partial, /Unknown 50%/);
   assert.match(partial, /WAN unknown · 8 transactions/);
 });
+
+test('running test shows phases, countdown and the pause or resume action', () => {
+  const scenario = {active: true, scenario_name: 'Brownout', step_label: 'Degrade', phase_index: 1, phase: 'Brownout',
+    phases: [{name: 'Baseline', planned_s: 60}, {name: 'Brownout', planned_s: 120}, {name: 'Recovery', planned_s: 60}],
+    planned_s: 240, elapsed_s: 100, phase_elapsed_s: 30, phase_remaining_s: 90, next_phase: 'Recovery', paused: false};
+  const timeline = JSON.parse(JSON.stringify(ui.phaseTimeline(scenario)));
+  assert.deepEqual(timeline.map(phase => [phase.state, Math.round(phase.fill)]), [['done', 100], ['current', 25], ['upcoming', 0]]);
+  assert.equal(ui.phaseCountdown(scenario), 'next: Recovery in 1:30');
+  assert.equal(ui.phaseCountdown({...scenario, paused: true}), 'Recovery follows 1:30 after resuming');
+  assert.equal(ui.phaseCountdown({...scenario, next_phase: null}), 'ends in 1:30');
+  const classes = new Set(), nodes = {};
+  for (const selector of ['[data-run-name]', '[data-run-phase]', '[data-run-step]', '[data-run-condition]', '[data-run-time]', '[data-run-pause]', '[data-run-phases]'])
+    nodes[selector] = {textContent: '', innerHTML: ''};
+  nodes['[data-run-pause-form]'] = {setAttribute(name, value) { this[name] = value; }};
+  const root = {dataset: {pauseUrl: '/lab/scenario/pause', resumeUrl: '/lab/scenario/resume'},
+    classList: {toggle: (name, on) => on ? classes.add(name) : classes.delete(name)}, querySelector: selector => nodes[selector] || null};
+  ui.renderRunningTest(root, {...scenario, scenario_name: '<b>x</b>'});
+  assert.equal(nodes['[data-run-name]'].textContent, '<b>x</b>');
+  assert.equal(nodes['[data-run-phase]'].textContent, 'phase 2 of 3 · Brownout');
+  assert.equal(nodes['[data-run-time]'].textContent, '1:40 of about 4:00 · next: Recovery in 1:30');
+  assert.equal(nodes['[data-run-pause-form]'].action, '/lab/scenario/pause');
+  assert.equal((nodes['[data-run-phases]'].innerHTML.match(/class="phase /g) || []).length, 3);
+  ui.renderRunningTest(root, {...scenario, paused: true, phases: [{name: '<img>', planned_s: 60}], phase_index: 0});
+  assert.ok(classes.has('paused'));
+  assert.equal(nodes['[data-run-pause]'].textContent, 'Resume');
+  assert.equal(nodes['[data-run-pause-form]'].action, '/lab/scenario/resume');
+  assert.ok(!nodes['[data-run-phases]'].innerHTML.includes('<img>'));
+});

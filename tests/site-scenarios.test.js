@@ -71,3 +71,17 @@ test('active site targets judge DEM and late steering and require interactive ti
   const html = dom.window.NetEmUI.steeringHtml({classes:[{label:'Voice',severity:'good',verdict:'steered',shares:[],text:'Moved',reactions:[{was_used:true,steered_after_seconds:15,label:'WAN1'}]}]}, {steering_max_s:10});
   assert.ok(html.includes('Steering target missed'));
 });
+
+test('shared selectors fill the session form and follow the industry', () => {
+  const dom = new JSDOM('<form id="start"><select name="industry"></select><select name="sub_industry"></select><select name="function"></select><select name="size"></select><select name="criticality"></select></form>', {runScripts: 'outside-only'});
+  dom.window.eval(fs.readFileSync('static/site-scenarios.js', 'utf8'));
+  const form = dom.window.document.getElementById('start');
+  let changes = 0;
+  const {values} = dom.window.NetEmSites.selectors(form, options, {...selection, industry: 'retail', sub_industry: 'grocery', function: 'store'}, () => changes++);
+  assert.equal(values().industry, 'retail');
+  assert.equal(values().function, 'store');
+  form.elements.industry.value = 'manufacturing';
+  form.elements.industry.dispatchEvent(new dom.window.Event('change'));
+  assert.equal(JSON.stringify(values()), JSON.stringify(selection));
+  assert.equal(changes, 1);
+});

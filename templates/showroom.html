@@ -20,25 +20,64 @@
     <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
   </header>
   <main>
-    <section class="summary" aria-label="Live summary">
-      <article><span>WAN paths</span><strong id="path-count">—</strong></article>
-      <article><span>Passing model SLA</span><strong id="healthy-count">—</strong></article>
-      <article><span>Measured download</span><strong id="total-down">—</strong></article>
-      <article><span>Measured upload</span><strong id="total-up">—</strong></article>
+    <section class="site" aria-label="Client site">
+      <div class="site-identity">
+        <span class="eyebrow">Client site</span>
+        <h2 id="site-title">No client site selected</h2>
+        <p id="site-meta">Choose a site in the operator interface to show its industry, size and targets.</p>
+        <p id="site-people"></p>
+      </div>
+      <div class="site-targets"><span class="eyebrow" id="targets-heading">Experience targets</span><div id="site-targets" class="chips"></div><p id="site-lines"></p></div>
+      <div class="site-session"><span class="eyebrow">Lab session</span><strong id="session-name">No session running</strong><p id="session-site"></p></div>
     </section>
-    <section class="demo" aria-label="Current demonstration"><div><span class="eyebrow">Current demonstration</span><h2 id="demo-name">Waiting for live data</h2><p id="demo-stage"></p></div><span id="session-name"></span></section>
-    <div class="section-heading"><h2>Live WAN paths</h2><span id="page-number"></span></div>
-    <section id="paths" class="paths" aria-label="WAN status"><p class="empty">Waiting for the first snapshot…</p></section>
+    <div class="columns">
+      <section class="column" aria-label="Network and activity">
+        <div class="section-heading"><h2>Network &amp; activity</h2><span id="page-number"></span></div>
+        <section class="demo" aria-label="Running now">
+          <div class="demo-main"><span class="eyebrow">Running now</span><h3 id="demo-name">Waiting for live data</h3><p id="demo-stage"></p><div id="demo-phases" class="phases" hidden></div><p id="demo-time" class="demo-time"></p><div id="plan-tests" class="chips"></div></div>
+          <div class="workload"><span class="eyebrow">Simulated users</span><strong id="workload-users">—</strong><p id="workload-summary"></p><div id="app-mix" class="mix"></div></div>
+        </section>
+        <section class="summary" aria-label="Network summary">
+          <article><span>WAN paths</span><strong id="path-count">—</strong></article>
+          <article><span>Passing model SLA</span><strong id="healthy-count">—</strong></article>
+          <article><span>Measured download</span><strong id="total-down">—</strong></article>
+          <article><span>Measured upload</span><strong id="total-up">—</strong></article>
+        </section>
+        <section id="paths" class="paths" aria-label="WAN status"><p class="empty">Waiting for the first snapshot…</p></section>
+      </section>
+      <section class="column" aria-label="Experience outcome">
+        <div class="section-heading"><h2>Experience outcome</h2><span id="outcome-window"></span></div>
+        <section class="results" aria-label="Result against targets">
+          <article class="result unknown" id="result-experience"><span>Experience</span><strong data-value>—</strong><small data-target></small></article>
+          <article class="result unknown" id="result-success"><span>Request success</span><strong data-value>—</strong><small data-target></small></article>
+          <article class="result unknown" id="result-interactive"><span>Interactive response · P95</span><strong data-value>—</strong><small data-target></small></article>
+        </section>
+        <section class="panel report" id="report" aria-label="Test report" hidden>
+          <div class="report-head"><div><span class="eyebrow">Test report</span><h3 id="report-name"></h3><p id="report-meta"></p></div><strong class="pill" id="report-result"></strong></div>
+          <ul id="report-conclusion" class="conclusion"></ul>
+          <table class="phase-table"><thead><tr><th>Phase</th><th>Experience</th><th>Success</th><th>Interactive P95</th><th>WAN traffic · Mbit/s</th><th>SD-WAN steering</th></tr></thead><tbody id="report-phases"></tbody></table>
+          <div class="remediation"><span class="eyebrow">SD-WAN remediation</span><div id="report-remediation"></div></div>
+        </section>
+        <div id="live-outcome" class="live-outcome">
+          <section class="panel" aria-label="Where and why"><span class="eyebrow">Where it happens &amp; why</span><div id="findings" class="findings"><p class="muted">Waiting for measurements…</p></div></section>
+          <section class="panel" aria-label="SD-WAN steering"><span class="eyebrow">SD-WAN steering</span><div id="steering" class="steering"><p class="muted">Waiting for measurements…</p></div>
+            <div class="legend-health"><span class="healthy">Healthy</span><span class="congested">Congested</span><span class="degraded">Degraded</span><span class="failed">Failed</span><span class="unknown">WAN unknown</span></div>
+          </section>
+        </div>
+      </section>
+    </div>
   </main>
-  <footer><span>Read-only display · updates every 2 seconds</span><span>Traffic is measured. Delay, jitter, loss and model SLA describe requested NetEm impairments.</span></footer>
+  <footer><span>Read-only display · updates every 2 seconds</span><span>Traffic and experience are measured. Delay, jitter, loss and model SLA describe requested NetEm impairments.</span></footer>
   <template id="path-template">
     <article class="path">
       <div class="path-heading"><div><h3 data-field="name"></h3><span data-field="profile"></span></div><strong class="badge" data-field="health"></strong></div>
-      <div class="traffic"><div><span>Download · Mbit/s</span><strong data-field="down"></strong></div><div><span>Upload · Mbit/s</span><strong data-field="up"></strong></div></div>
+      <p class="reason" data-field="reason"></p>
+      <div class="traffic"><div><span>Download · Mbit/s</span><strong data-field="down"></strong><div class="bar"><i data-bar="down"></i></div><small data-field="down-util"></small></div><div><span>Upload · Mbit/s</span><strong data-field="up"></strong><div class="bar"><i data-bar="up"></i></div><small data-field="up-util"></small></div></div>
       <div class="limits" data-field="limits"></div>
       <svg class="spark" viewBox="0 0 300 52" preserveAspectRatio="none" role="img" aria-label="Measured download and upload over the last two minutes"><path class="download"></path><path class="upload"></path></svg>
       <div class="legend"><span>Download</span><span>Upload</span><span>Last 2 minutes · auto scale</span></div>
       <div class="impairments"><div><span>Injected delay</span><strong data-field="delay"></strong></div><div><span>Injected jitter</span><strong data-field="jitter"></strong></div><div><span>Injected loss</span><strong data-field="loss"></strong></div><div><span>Model quality</span><strong data-field="quality"></strong></div></div>
+      <p class="users" data-field="users"></p>
       <p class="sample" data-field="sample"></p>
     </article>
   </template>

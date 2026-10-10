@@ -120,9 +120,12 @@ ACTIVE_SESSION = {
     "id": None,
     "name": None,
     "started_at": None,
+    "site": None,
 }
 CONFIG_LOCK = threading.RLock()
 SCENARIO_STOP = threading.Event()
+# Set while an operator holds the running test in its current phase.
+SCENARIO_PAUSE = threading.Event()
 SCENARIO_STATE = {
     "active": False,
     "scenario_id": None,
@@ -136,6 +139,14 @@ SCENARIO_STATE = {
     "condition": None,
     "result": None,
     "error": None,
+    "phases": [],
+    "phase_index": None,
+    "phase": None,
+    "planned_s": None,
+    "paused": False,
+    "paused_at": None,
+    "paused_total_s": 0.0,
+    "phase_started_s": None,
 }
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
@@ -614,18 +625,21 @@ BANDWIDTH_OPTIONS = [
     1000, 2000, 2500, 5000, 10000,
 ]
 
+# Built-in tests run about 3-5 minutes in named phases, long enough for SD-WAN health
+# checks to react and for experience measurements to settle; length is adjustable at start.
 DEFAULT_SCENARIOS = [
     {
         "id": "progressive_brownout",
         "name": "Progressive brownout",
         "description": "Gradually degrades one WAN, holds it in a poor state, then restores it.",
         "steps": [
-            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
-            {"after": 10, "action": "quality", "value": 80, "label": "Minor degradation"},
-            {"after": 10, "action": "quality", "value": 60, "label": "Noticeable degradation"},
-            {"after": 10, "action": "quality", "value": 40, "label": "Severe brownout"},
-            {"after": 20, "action": "quality", "value": 70, "label": "Partial recovery"},
-            {"after": 10, "action": "quality", "value": 100, "label": "Recovered"},
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal", "phase": "Baseline"},
+            {"after": 60, "action": "quality", "value": 80, "label": "Minor degradation", "phase": "Degradation"},
+            {"after": 40, "action": "quality", "value": 60, "label": "Noticeable degradation", "phase": "Degradation"},
+            {"after": 40, "action": "quality", "value": 40, "label": "Severe brownout", "phase": "Severe brownout"},
+            {"after": 60, "action": "quality", "value": 70, "label": "Partial recovery", "phase": "Recovery"},
+            {"after": 30, "action": "quality", "value": 100, "label": "Recovered", "phase": "Recovery"},
+            {"after": 30, "action": "phase", "label": "Settled", "phase": "Recovery"},
         ],
     },
     {
@@ -633,23 +647,26 @@ DEFAULT_SCENARIOS = [
         "name": "SLA failover",
         "description": "Starts healthy, blackholes the WAN while link state remains up, then restores it.",
         "steps": [
-            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
-            {"after": 10, "action": "fault", "value": "blackhole", "label": "Blackhole"},
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal", "phase": "Baseline"},
+            {"after": 60, "action": "fault", "value": "blackhole", "label": "Blackhole", "phase": "Outage"},
             {
                 "after": 0,
                 "action": "assert",
                 "condition": {"type": "sla", "state": "fail"},
                 "timeout": 5,
-                "label": "Expected SLA detects failure"
+                "label": "Expected SLA detects failure",
+                "phase": "Outage",
             },
-            {"after": 30, "action": "fault", "value": "normal", "label": "Connectivity restored"},
+            {"after": 90, "action": "fault", "value": "normal", "label": "Connectivity restored", "phase": "Recovery"},
             {
                 "after": 0,
                 "action": "assert",
                 "condition": {"type": "sla", "state": "pass"},
                 "timeout": 5,
-                "label": "Expected SLA recovers"
+                "label": "Expected SLA recovers",
+                "phase": "Recovery",
             },
+            {"after": 60, "action": "phase", "label": "Settled", "phase": "Recovery"},
         ],
     },
     {
@@ -657,11 +674,16 @@ DEFAULT_SCENARIOS = [
         "name": "Flaky underlay",
         "description": "Alternates between healthy and one-way failure to exercise SLA hysteresis.",
         "steps": [
-            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
-            {"after": 8, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure"},
-            {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
-            {"after": 8, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure"},
-            {"after": 8, "action": "fault", "value": "normal", "label": "Recovered"},
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal", "phase": "Baseline"},
+            {"after": 60, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "normal", "label": "Recovered", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "normal", "label": "Recovered", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "downstream_blackhole", "label": "Downstream failure", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "normal", "label": "Recovered", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "upstream_blackhole", "label": "Upstream failure", "phase": "Flapping"},
+            {"after": 20, "action": "fault", "value": "normal", "label": "Recovered", "phase": "Recovery"},
+            {"after": 45, "action": "phase", "label": "Settled", "phase": "Recovery"},
         ],
     },
     {
@@ -669,12 +691,13 @@ DEFAULT_SCENARIOS = [
         "name": "Availability stress / DDoS impact",
         "description": "Safely emulates the WAN impact of a saturation event without generating attack traffic.",
         "steps": [
-            {"after": 0, "action": "quality", "value": 100, "label": "Nominal"},
-            {"after": 8, "action": "quality", "value": 60, "label": "Congestion begins"},
-            {"after": 8, "action": "quality", "value": 30, "label": "Heavy saturation impact"},
-            {"after": 12, "action": "quality", "value": 10, "label": "Severe availability impact"},
-            {"after": 15, "action": "quality", "value": 70, "label": "Attack subsides"},
-            {"after": 10, "action": "quality", "value": 100, "label": "Recovered"},
+            {"after": 0, "action": "quality", "value": 100, "label": "Nominal", "phase": "Baseline"},
+            {"after": 60, "action": "quality", "value": 60, "label": "Congestion begins", "phase": "Congestion"},
+            {"after": 45, "action": "quality", "value": 30, "label": "Heavy saturation impact", "phase": "Saturation"},
+            {"after": 45, "action": "quality", "value": 10, "label": "Severe availability impact", "phase": "Saturation"},
+            {"after": 45, "action": "quality", "value": 70, "label": "Attack subsides", "phase": "Recovery"},
+            {"after": 30, "action": "quality", "value": 100, "label": "Recovered", "phase": "Recovery"},
+            {"after": 30, "action": "phase", "label": "Settled", "phase": "Recovery"},
         ],
     },
 ]
@@ -694,6 +717,9 @@ def get_scenarios(cfg: dict):
     for item in cfg.get("custom_scenarios", []):
         if isinstance(item, dict) and item.get("id") and item.get("steps"):
             scenarios.append(item)
+    for item in scenarios:
+        phases, item["planned_s"] = scenario_phases(item["steps"])
+        item["phases"] = [phase["name"] for phase in phases]
     return scenarios
 
 
@@ -851,11 +877,11 @@ def validate_scenario_steps(raw_steps):
 
         action = str(step.get("action", "")).strip()
         if action not in (
-            "quality", "fault", "mtu", "traffic_generator", "wait", "assert"
+            "quality", "fault", "mtu", "traffic_generator", "wait", "assert", "phase"
         ):
             raise ValueError(
                 f"Step {index}: action must be quality, fault, mtu, "
-                "traffic_generator, wait or assert."
+                "traffic_generator, wait, assert or phase."
             )
 
         try:
@@ -868,6 +894,8 @@ def validate_scenario_steps(raw_steps):
             "action": action,
             "label": str(step.get("label") or action)[:80],
         }
+        if step.get("phase"):
+            validated_step["phase"] = str(step["phase"]).strip()[:40]
 
         if action == "quality":
             try:
@@ -2600,6 +2628,8 @@ def track_steering_reaction(cls: str, label: str, link: dict, pct, now: float):
     if entry["used"] and pct is not None and entry["steered_at"] is None:
         if pct <= STEERED_AWAY_PCT:
             entry["steered_at"] = now
+            recorder_note("reactions", {"traffic_class": label, "wan": link["label"], "health": link["health"],
+                                        "seconds": round(elapsed)})
             log_event("steering", f"SD-WAN moved {label.lower()} off {link['label']} {round(elapsed)} s after it became {link['health']}",
                       link_id=link["link_id"], traffic_class=cls, seconds=round(elapsed))
         elif not entry["warned"] and elapsed >= STEERING_GRACE_SECONDS:
@@ -2796,7 +2826,7 @@ def diagnosis_worker():
     # Keeps findings (and their Detected/Cleared events) current without an open browser.
     while not BACKGROUND_STOP.is_set():
         try:
-            current_diagnosis(max_age=0)
+            record_test_sample(current_diagnosis(max_age=0))
         except Exception as exc:
             with DIAGNOSIS_LOCK:
                 DIAGNOSIS_CACHE["error"] = str(exc)[:240]
@@ -3266,9 +3296,12 @@ def build_session_report(session_id: str, end_time=None):
     events = read_session_events(session_id)
     assertions = []
     tests = []
+    summaries = []
 
     for event in events:
         details = event.get("details", {})
+        if event.get("kind") == "test-summary" and isinstance(details.get("summary"), dict):
+            summaries.append(details["summary"])
         if event.get("kind") == "assertion":
             assertions.append(
                 {
@@ -3387,11 +3420,13 @@ def build_session_report(session_id: str, end_time=None):
             "ended_at": ended_at,
             "duration_s": round(max(0, ended_at - started_at), 3),
             "status": session.get("status"),
+            "site": session.get("site"),
         },
         "generated_at": time.time(),
         "result": result,
         "assertions": assertions,
         "tests": tests,
+        "test_summaries": summaries,
         "telemetry": telemetry,
         "probes": probes,
         "event_counts": event_counts,
@@ -3551,7 +3586,20 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
 
 def scenario_snapshot():
     with RUNTIME_LOCK:
-        return dict(SCENARIO_STATE)
+        state = dict(SCENARIO_STATE)
+    if state.get("active") and state.get("started_at"):
+        held = state.get("paused_total_s") or 0.0
+        if state.get("paused") and state.get("paused_at"):
+            held += time.time() - state["paused_at"]
+        # Elapsed test time excludes pauses so progress matches the planned phases.
+        state["elapsed_s"] = round(max(0.0, time.time() - state["started_at"] - held), 1)
+        phases, index = state.get("phases") or [], state.get("phase_index")
+        if index is not None and index < len(phases) and state.get("phase_started_s") is not None:
+            # Counted from when the phase really began, since waits on conditions can stretch a phase.
+            state["phase_elapsed_s"] = round(max(0.0, state["elapsed_s"] - state["phase_started_s"]), 1)
+            state["phase_remaining_s"] = round(max(0.0, phases[index]["planned_s"] - state["phase_elapsed_s"]), 1)
+            state["next_phase"] = phases[index + 1]["name"] if index + 1 < len(phases) else None
+    return state
 
 
 def compare_condition_value(actual, operator, expected):
@@ -3744,6 +3792,11 @@ def wait_for_scenario_condition(
     while time.time() <= deadline:
         if SCENARIO_STOP.is_set():
             return False, last_observed, "stopped", time.time() - started
+        if SCENARIO_PAUSE.is_set():
+            paused = time.time()
+            SCENARIO_STOP.wait(0.25)
+            deadline += time.time() - paused
+            continue
 
         passed, observed, detail = evaluate_scenario_condition(
             condition, default_link_id
@@ -3765,6 +3818,250 @@ def wait_for_scenario_condition(
     return passed, observed, detail or last_detail, time.time() - started
 
 
+# ---------- Test recording and summary ----------
+#
+# While a test runs, the diagnosis worker records what users experienced, how
+# much traffic each WAN carried and where the appliance steered traffic, tagged
+# with the current phase. When the test ends this becomes its summary: what
+# happened, performance per phase, SD-WAN remediation and the checks.
+
+TEST_RECORDER = {"active": False}
+TEST_RECORDER_LOCK = threading.Lock()
+LAST_TEST_SUMMARY_PATH = RUNTIME_DIR / "last-test-summary.json"
+BASELINE_PHASES = ("Baseline", "Steady state")
+
+
+def load_last_test_summary():
+    try:
+        summary = json.loads(LAST_TEST_SUMMARY_PATH.read_text())
+        return summary if isinstance(summary, dict) else None
+    except (OSError, ValueError):
+        return None
+
+
+LAST_TEST_SUMMARY = load_last_test_summary()
+
+
+def recorder_start(scenario: dict, link_id: str, phases: list):
+    with TEST_RECORDER_LOCK:
+        TEST_RECORDER.clear()
+        TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
+                             started_at=time.time(), phases=[phase["name"] for phase in phases],
+                             phase_marks=[], samples=[], assertions=[], reactions=[])
+
+
+def recorder_note(kind: str, item: dict):
+    with TEST_RECORDER_LOCK:
+        if TEST_RECORDER.get("active"):
+            TEST_RECORDER[kind].append(item)
+
+
+def record_test_sample(payload: dict):
+    """One sample of the running test, taken with each diagnosis refresh."""
+    if not TEST_RECORDER.get("active"):
+        return
+    scenario = scenario_snapshot()
+    if not scenario.get("active"):
+        return
+    status = (payload.get("traffic_generator") or {}).get("status") or {}
+    dem = status.get("dem") or {}
+    has_data = bool(dem.get("requests"))
+    sample = {
+        "t": scenario.get("elapsed_s"), "phase": scenario.get("phase"), "paused": bool(scenario.get("paused")),
+        "experience": dem.get("experience_score") if has_data else None,
+        "success": dem.get("availability_pct") if has_data else None,
+        "interactive_p95_ms": dem.get("interactive_p95_ms") if has_data else None,
+        "links": [{"id": item["link_id"], "label": item["label"], "health": item.get("health"),
+                   "down_mbps": ((item.get("directions") or {}).get("down") or {}).get("rate_mbps"),
+                   "up_mbps": ((item.get("directions") or {}).get("up") or {}).get("rate_mbps")}
+                  for item in payload.get("links") or []],
+        "steering": {item["label"]: {"verdict": item.get("verdict"),
+                                     "impaired": [share["label"] for share in item.get("shares") or []
+                                                  if share.get("health") not in (None, "healthy") and share.get("pct")]}
+                     for item in (payload.get("steering") or {}).get("classes") or []},
+    }
+    with TEST_RECORDER_LOCK:
+        if TEST_RECORDER.get("active"):
+            TEST_RECORDER["samples"] = (TEST_RECORDER["samples"] + [sample])[-2000:]
+
+
+def _average(values):
+    values = [float(value) for value in values if value is not None]
+    return round(sum(values) / len(values), 1) if values else None
+
+
+def summarize_test(record: dict, result: str, error, targets=None, site_label=None, ended_at=None):
+    """Turn a recorded test into what happened, performance per phase, remediation and checks."""
+    ended_at = ended_at or time.time()
+    samples = record.get("samples") or []
+    marks = record.get("phase_marks") or []
+    phases = []
+    for name in record.get("phases") or []:
+        rows = [sample for sample in samples if sample.get("phase") == name]
+        measured = [sample for sample in rows if sample.get("experience") is not None]
+        last = measured[-1] if measured else {}
+        mark = next((item for item in marks if item["name"] == name), None)
+        following = next((item for item in marks if mark and item["at"] > mark["at"]), None)
+        links = {}
+        for sample in rows:
+            for link in sample.get("links") or []:
+                links.setdefault(link["id"], {"label": link["label"], "down": [], "up": [], "health": None})
+                links[link["id"]]["down"].append(link.get("down_mbps"))
+                links[link["id"]]["up"].append(link.get("up_mbps"))
+                links[link["id"]]["health"] = link.get("health") or links[link["id"]]["health"]
+        phases.append({
+            "name": name, "reached": mark is not None,
+            "duration_s": round((following["at"] if following else ended_at) - mark["at"]) if mark else None,
+            "experience_score": last.get("experience"), "success_pct": last.get("success"),
+            "interactive_p95_ms": last.get("interactive_p95_ms"),
+            "worst_success_pct": min((sample["success"] for sample in measured if sample.get("success") is not None), default=None),
+            "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
+                      "health": item["health"]} for item in links.values()],
+            "steering": {label: entry["verdict"] for label, entry in ((rows[-1] if rows else {}).get("steering") or {}).items()},
+        })
+    assertions = record.get("assertions") or []
+    failed = [item for item in assertions if not item.get("passed")]
+    steering_target = (targets or {}).get("steering_max_s")
+    remediation = [dict(item, within_target=None if steering_target is None else item["seconds"] <= steering_target)
+                   for item in record.get("reactions") or []]
+
+    conclusion = [f"{record.get('name') or 'Test'} {result}" +
+                  (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
+    if error and result != "passed":
+        conclusion.append(str(error)[:200])
+    measured_phases = [phase for phase in phases if phase["experience_score"] is not None]
+    if measured_phases:
+        base = next((phase for phase in measured_phases if phase["name"] in BASELINE_PHASES), measured_phases[0])
+        others = [phase for phase in measured_phases if phase is not base]
+        worst = min(others, key=lambda phase: phase["experience_score"]) if others else None
+        if worst and worst["experience_score"] < base["experience_score"]:
+            text = (f"Experience was {base['experience_score']:.0f} in {base['name']} and fell to "
+                    f"{worst['experience_score']:.0f} during {worst['name']}")
+            if measured_phases[-1] is not worst:
+                text += f", ending at {measured_phases[-1]['experience_score']:.0f} in {measured_phases[-1]['name']}"
+            conclusion.append(text + ".")
+        else:
+            conclusion.append(f"Experience held at {base['experience_score']:.0f} or better through the test.")
+    else:
+        conclusion.append("No simulated user traffic was measured, so user impact and steering were not assessed.")
+    # Remediation lines are kept apart so a report can show them in their own section.
+    reacted = []
+    for item in remediation:
+        text = f"The appliance moved {item['traffic_class'].lower()} off {item['wan']} in {item['seconds']} s"
+        if item["within_target"] is not None:
+            text += f" (target ≤ {steering_target} s {'met' if item['within_target'] else 'missed'})"
+        reacted.append(text + ".")
+    narrative = list(conclusion)
+    stuck = {}
+    for phase in phases:
+        for label, verdict in phase["steering"].items():
+            if verdict in ("stuck", "stuck_impact"):
+                stuck.setdefault(label, phase["name"])
+    for label, phase_name in stuck.items():
+        if not any(item["traffic_class"] == label for item in remediation):
+            narrative.append(f"{label} stayed on an impaired WAN during {phase_name}.")
+    if failed:
+        narrative.append("Missed: " + "; ".join(item["label"] for item in failed[:4]) + ".")
+    conclusion = narrative[:len(conclusion)] + reacted + narrative[len(conclusion):]
+    return {
+        "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
+        "site": site_label, "result": result, "started_at": record.get("started_at"), "ended_at": ended_at,
+        "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
+        "phases": phases, "remediation": remediation, "steering_target_s": steering_target,
+        "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
+                       "items": [{key: item.get(key) for key in ("label", "passed", "observed", "phase")} for item in assertions]},
+        "conclusion": conclusion, "narrative": narrative,
+    }
+
+
+def recorder_finish(result: str, error):
+    global LAST_TEST_SUMMARY
+    with TEST_RECORDER_LOCK:
+        record = copy.deepcopy(TEST_RECORDER)
+        TEST_RECORDER.clear()
+        TEST_RECORDER["active"] = False
+    if not record.get("active"):
+        return None
+    cfg = load_config()
+    plan = active_site_plan(cfg)
+    summary = summarize_test(record, result, error, (plan or {}).get("targets"), (plan or {}).get("label"))
+    link = get_link(cfg, record.get("link_id") or "")
+    summary["link"] = (link or {}).get("name") or record.get("link_id")
+    LAST_TEST_SUMMARY = summary
+    try:
+        RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
+        LAST_TEST_SUMMARY_PATH.write_text(json.dumps(summary))
+    except OSError:
+        pass
+    log_event("test-summary", summary["conclusion"][0], summary=summary)
+    return summary
+
+
+def scenario_sleep(seconds: float):
+    """Wait out a step delay. Paused time does not count, and a paused test holds here
+    in its current phase until resumed. Returns True when the test was stopped."""
+    remaining = max(0.0, float(seconds))
+    while remaining > 0 or SCENARIO_PAUSE.is_set():
+        if SCENARIO_STOP.is_set():
+            return True
+        started = time.monotonic()
+        SCENARIO_STOP.wait(0.25 if SCENARIO_PAUSE.is_set() else min(0.25, remaining))
+        if not SCENARIO_PAUSE.is_set():
+            remaining -= time.monotonic() - started
+    return SCENARIO_STOP.is_set()
+
+
+def scenario_phases(steps):
+    """Planned phase timeline: each phase runs from its first step until the next phase starts."""
+    phases, elapsed = [], 0
+    for step in steps:
+        elapsed += int(step.get("after", 0))
+        name = step.get("phase") or (phases[-1]["name"] if phases else "Test")
+        if not phases or phases[-1]["name"] != name:
+            phases.append({"name": name, "start_s": elapsed})
+    for current, following in zip(phases, phases[1:] + [{"start_s": elapsed}]):
+        current["planned_s"] = following["start_s"] - current["start_s"]
+    return phases, elapsed
+
+
+def step_phase_indexes(steps):
+    """Phase index of each step, starting a new phase exactly where scenario_phases does."""
+    indexes, index, current = [], -1, None
+    for step in steps:
+        name = step.get("phase") or current or "Test"
+        if name != current:
+            index, current = index + 1, name
+        indexes.append(index)
+    return indexes
+
+
+def scale_scenario_steps(steps, length_s: float):
+    """Stretch or shrink a test to about length_s seconds; DEM windows follow, timeouts do not."""
+    planned = scenario_phases(steps)[1]
+    if planned <= 0:
+        return [dict(step) for step in steps]
+    factor = max(0.25, min(4.0, float(length_s) / planned))
+    scaled = []
+    for step in steps:
+        item = copy.deepcopy(step)
+        item["after"] = max(0, min(3600, round(int(step.get("after", 0)) * factor)))
+        condition = item.get("condition")
+        if isinstance(condition, dict) and condition.get("type") == "dem" and condition.get("window"):
+            condition["window"] = max(10, min(3600, round(condition["window"] * factor)))
+        scaled.append(item)
+    return scaled
+
+
+def requested_length_s(raw):
+    """Optional test length from a form (minutes); None keeps the designed length."""
+    if raw in (None, ""):
+        return None
+    minutes = float(raw)
+    if not math.isfinite(minutes) or not 1 <= minutes <= 60:
+        raise ValueError("Test length must be 1 to 60 minutes.")
+    return minutes * 60
+
+
 def run_scenario(link_id: str, scenario: dict):
     cfg = load_config()
     presets = get_presets(cfg)
@@ -3782,6 +4079,17 @@ def run_scenario(link_id: str, scenario: dict):
     scenario_workload_id = None
     scenario_error = None
     started_at = time.time()
+    steps = scenario.get("steps", [])
+    phases, planned_s = scenario_phases(steps)
+    phase_indexes = step_phase_indexes(steps)
+    with RUNTIME_LOCK:
+        SCENARIO_STATE.update(phases=[{"name": phase["name"], "planned_s": phase["planned_s"]} for phase in phases],
+                              phase_index=0 if phases else None, phase=phases[0]["name"] if phases else None,
+                              planned_s=planned_s, paused=False, paused_at=None, paused_total_s=0.0,
+                              phase_started_s=0.0 if phases else None)
+    recorder_start(scenario, link_id, phases)
+    if phases:
+        recorder_note("phase_marks", {"name": phases[0]["name"], "at": time.time()})
 
     log_event(
         "scenario",
@@ -3793,23 +4101,37 @@ def run_scenario(link_id: str, scenario: dict):
 
     try:
         for index, step in enumerate(scenario.get("steps", []), start=1):
-            if SCENARIO_STOP.wait(max(0, int(step.get("after", 0)))):
+            if scenario_sleep(max(0, int(step.get("after", 0)))):
                 scenario_result = "stopped"
                 break
 
             action = step.get("action")
             label = step.get("label") or action
+            phase_index = phase_indexes[index - 1] if phase_indexes else None
             with RUNTIME_LOCK:
+                previous_phase = SCENARIO_STATE.get("phase_index")
+                if phase_index is not None and phase_index != previous_phase:
+                    SCENARIO_STATE["phase_started_s"] = round(max(0.0, time.time() - (SCENARIO_STATE.get("started_at") or started_at)
+                                                                  - (SCENARIO_STATE.get("paused_total_s") or 0.0)), 1)
                 SCENARIO_STATE.update(
                     {
                         "step": index,
                         "step_label": label,
                         "step_action": action,
                         "condition": None,
+                        "phase_index": phase_index,
+                        "phase": phases[phase_index]["name"] if phase_index is not None else None,
                     }
                 )
+            if phase_index is not None and phase_index != previous_phase:
+                recorder_note("phase_marks", {"name": phases[phase_index]["name"], "at": time.time()})
+                log_event("scenario", f'{scenario["name"]}: phase {phases[phase_index]["name"]}',
+                          scenario_id=scenario.get("id"), link_id=link_id, phase=phases[phase_index]["name"])
 
-            if action == "quality":
+            if action == "phase":
+                pass
+
+            elif action == "quality":
                 runtime_profile = copy.deepcopy(original)
                 runtime_profile["mode"] = "quality"
                 runtime_profile["quality"] = int(step.get("value", 100))
@@ -3890,6 +4212,8 @@ def run_scenario(link_id: str, scenario: dict):
                 }
 
                 if action == "assert":
+                    recorder_note("assertions", {"label": label, "passed": bool(passed), "observed": observed,
+                                                 "phase": SCENARIO_STATE.get("phase")})
                     log_event(
                         "assertion",
                         f'{scenario["name"]}: {label} — '
@@ -3943,6 +4267,10 @@ def run_scenario(link_id: str, scenario: dict):
             error=scenario_error,
             duration_s=duration_s,
         )
+        try:
+            recorder_finish(scenario_result, scenario_error)
+        except Exception as exc:
+            log_event("scenario", "Test summary could not be built", error=str(exc)[:240])
         with RUNTIME_LOCK:
             SCENARIO_STATE.update(
                 {
@@ -3958,8 +4286,17 @@ def run_scenario(link_id: str, scenario: dict):
                     "condition": None,
                     "result": scenario_result,
                     "error": scenario_error,
+                    "phases": [],
+                    "phase_index": None,
+                    "phase": None,
+                    "planned_s": None,
+                    "paused": False,
+                    "paused_at": None,
+                    "paused_total_s": 0.0,
+                    "phase_started_s": None,
                 }
             )
+        SCENARIO_PAUSE.clear()
         SCENARIO_STOP.clear()
 
 
@@ -4235,6 +4572,14 @@ DOCS_PAGES = [
         "keywords": "analytics charts throughput pps latency jitter loss quality sla measured injected",
     },
     {
+        "slug": "showroom",
+        "title": "Showroom display",
+        "category": "Observe",
+        "summary": "A read-only demo screen: the client site, the running test and its phases, WAN performance and what users get.",
+        "template": "docs/articles/showroom.html",
+        "keywords": "showroom dashboard display demo screen kiosk customer read-only 8082 phases report summary",
+    },
+    {
         "slug": "integrations-api",
         "title": "Integrations & API",
         "category": "Observe",
@@ -4249,6 +4594,14 @@ DOCS_PAGES = [
         "summary": "Map interfaces, persist bridges and customize DIA, broadband, mobile and satellite baselines.",
         "template": "docs/articles/topology_profiles.html",
         "keywords": "setup interface bridge management presets dia dsl broadband 4g 5g satellite startup",
+    },
+    {
+        "slug": "branding",
+        "title": "Appliance branding",
+        "category": "Configure",
+        "summary": "Give the operator interface, reports and showroom your name, logo, font and colours.",
+        "template": "docs/articles/branding.html",
+        "keywords": "branding brand logo favicon font colours colors theme palette white label showroom",
     },
     {
         "slug": "updates-releases",
@@ -4363,11 +4716,12 @@ def tests():
         site_options=site_catalog.catalog(),
         site_plan=active_site_plan(cfg, traffic_generator.get("catalog")),
         site_state=site_plan_snapshot(),
+        last_test=LAST_TEST_SUMMARY,
         events=list(reversed([
             event for event in EVENT_LOG
             if event.get("kind") in (
                 "scenario", "scenario-config", "fault", "mtu",
-                "capture", "security-test", "traffic-generator", "site", "site-test"
+                "capture", "security-test", "traffic-generator", "site", "site-test", "test-summary"
             )
         ][-40:])),
     )
@@ -4382,18 +4736,35 @@ def sessions():
             event for event in EVENT_LOG
             if event.get("details", {}).get("session_id") == active.get("id")
         ][-30:]))
+    site_profile = load_config().get("site_profile")
     return render_template(
         "sessions.html",
         page="sessions",
         active_session=active,
         active_events=active_events,
         sessions=session_rows(),
+        site_options=site_catalog.catalog(),
+        site_selection=site_profile if isinstance(site_profile, dict) else None,
     )
 
 
 @app.route("/sessions/start", methods=["POST"])
 def session_start():
     name = (request.form.get("name") or "Lab session").strip()[:100]
+    # A session validates one client site; without fields it uses the active site profile.
+    cfg = load_config()
+    submitted = {key: request.form.get(key) for key in SITE_FIELDS}
+    try:
+        if any(submitted.values()):
+            selection = site_catalog.validate_selection(submitted)
+        elif isinstance(cfg.get("site_profile"), dict):
+            selection = site_catalog.validate_selection(cfg["site_profile"])
+        else:
+            raise ValueError("Choose the industry, sub-industry, site function, size and criticality this session validates.")
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect_after("sessions")
+    site = dict(selection, label=site_catalog.site_label(selection))
     with RUNTIME_LOCK:
         if ACTIVE_SESSION["active"]:
             flash("A lab session is already active.", "error")
@@ -4406,6 +4777,7 @@ def session_start():
                 "id": session_id,
                 "name": name or "Lab session",
                 "started_at": time.time(),
+                "site": site,
             }
         )
         LAB_SESSIONS.append(
@@ -4415,12 +4787,18 @@ def session_start():
                 "started_at": ACTIVE_SESSION["started_at"],
                 "ended_at": None,
                 "status": "active",
+                "site": site,
             }
         )
         del LAB_SESSIONS[:-100]
         save_session_history()
 
-    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]}')
+    if cfg.get("site_profile") != selection:
+        # The session's site becomes the active site so its targets judge what is recorded.
+        cfg["site_profile"] = selection
+        save_config(cfg)
+        log_event("site", f"Active site: {site['label']}", selection=selection, sla_applied=False)
+    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]} · {site["label"]}', site=site)
     flash(f'Lab session "{ACTIVE_SESSION["name"]}" started.', "success")
     return redirect_after("sessions")
 
@@ -4457,6 +4835,7 @@ def session_stop():
                 "id": None,
                 "name": None,
                 "started_at": None,
+                "site": None,
             }
         )
         save_session_history()
@@ -4863,6 +5242,7 @@ def settings():
         link_count=len(cfg.get("wan_links", [])),
         preset_count=len(get_presets(cfg)),
         update_status=git_update_status(fetch=False),
+        showroom_url=showroom_url(),
     )
 
 
@@ -5213,6 +5593,13 @@ def site_run():
     if not traffic_generator_snapshot().get("connected"):
         flash("Site tests need a connected Traffic Simulator.", "error")
         return redirect_after("tests")
+    try:
+        length_s = requested_length_s(request.form.get("length_min"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect_after("tests")
+    if length_s:
+        plan["tests"] = [dict(test, steps=scale_scenario_steps(test["steps"], length_s)) for test in plan["tests"]]
     test_id = request.form.get("test_id") or "all"
     tests = [test for test in plan["tests"] if test_id in ("all", test["id"])]
     links = {role: request.form.get(f"{role}_link") or "" for role in ("primary", "backup")}
@@ -5262,6 +5649,13 @@ def lab_scenario_start():
     if not scenario:
         flash("Unknown scenario.", "error")
         return redirect_after("scenarios")
+    try:
+        length_s = requested_length_s(request.form.get("length_min"))
+    except ValueError as exc:
+        flash(str(exc), "error")
+        return redirect_after("scenarios")
+    if length_s:
+        scenario = dict(scenario, steps=scale_scenario_steps(scenario["steps"], length_s))
 
     with RUNTIME_LOCK:
         if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
@@ -5292,6 +5686,37 @@ def lab_scenario_start():
     ).start()
     flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
     return redirect_after("scenarios")
+
+
+@app.route("/lab/scenario/pause", methods=["POST"])
+def lab_scenario_pause():
+    """Hold the running test in its current phase, impairment applied, until resumed."""
+    with RUNTIME_LOCK:
+        active = SCENARIO_STATE["active"] and not SCENARIO_STATE["paused"]
+        if active:
+            SCENARIO_PAUSE.set()
+            SCENARIO_STATE.update(paused=True, paused_at=time.time())
+            name, phase = SCENARIO_STATE["scenario_name"], SCENARIO_STATE.get("phase")
+    if active:
+        log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
+        flash("Test paused. It stays in its current phase until you resume it.", "info")
+    return redirect_after("tests")
+
+
+@app.route("/lab/scenario/resume", methods=["POST"])
+def lab_scenario_resume():
+    with RUNTIME_LOCK:
+        active = SCENARIO_STATE["active"] and SCENARIO_STATE["paused"]
+        if active:
+            held = time.time() - (SCENARIO_STATE["paused_at"] or time.time())
+            SCENARIO_STATE.update(paused=False, paused_at=None,
+                                  paused_total_s=SCENARIO_STATE["paused_total_s"] + held)
+            SCENARIO_PAUSE.clear()
+            name = SCENARIO_STATE["scenario_name"]
+    if active:
+        log_event("scenario", f"{name}: resumed after {round(held)} s", paused_seconds=round(held))
+        flash("Test resumed.", "info")
+    return redirect_after("tests")
 
 
 @app.route("/lab/scenario/stop", methods=["POST"])
@@ -6205,26 +6630,208 @@ def showroom_snapshot():
         })
     scenario = scenario_snapshot()
     lab_session = session_snapshot()
+    try:
+        diagnosis = current_diagnosis()
+    except Exception:
+        diagnosis = {}
+    # A running session names the site it validates; otherwise show the active site profile.
+    session_site = lab_session.get("site") if lab_session.get("active") else None
+    site_plan = active_site_plan({"site_profile": session_site} if session_site else cfg)
+    signals = {item["link_id"]: item for item in diagnosis.get("links") or []}
+    for link in links:
+        item = signals.get(link["id"]) or {}
+        directions = item.get("directions") or {}
+        experience = item.get("experience") or {}
+        link.update({
+            "health": item.get("health"),
+            "health_reason": showroom_text(item.get("health_reason")) or None,
+            "full": list(item.get("full") or []),
+            "down_util_pct": (directions.get("down") or {}).get("util_pct"),
+            "up_util_pct": (directions.get("up") or {}).get("util_pct"),
+            "users_success_pct": experience.get("availability_pct"),
+            "worst_app": showroom_app_label(experience.get("worst_app")) if experience.get("worst_app") else None,
+            "worst_app_success_pct": experience.get("worst_availability_pct"),
+        })
+    plan = site_plan_snapshot()
     return {
         "timestamp": now, "links": links,
-        "scenario": {key: scenario.get(key) for key in (
-            "active", "scenario_name", "step", "step_count", "step_label")},
-        "session": {key: lab_session.get(key) for key in ("active", "name")},
+        "scenario": dict({key: scenario.get(key) for key in (
+            "active", "scenario_name", "step", "step_count", "step_label", "phases", "phase_index", "phase",
+            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase")},
+            link=showroom_link_label(cfg, scenario.get("link_id"))),
+        # Once a test ends, its summary stays on screen until the next one starts.
+        "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") else None,
+        "session": {"active": bool(lab_session.get("active")), "name": lab_session.get("name"),
+                    "site": (session_site or {}).get("label")},
+        "site": showroom_site(site_plan),
+        "plan": {"active": plan.get("active"), "label": plan.get("label"), "result": plan.get("result"),
+                 "tests": [{"name": test.get("name"), "role": test.get("role"), "status": test.get("status")}
+                           for test in plan.get("tests") or []]},
+        **showroom_outcome(diagnosis, site_plan),
+    }
+
+
+# The showroom publishes presentation data only. Findings and steering texts are
+# generated from measurements and may mention addresses, so those are removed.
+SHOWROOM_ADDRESS = re.compile(r"\b(?:\d{1,3}\.){3}\d{1,3}\b|\b[0-9a-fA-F]{1,4}(?::[0-9a-fA-F]{0,4}){2,7}\b")
+# Without an active site the showroom judges against the Command Center's lab thresholds.
+SHOWROOM_LAB_TARGETS = {"experience_min": 75, "success_min_pct": 99.0, "interactive_p95_max_ms": 400, "steering_max_s": None}
+
+
+def showroom_text(value, limit=240):
+    return SHOWROOM_ADDRESS.sub("an address", str(value or ""))[:limit]
+
+
+def showroom_link_label(cfg, link_id):
+    link = get_link(cfg, link_id or "") if link_id else None
+    return (link or {}).get("name") or None
+
+
+def showroom_summary(summary):
+    """The finished test's summary without internal identifiers or addresses."""
+    if not summary:
+        return None
+    return {
+        "name": summary.get("name"), "link": summary.get("link"), "site": summary.get("site"),
+        "result": summary.get("result"), "ended_at": summary.get("ended_at"), "duration_s": summary.get("duration_s"),
+        "conclusion": [showroom_text(line) for line in summary.get("narrative") or summary.get("conclusion") or []],
+        "phases": [{key: phase.get(key) for key in ("name", "reached", "duration_s", "experience_score", "success_pct",
+                                                    "worst_success_pct", "interactive_p95_ms", "steering")}
+                   | {"wans": [{key: wan.get(key) for key in ("label", "down_mbps", "up_mbps", "health")}
+                               for wan in phase.get("wans") or []]}
+                   for phase in summary.get("phases") or []],
+        "remediation": [{key: item.get(key) for key in ("traffic_class", "wan", "seconds", "within_target")}
+                        for item in summary.get("remediation") or []],
+        "steering_target_s": summary.get("steering_target_s"),
+        "assertions": {"passed": (summary.get("assertions") or {}).get("passed"),
+                       "total": (summary.get("assertions") or {}).get("total")},
+    }
+
+
+def showroom_app_label(name):
+    catalog = SIMULATOR_CATALOG_CACHE.get("catalog") or {}
+    label = ((catalog.get("applications") or {}).get(name) or {}).get("label")
+    return label or str(name).replace("_", " ").capitalize()
+
+
+def showroom_site(plan):
+    """Who the demonstration models: the active site profile, its targets and typical lines."""
+    if not plan:
+        return None
+    selection = plan["selection"]
+    industry = site_catalog.INDUSTRIES[selection["industry"]]
+    load = plan["workload"]
+    return {
+        "label": plan["label"],
+        "industry": industry["label"],
+        "sub_industry": industry["sub_industries"][selection["sub_industry"]]["label"],
+        "function": site_catalog.SITE_FUNCTIONS[selection["function"]]["label"],
+        "size": site_catalog.SIZES[selection["size"]]["label"],
+        "criticality": site_catalog.CRITICALITY[selection["criticality"]]["label"],
+        "criticality_description": site_catalog.CRITICALITY[selection["criticality"]]["description"],
+        "employees": load["employees"],
+        "simulated_users": plan["start"]["users"],
+        "devices": {name: count for name, count in (load.get("devices") or {}).items() if count},
+        "targets": plan["targets"],
+        "wan_lines": {role: {"preset": line["preset"], "download_mbit": line["download_mbit"],
+                             "upload_mbit": line["upload_mbit"]}
+                      for role, line in plan["wan_lines"].items() if role in ("primary", "backup")},
+    }
+
+
+def showroom_verdict(value, target, higher_is_better=True):
+    if value is None or target is None:
+        return "unknown"
+    return "pass" if (value >= target if higher_is_better else value <= target) else "fail"
+
+
+def showroom_outcome(diagnosis, site_plan):
+    """What the simulated users get: traffic running, result against targets, where and why."""
+    generator = diagnosis.get("traffic_generator") or {}
+    status = generator.get("status") if generator.get("connected") else None
+    dem = (status or {}).get("dem") or {}
+    run = (status or {}).get("run") or {}
+    targets = dict((site_plan or {}).get("targets") or SHOWROOM_LAB_TARGETS)
+    apps = {name: item for name, item in (dem.get("applications") or {}).items() if item.get("requests")}
+    total = sum(item["requests"] for item in apps.values())
+    has_data = bool(dem.get("requests"))
+    score, success, interactive = (dem.get(key) if has_data else None
+                                   for key in ("experience_score", "availability_pct", "interactive_p95_ms"))
+    steering = diagnosis.get("steering") or {}
+    return {
+        "traffic": {
+            "configured": bool(generator.get("configured")), "connected": bool(generator.get("connected")),
+            "status": (status or {}).get("status"), "users": (status or {}).get("users"),
+            "label": showroom_text(run.get("label"), 120) or None, "activity": run.get("activity"),
+            "media_mode": run.get("media_mode"), "requests": dem.get("requests"), "window_seconds": dem.get("window_seconds"),
+            "applications": [{"name": showroom_app_label(name), "class": item.get("class") or DEFAULT_APP_CLASSES.get(name),
+                              "share_pct": round(item["requests"] * 100.0 / total, 1),
+                              "success_pct": item.get("availability_pct")}
+                             for name, item in sorted(apps.items(), key=lambda entry: -entry[1]["requests"])[:6]],
+        },
+        "experience": {
+            "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
+            "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
+            "verdicts": {
+                "experience": showroom_verdict(score, targets.get("experience_min")),
+                "success": showroom_verdict(success, targets.get("success_min_pct")),
+                "interactive": showroom_verdict(interactive, targets.get("interactive_p95_max_ms"), higher_is_better=False),
+            },
+        },
+        "findings": [{
+            "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),
+            "detail": showroom_text(item.get("detail")), "hint": showroom_text(item.get("hint")) or None,
+            "unattributed": item.get("unattributed") or 0,
+            "wans": [{"label": wan.get("label"), "affected": wan.get("affected") or 0,
+                      "causes": [showroom_text(cause) for cause in wan.get("causes") or []]}
+                     for wan in item.get("wans") or []],
+        } for item in (diagnosis.get("findings") or []) if item.get("source") != "mapping"][:4],
+        "steering": [{
+            "label": item.get("label"), "verdict": item.get("verdict"), "severity": item.get("severity"),
+            "text": showroom_text(item.get("text")), "unattributed_pct": item.get("unattributed_pct"),
+            "shares": [{"label": share.get("label"), "health": share.get("health"), "pct": share.get("pct")}
+                       for share in item.get("shares") or []],
+            "reactions": [{"label": reaction.get("label"), "health": reaction.get("health"),
+                           "steered_after_seconds": reaction.get("steered_after_seconds"),
+                           "impaired_for_seconds": reaction.get("impaired_for_seconds"),
+                           "within_target": None if reaction.get("steered_after_seconds") is None or not targets.get("steering_max_s")
+                                            else reaction["steered_after_seconds"] <= targets["steering_max_s"]}
+                          for reaction in item.get("reactions") or [] if reaction.get("was_used")],
+        } for item in steering.get("classes") or []],
     }
 
 
 showroom_app = create_showroom_app(showroom_snapshot, BRANDING_DIR)
 
 
+def showroom_listener():
+    """The showroom's bind address and port; port 0 disables it."""
+    port = int(os.environ.get("NETEM_SHOWROOM_PORT", "8082"))
+    if port != 0 and (not 1 <= port <= 65535 or port == 8081):
+        raise ValueError("NETEM_SHOWROOM_PORT must be 0 (disabled) or a port other than 8081")
+    return os.environ.get("NETEM_SHOWROOM_HOST", "0.0.0.0"), port
+
+
+def showroom_url():
+    """Where an operator's browser reaches the showroom, or None when it is disabled."""
+    try:
+        host, port = showroom_listener()
+    except ValueError:
+        return None
+    if not port:
+        return None
+    if host in ("", "0.0.0.0", "::"):
+        # Bound to every address: the one the operator used for this page reaches it too.
+        host = urlsplit(request.host_url).hostname or "localhost"
+    return f"http://{f'[{host}]' if ':' in host else host}:{port}/"
+
+
 def run_servers():
     """Share runtime state and workers; bind the viewer to its own HTTP listener."""
     from werkzeug.serving import make_server
 
-    port = int(os.environ.get("NETEM_SHOWROOM_PORT", "8082"))
-    if port != 0 and (not 1 <= port <= 65535 or port == 8081):
-        raise ValueError("NETEM_SHOWROOM_PORT must be 0 (disabled) or a port other than 8081")
-    viewer = make_server(os.environ.get("NETEM_SHOWROOM_HOST", "0.0.0.0"),
-                         port, showroom_app, threaded=True) if port else None
+    host, port = showroom_listener()
+    viewer = make_server(host, port, showroom_app, threaded=True) if port else None
     viewer_thread = None
     try:
         restore_runtime_state()

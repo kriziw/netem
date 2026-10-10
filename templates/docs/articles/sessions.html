@@ -2,13 +2,15 @@
 <p>A session is the evidence container for one validation objective. Tests describe the impairment; the session records what happened, what was measured and whether explicit assertions passed.</p>
 
 <h2 id="start">Start a session</h2>
-<ol><li>Open <strong>Sessions</strong>.</li><li>Name the objective.</li><li>Start the session.</li><li>Operate normally from Command Center, Tests and Analytics.</li><li>Complete the session when the validation is finished.</li></ol>
+<ol><li>Open <strong>Sessions</strong>.</li><li>Name the objective, for example the customer and site.</li><li>Choose the client site: industry, sub-industry, site function, size and criticality. The active site profile is preselected.</li><li>Start the session.</li><li>Operate normally from Command Center, Tests and Analytics.</li><li>Complete the session when the validation is finished.</li></ol>
+<p>Starting a session also makes its site the active site profile, so experience targets, the Command Center badge and the <a href="{{ url_for('documentation_page', slug='showroom') }}">showroom</a> all describe the same client.</p>
 <p>The active session ID is attached to runtime events, SQLite WAN telemetry and active-probe samples.</p>
 
 <h2 id="report">Completed session report</h2>
 <p>Completing a session generates and persists a report snapshot. The report includes:</p>
 <ul>
-<li>overall result: PASS, FAIL or UNSCORED;</li>
+<li>overall result: PASS, FAIL or UNSCORED, and the client site;</li>
+<li>a summary of each test: conclusion, per-phase experience, success, response time, WAN traffic and steering, and SD-WAN remediation;</li>
 <li>scenario runs and their completion status;</li>
 <li>every conditional assertion and observed value;</li>
 <li>WAN telemetry statistics such as peak throughput, worst injected latency/loss, minimum quality and expected-SLA-fail sample count;</li>

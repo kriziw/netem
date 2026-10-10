@@ -439,5 +439,65 @@ window.NetEmUI = (() => {
     }).join('');
   }
 
-  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml};
+  const clock = seconds => {
+    const value = Math.max(0, Math.round(Number(seconds) || 0));
+    return Math.floor(value / 60) + ':' + String(value % 60).padStart(2, '0');
+  };
+
+  // Planned phases of the running test with each one's state and fill, from elapsed (pause-free) time.
+  function phaseTimeline(scenario) {
+    const phases = (scenario && scenario.phases) || [];
+    const total = phases.reduce((sum, phase) => sum + (Number(phase.planned_s) || 0), 0);
+    let start = 0;
+    return phases.map((phase, index) => {
+      const planned = Number(phase.planned_s) || 0;
+      const current = index === scenario.phase_index;
+      const elapsed = Number(scenario.elapsed_s) || 0;
+      const into = Number.isFinite(scenario.phase_elapsed_s) ? scenario.phase_elapsed_s : elapsed - start;
+      const item = {
+        name: phase.name, planned_s: planned, share: total ? planned / total * 100 : 100 / phases.length,
+        state: index < scenario.phase_index ? 'done' : current ? 'current' : 'upcoming',
+        fill: index < scenario.phase_index ? 100 : current && planned ? Math.max(0, Math.min(100, into / planned * 100)) : 0,
+      };
+      start += planned;
+      return item;
+    });
+  }
+
+  // When the next phase starts, counted from when the current phase really began.
+  function phaseCountdown(scenario) {
+    if (!scenario || !scenario.active || !Number.isFinite(scenario.phase_remaining_s)) return '';
+    const left = clock(scenario.phase_remaining_s), next = scenario.next_phase;
+    if (scenario.paused) return next ? next + ' follows ' + left + ' after resuming' : 'ends ' + left + ' after resuming';
+    if (scenario.phase_remaining_s < 1) return next ? 'next: ' + next + ' shortly' : 'finishing';
+    return next ? 'next: ' + next + ' in ' + left : 'ends in ' + left;
+  }
+
+  function renderRunningTest(root, scenario) {
+    if (!root || !scenario || !scenario.active) return;
+    const set = (selector, value) => { const node = root.querySelector(selector); if (node) node.textContent = value; };
+    const count = (scenario.phases || []).length;
+    root.classList.toggle('paused', Boolean(scenario.paused));
+    set('[data-run-name]', scenario.scenario_name || 'Running test');
+    set('[data-run-phase]', count ? (scenario.paused ? 'Paused in ' : '') + 'phase ' + ((scenario.phase_index ?? 0) + 1) + ' of ' + count + ' · ' + (scenario.phase || '') : '');
+    set('[data-run-step]', scenario.step_label || 'running');
+    set('[data-run-condition]', scenario.condition?.description ? 'Waiting for ' + scenario.condition.description +
+      (scenario.condition.observed != null ? ' · observed ' + scenario.condition.observed : '') : '');
+    const countdown = phaseCountdown(scenario);
+    set('[data-run-time]', clock(scenario.elapsed_s) + ' of about ' + clock(scenario.planned_s) +
+      (countdown ? ' · ' + countdown : '') +
+      (scenario.paused ? ' · paused, holding the current phase' : '') + (scenario.paused_total_s ? ' · paused ' + clock(scenario.paused_total_s) + ' so far' : ''));
+    const form = root.querySelector('[data-run-pause-form]');
+    if (form) {
+      form.setAttribute('action', scenario.paused ? root.dataset.resumeUrl : root.dataset.pauseUrl);
+      set('[data-run-pause]', scenario.paused ? 'Resume' : 'Pause phase');
+    }
+    const track = root.querySelector('[data-run-phases]');
+    if (track) {
+      track.innerHTML = phaseTimeline(scenario).map(phase => '<span class="phase '+phase.state+'" style="flex-basis:'+phase.share.toFixed(2)+'%" title="'+escapeHtml(phase.name)+' · '+clock(phase.planned_s)+'">'+
+        '<i style="width:'+phase.fill.toFixed(1)+'%"></i><b>'+escapeHtml(phase.name)+'</b></span>').join('');
+    }
+  }
+
+  return {trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml, phaseTimeline, phaseCountdown, renderRunningTest};
 })();

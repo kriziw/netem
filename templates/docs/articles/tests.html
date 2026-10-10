@@ -2,7 +2,14 @@
 <p>The Tests page groups capabilities by validation outcome instead of implementation primitive. A test can now combine timed impairment stages with state-driven <code>wait</code> and <code>assert</code> stages.</p>
 
 <h2 id="quick-tests">Built-in tests</h2>
-<p>Progressive brownout, SLA failover, Flaky underlay and Availability stress remain available as one-click tests. The built-in SLA failover test now includes two assertions: expected SLA must fail after the blackhole and recover after the path is restored.</p>
+<p>Progressive brownout, SLA failover, Flaky underlay and Availability stress remain available as one-click tests. The built-in SLA failover test includes two assertions: expected SLA must fail after the blackhole and recover after the path is restored.</p>
+
+<h2 id="phases">Phases and length</h2>
+<p>Every built-in and site test runs about 3–5 minutes in named phases, for example Baseline → Degradation → Severe brownout → Recovery. That is long enough for SD-WAN health checks to react and for the 60-second experience window to show the effect, and short enough to repeat. Each test card shows its planned length and phases.</p>
+<p>Change <strong>Length</strong> before starting to stretch or shrink a test (1–60 minutes). Delays between stages and DEM measurement windows scale with it; timeouts on conditions do not, so a check still gets the time it needs.</p>
+
+<h2 id="pause">Pause a phase</h2>
+<p><strong>Pause phase</strong> in the running-test bar on the Command Center or Tests page holds the test in its current phase, with its impairment still applied, until you select <strong>Resume</strong>. Use it to explain what is happening or to let a slow appliance react. Paused time does not count toward the test's length, and the showroom marks the test as paused. Stop &amp; restore still ends the test at any time.</p>
 
 <h2 id="actions">Supported scenario actions</h2>
 <div class="docs-table"><table>
@@ -50,7 +57,10 @@
 <p>Probe conditions reject stale results instead of treating an old success/failure as current evidence.</p>
 
 <h2 id="running">Running-test state</h2>
-<p>The sticky running-test bar shows the current stage, condition description, latest observed value and true stage-count progress. Stop &amp; restore interrupts both timed waits and conditional polling.</p>
+<p>The running-test bar shows the test, its WAN, the current phase and stage, any condition it is waiting for with the latest observed value, the phase timeline, the elapsed time against the planned length and when the next phase starts. Stop &amp; restore interrupts both timed waits and conditional polling.</p>
+
+<h2 id="summary">Test summary</h2>
+<p>When a test ends, NetEm summarizes it: the result and checks passed, a short conclusion, and per phase the experience score, request success (with its lowest point), interactive P95, average traffic per WAN and the SD-WAN steering verdict per traffic class. SD-WAN remediation lists which traffic the appliance moved off which WAN, how fast, and whether that met the active site's steering target. The latest summary appears on the Tests page and on the <a href="{{ url_for('documentation_page', slug='showroom') }}">showroom</a>; summaries of tests run in a lab session are part of its report. Summaries need the Traffic Simulator to measure user experience.</p>
 
 <h2 id="session">Assertions and Lab Sessions</h2>
 <p>Start a Lab Session before running a scored validation. Every assertion writes an <code>assertion</code> event containing the requirement, observed value, elapsed evaluation time and PASS/FAIL result. Completed session reports aggregate those results automatically.</p>

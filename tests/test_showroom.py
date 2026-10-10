@@ -45,9 +45,49 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(link["traffic_available"])
         self.assertEqual((link["down_mbps"], link["up_mbps"]), (0, 1.5))
         self.assertEqual(result["scenario"]["scenario_name"], "Brownout")
-        self.assertEqual(result["session"], {"active": True, "name": "Showcase"})
+        self.assertEqual(result["session"], {"active": True, "name": "Showcase", "site": None})
+        self.assertIsNone(result["last_test"])
         for secret in ("secret-token", "private-interface", "192.0.2.1", "sensitive diagnostic", "internal"):
             self.assertNotIn(secret, str(result))
+
+    def test_site_session_and_diagnosis_texts_never_publish_addresses(self):
+        site = dict(industry="manufacturing", sub_industry="automotive", function="plant", size="large",
+                    criticality="business_critical", label="Automotive plant")
+        diagnosis = {
+            "findings": [{"severity": "bad", "source": "experience", "title": "Voice fails via 198.51.100.7",
+                          "detail": "Replies from 2001:db8::7 instead", "wans": [{"label": "WAN1", "affected": 3,
+                                                                                   "causes": ["Queue full on 203.0.113.9"]}]},
+                         {"severity": "warn", "source": "mapping", "title": "Map 192.0.2.44 to a WAN"}],
+            "steering": {"classes": [{"label": "Voice & video", "verdict": "steered", "severity": "good",
+                                      "text": "Moved from 198.51.100.7", "shares": [], "reactions": []}]},
+        }
+        with patch.object(netem, "session_snapshot", return_value={"active": True, "name": "PoC", "site": site}), \
+             patch.object(netem, "current_diagnosis", return_value=diagnosis):
+            result = self.snapshot(None)
+        self.assertEqual(result["session"]["site"], "Automotive plant")
+        self.assertEqual(result["site"]["sub_industry"], "Automotive")
+        self.assertEqual(result["experience"]["targets"]["steering_max_s"], 30)
+        self.assertEqual([item["title"] for item in result["findings"]], ["Voice fails via an address"])
+        for address in ("198.51.100.7", "2001:db8::7", "203.0.113.9", "192.0.2.44"):
+            self.assertNotIn(address, str(result))
+
+    def test_finished_test_report_is_published_only_between_tests(self):
+        summary = {"name": "Brownout", "link": "WAN1", "result": "failed", "ended_at": 90, "duration_s": 240,
+                   "link_id": "internal-link", "scenario_id": "internal-id",
+                   "conclusion": ["Brownout failed.", "Moved off 192.0.2.1 in 4 s."],
+                   "narrative": ["Brownout failed.", "Experience fell during Brownout."],
+                   "phases": [{"name": "Brownout", "reached": True, "experience_score": 60, "secret": "x",
+                               "wans": [{"label": "WAN1", "down_mbps": 4, "id": "internal-link"}]}],
+                   "remediation": [{"traffic_class": "Voice & video", "wan": "WAN1", "seconds": 4, "within_target": True, "health": "x"}],
+                   "assertions": {"passed": 1, "total": 2, "items": [{"label": "secret check"}]}}
+        with patch.object(netem, "LAST_TEST_SUMMARY", summary):
+            self.assertIsNone(self.snapshot(None)["last_test"])
+            with patch.object(netem, "scenario_snapshot", return_value={"active": False}):
+                report = self.snapshot(None)["last_test"]
+        self.assertEqual(report["conclusion"], ["Brownout failed.", "Experience fell during Brownout."])
+        self.assertEqual(report["assertions"], {"passed": 1, "total": 2})
+        for hidden in ("internal-link", "internal-id", "secret"):
+            self.assertNotIn(hidden, str(report))
 
     def test_missing_invalid_stale_and_future_measurements_are_unknown(self):
         for sample in (None, {"timestamp": 99, "rate_valid": 0},

@@ -1,0 +1,41 @@
+{% macro test_summary(summary, title="Last test summary") %}
+{% set tone = {'passed': 'good', 'failed': 'bad'}.get(summary.result, 'warn') %}
+{% set verdicts = {'steered': 'steered away', 'unaffected': 'unaffected', 'balanced': 'all WANs healthy', 'stuck': 'on impaired WAN',
+                   'stuck_impact': 'on impaired WAN, users affected', 'no_healthy': 'no healthy WAN', 'idle': 'no traffic',
+                   'partial': 'partly attributed', 'unattributed': 'WAN unknown'} %}
+<section class="card test-summary" style="margin-bottom:14px">
+  <div class="card-head">
+    <div>
+      <div class="card-title">{{ title }} · {{ summary.name }}</div>
+      <div class="card-sub">{% if summary.link %}On {{ summary.link }} · {% endif %}{% if summary.site %}{{ summary.site }} · {% endif %}{{ (summary.duration_s // 60)|int }}:{{ "%02d"|format((summary.duration_s % 60)|int) }} long{% if summary.assertions.total %} · {{ summary.assertions.passed }} of {{ summary.assertions.total }} checks passed{% endif %}</div>
+    </div>
+    <span class="status {{ tone }}">{{ (summary.result or 'finished')|capitalize }}</span>
+  </div>
+  <div class="card-pad">
+    <ul class="summary-lines">
+      {% for line in (summary.narrative or summary.conclusion)[1:] %}<li>{{ line }}</li>{% endfor %}
+    </ul>
+    <div class="table-wrap">
+    <table>
+      <thead><tr><th>Phase</th><th>Duration</th><th>Experience</th><th>Request success</th><th>Interactive P95</th><th>WAN traffic (avg ↓/↑ Mbit/s)</th><th>SD-WAN steering</th></tr></thead>
+      <tbody>
+      {% for phase in summary.phases %}
+        <tr{% if not phase.reached %} class="muted-row"{% endif %}>
+          <td><strong>{{ phase.name }}</strong></td>
+          <td>{% if phase.reached and phase.duration_s is not none %}{{ (phase.duration_s // 60)|int }}:{{ "%02d"|format((phase.duration_s % 60)|int) }}{% else %}not reached{% endif %}</td>
+          <td>{{ "%.0f"|format(phase.experience_score) if phase.experience_score is not none else '—' }}</td>
+          <td>{% if phase.success_pct is not none %}{{ "%.1f"|format(phase.success_pct) }}%{% if phase.worst_success_pct is not none and phase.worst_success_pct < phase.success_pct - 0.05 %} <span class="field-help">(low {{ "%.1f"|format(phase.worst_success_pct) }}%)</span>{% endif %}{% else %}—{% endif %}</td>
+          <td>{{ "%.0f ms"|format(phase.interactive_p95_ms) if phase.interactive_p95_ms is not none else '—' }}</td>
+          <td>{% for wan in phase.wans %}{{ wan.label }} {{ "%.0f"|format(wan.down_mbps) if wan.down_mbps is not none else '—' }}/{{ "%.0f"|format(wan.up_mbps) if wan.up_mbps is not none else '—' }}{% if wan.health and wan.health != 'healthy' %} <span class="status warn">{{ wan.health }}</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+          <td>{% for label in ['Voice & video', 'Web, collaboration & DNS', 'File transfers'] if label in phase.steering %}{{ label }}: {{ verdicts.get(phase.steering[label], phase.steering[label]|replace('_', ' ')) }}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div class="field-help" style="margin-top:10px"><strong>SD-WAN remediation:</strong>
+      {% for item in summary.remediation %}{{ item.traffic_class }} moved off {{ item.wan }} in {{ item.seconds }} s{% if item.within_target is sameas true %} (within {{ summary.steering_target_s }} s){% elif item.within_target is sameas false %} (slower than {{ summary.steering_target_s }} s){% endif %}{% if not loop.last %} · {% endif %}{% else %}no traffic was moved between WANs during this test.{% endfor %}
+    </div>
+  </div>
+</section>
+{% endmacro %}

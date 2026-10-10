@@ -3,7 +3,16 @@
 <p>The preview derives employees, concurrent staff and devices, persona shares, application emphasis, experience targets, typical primary/backup WAN lines and an ordered test plan. These are lab assumptions, not a capacity survey or production SLA. Adjust the simulated user count before running. Counts above 5,000 are capped while retaining the persona proportions.</p>
 <h2 id="save">Activate targets and WAN lines</h2>
 <p><strong>Save as active site</strong> activates the site badge and experience targets in the Command Center. Check the explicit SLA replacement option only if you also want to replace the current model WAN SLA thresholds. Saving a profile does not change WAN lines.</p>
-<p>Choose two different WANs as primary and backup, then use <strong>Apply WAN lines</strong> to replace their saved presets and bandwidth limits with the suggested lines. For a large mission-critical plant the suggestion is DIA 1,000/1,000 Mbit/s plus a diverse DIA 500/500 Mbit/s backup. Carrier diversity must be provided by your actual lab topology.</p>
+<p>Choose two different WANs as primary and backup, then use <strong>Apply WAN lines</strong> to replace their saved presets and bandwidth limits with the suggested lines. Carrier diversity must be provided by your actual lab topology.</p>
+<h2 id="wan-lines">Typical WAN lines</h2>
+<p>The suggested lines depend on the kind of site, its size and its criticality:</p>
+<ul>
+<li><strong>Core sites</strong> (headquarters, plants, R&amp;D centers, hospitals, laboratories) use DIA. They move to dual DIA once the business depends on them: a large business-critical or mission-critical plant gets two DIA 1,000/1,000 Mbit/s lines.</li>
+<li><strong>Offices</strong> (regional and branch offices, schools) start on broadband with mobile backup and step up to DIA with broadband or DIA backup.</li>
+<li><strong>Frontline sites</strong> (stores, restaurants, hotels, clinics, bank branches, warehouses) use broadband or DIA with 4G/5G backup; large critical ones add a second wired line.</li>
+<li><strong>Field sites</strong> rely on mobile, satellite or DSL and rarely have a second wired line.</li>
+</ul>
+<p>Dual-DIA sites get the same bandwidth on both lines, so either line can carry the whole site if the other fails. Order the second line from a different carrier with a separate building entry.</p>
 <h2 id="targets">Experience targets</h2>
 <table><thead><tr><th>Target</th><th>Standard</th><th>Business-critical</th><th>Mission-critical</th></tr></thead><tbody>
 <tr><td>Experience ≥</td><td>70</td><td>80</td><td>90</td></tr>
@@ -15,7 +24,9 @@
 <p>Mission-critical sites use strict voice/video judging. Safety-sensitive sub-industries also use strict judging at lower criticality. OT telemetry remains intolerant of loss in either media mode.</p>
 <h2 id="run">Run and stop</h2>
 <p>Run an individual test or <strong>Run all</strong>. The plan includes baseline, primary brownout and primary outage; business-critical sites add backup outage and primary congestion; mission-critical sites add intermittent primary failures. Congestion is approximated by reducing primary quality to 30%, which also changes delay and loss; it is not a pure bandwidth saturation test.</p>
-<p>Tests start and stop their own site workload, record assertions and per-test results in the activity log, and restore the tested WAN to its saved configuration. <strong>Stop plan &amp; restore</strong> stops the current test and skips remaining tests. A failed assertion marks that test failed; later tests still run. Start a lab session before running to retain evidence in its report.</p>
+<p>Each test takes about 3.5–4.5 minutes in phases: <em>Warm-up</em> (60 s) while the site workload ramps up, <em>Baseline</em> (60 s) to measure normal experience, the impairment phase (<em>Brownout</em>, <em>Outage</em>, <em>Backup outage</em>, <em>Saturation</em> or <em>Flapping</em>), and <em>Recovery</em>. The baseline test runs Warm-up and a longer Steady state. Set the plan length before running to scale every test, and use <strong>Pause phase</strong> to hold a test in its current phase. See <a href="{{ url_for('documentation_page', slug='tests') }}#phases">Tests → Phases and length</a>.</p>
+<p>After each test, its summary shows what happened per phase and whether the appliance moved traffic within the steering target. The <a href="{{ url_for('documentation_page', slug='showroom') }}">showroom</a> shows the site, the running test with its phases, and that summary.</p>
+<p>Tests start and stop their own site workload, record assertions and per-test results in the activity log, and restore the tested WAN to its saved configuration. <strong>Stop plan &amp; restore</strong> stops the current test and skips remaining tests. A failed assertion marks that test failed; later tests still run. Start a lab session before running to retain evidence in its report; choose the client site when starting it, so the report and the showroom name the site.</p>
 <h2 id="compatibility">Simulator and lab requirements</h2>
 <p>Connect the Traffic Simulator under Settings → Integrations. Industry applications and personas require the simulator’s industry-app update. Older catalogs remove unsupported applications/personas and show a warning; their reduced workload is not equivalent to the full industry simulation. Per-WAN steering also requires an updated target and appliance egress addresses mapped to the WANs.</p>
 <p>Before evaluating a customer appliance, validate both paths and the baseline. The site catalog does not configure appliance SD-WAN policies. Generic and custom tests remain available below the site selector.</p>

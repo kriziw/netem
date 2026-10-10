@@ -33,14 +33,46 @@ class CatalogTests(unittest.TestCase):
                             count += 1
         self.assertEqual(count, 1728)
 
-    def test_automotive_targets_and_diverse_lines(self):
+    def test_automotive_targets_and_matched_dual_dia(self):
         plan = sites.build_site_plan(SELECTION)
         self.assertEqual(plan["start"]["users"], 960)
         self.assertEqual(plan["workload"]["employees"], 1200)
         self.assertEqual(plan["targets"]["steering_max_s"], 10)
-        self.assertEqual(plan["wan_lines"]["backup"]["preset"], "dia")
-        self.assertEqual(plan["wan_lines"]["backup"]["download_mbit"], 500)
+        lines = plan["wan_lines"]
+        self.assertEqual([lines[role]["preset"] for role in ("primary", "backup")], ["dia", "dia"])
+        self.assertEqual((lines["backup"]["download_mbit"], lines["backup"]["upload_mbit"]), (1000, 1000))
         self.assertEqual(len(plan["tests"]), 6)
+
+    def test_wan_lines_follow_site_category_size_and_criticality(self):
+        def lines(**override):
+            item = sites.wan_lines(dict(SELECTION, **override))
+            return tuple((item[role]["preset"], item[role]["download_mbit"], item[role]["upload_mbit"]) for role in ("primary", "backup"))
+        self.assertEqual(lines(criticality="business_critical"), (("dia", 1000, 1000), ("dia", 1000, 1000)))
+        self.assertEqual(lines(criticality="standard"), (("dia", 1000, 1000), ("broadband", 500, 50)))
+        self.assertEqual(lines(industry="retail", sub_industry="grocery", function="retail_store", size="small", criticality="standard"),
+                         (("broadband", 100, 20), ("4g", 80, 20)))
+        self.assertEqual(lines(industry="energy", sub_industry="power", function="field_site", size="small", criticality="standard"),
+                         (("satellite", 100, 20), ("4g", 80, 20)))
+        # Either line of a dual-DIA site carries the whole site.
+        pairs = 0
+        for category in sites.WAN_LINES.values():
+            for by_criticality in category.values():
+                for primary, backup in by_criticality.values():
+                    if primary[0] == backup[0] == "dia":
+                        pairs += 1
+                        self.assertEqual(primary, backup)
+        self.assertGreater(pairs, 10)
+        note = " ".join(sites.wan_lines(SELECTION)["notes"])
+        self.assertIn("matching bandwidth", note)
+
+    def test_every_site_test_runs_three_to_five_minutes_in_phases(self):
+        for criticality in sites.CRITICALITY:
+            for test in sites.build_site_plan(dict(SELECTION, criticality=criticality))["tests"]:
+                with self.subTest(criticality=criticality, test=test["id"]):
+                    phases, total = netem.scenario_phases(netem.validate_scenario_steps(test["steps"]))
+                    self.assertTrue(180 <= total <= 300, total)
+                    self.assertEqual(phases[0]["name"], "Warm-up")
+                    self.assertTrue(all(phase["planned_s"] > 0 for phase in phases))
 
     def test_invalid_cascade_is_rejected(self):
         for override in (dict(industry="unknown"), dict(sub_industry="grocery"), dict(function="clinic"), dict(size="huge"), dict(criticality="urgent")):
@@ -117,7 +149,18 @@ class SiteRoutesTests(unittest.TestCase):
         with patch.object(netem, "apply_selected_profile", return_value=(True, "ok", {})) as apply:
             self.post("/site/wan", primary_link="wan1", backup_link="wan2")
             self.assertEqual(apply.call_count, 2)
-        self.assertEqual(self.cfg["wan_links"][1]["bandwidth_download_mbit"], 500)
+        self.assertEqual(self.cfg["wan_links"][1]["bandwidth_download_mbit"], 1000)
+
+    def test_run_scales_tests_to_the_requested_length(self):
+        with patch.object(netem.threading, "Thread") as worker:
+            self.post("/site/run", primary_link="wan1", backup_link="wan2", test_id="baseline", length_min="8")
+            steps = worker.call_args.kwargs["args"][1][0]["steps"]
+            self.assertAlmostEqual(netem.scenario_phases(steps)[1], 480, delta=5)
+            self.post("/site/stop")
+            netem.SITE_PLAN_STATE.update(active=False)
+            netem.SITE_PLAN_STOP.clear()
+            self.post("/site/run", primary_link="wan1", backup_link="wan2", test_id="baseline", length_min="90")
+            self.assertEqual(worker.call_count, 1)
 
     def test_run_overrides_users_and_blocks_overlapping_tests(self):
         with patch.object(netem.threading, "Thread") as worker:
