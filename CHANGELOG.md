@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.14.0](https://github.com/kriziw/netem/compare/v0.13.0...v0.14.0) (2026-10-10)
+
+
+### Features
+
+* check and repair the simulator's traffic path before starting traffic ([#49](https://github.com/kriziw/netem/issues/49)) ([3291adf](https://github.com/kriziw/netem/commit/3291adfe380c5dc7484b6e037b1dfd650d3e37bb))
+
+
+### Bug Fixes
+
+* keep NetEm working through clock steps and check that platform clocks agree ([#48](https://github.com/kriziw/netem/issues/48)) ([d0d30a5](https://github.com/kriziw/netem/commit/d0d30a54d6945d8728f986deb008d169526aac03))
+* offer updates only for new releases, not merged commits ([#46](https://github.com/kriziw/netem/issues/46)) ([e3d606f](https://github.com/kriziw/netem/commit/e3d606f9c3068dfee47c933f05f8828605c066b6))
+
 ## [0.13.0](https://github.com/kriziw/netem/compare/v0.12.0...v0.13.0) (2026-10-10)
 
 
