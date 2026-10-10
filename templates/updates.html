@@ -7,7 +7,7 @@
   <div>
     <div class="eyebrow">Settings</div>
     <h1>Application &amp; updates</h1>
-    <p class="page-description">NetEm follows <span class="mono">origin/main</span> as the stable appliance channel. Release Please manages semantic versions, changelog entries, tags and GitHub releases.</p>
+    <p class="page-description">NetEm installs releases from <span class="mono">origin/main</span>. Release Please publishes them with semantic versions, changelog entries and tags; commits merged after a release are installed with the next one.</p>
   </div>
   <div class="page-actions">
     <a class="btn" href="{{ url_for('settings') }}">Back to settings</a>
@@ -21,14 +21,14 @@
     <div class="stat-sub">{{ update_status.commit or "unknown commit" }}</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Stable version</div>
-    <div class="stat-value {% if update_status.remote_version and update_status.remote_version != update_status.installed_version %}warn{% else %}good{% endif %}">{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}—{% endif %}</div>
-    <div class="stat-sub">origin/{{ update_status.target_branch or "main" }}</div>
+    <div class="stat-label">Latest release</div>
+    <div class="stat-value {% if update_status.update_available %}warn{% else %}good{% endif %}">{% if update_status.remote_version %}v{{ update_status.remote_version }}{% else %}—{% endif %}</div>
+    <div class="stat-sub">{% if update_status.release_commit %}release commit {{ update_status.release_commit }}{% else %}origin/{{ update_status.target_branch or "main" }}{% endif %}</div>
   </div>
   <div class="stat">
-    <div class="stat-label">Available commits</div>
-    <div class="stat-value {% if update_status.behind %}warn{% else %}good{% endif %}">{{ update_status.behind or 0 }}</div>
-    <div class="stat-sub">stable commits ahead of installation</div>
+    <div class="stat-label">Unreleased commits</div>
+    <div class="stat-value">{{ update_status.unreleased or 0 }}</div>
+    <div class="stat-sub">merged on main, installed with the next release</div>
   </div>
   <div class="stat">
     <div class="stat-label">Working tree</div>
@@ -42,9 +42,9 @@
     <div class="card-head">
       <div><div class="card-title">Stable update channel</div><div class="card-sub">Status of this appliance checkout</div></div>
       {% if update_status.ok %}
-        {% if update_status.ahead and update_status.behind %}<span class="status bad">Diverged</span>
-        {% elif update_status.dirty %}<span class="status warn">Local changes</span>
-        {% elif update_status.behind %}<span class="status warn">Update available</span>
+        {% if update_status.dirty %}<span class="status warn">Local changes</span>
+        {% elif update_status.update_available and not update_status.release_reachable %}<span class="status bad">Diverged</span>
+        {% elif update_status.update_available %}<span class="status warn">Update available</span>
         {% else %}<span class="status good">Up to date</span>{% endif %}
       {% else %}<span class="status bad">Unavailable</span>{% endif %}
     </div>
@@ -54,6 +54,7 @@
         <div class="k">Update channel</div><div class="v mono">origin/{{ update_status.target_branch or "main" }}</div>
         <div class="k">Remote</div><div class="v mono">{{ update_status.remote_url or "unknown" }}</div>
         <div class="k">Installed commit</div><div class="v"><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
+        <div class="k">Release commits to install</div><div class="v">{{ update_status.release_behind if update_status.update_available else 0 }}</div>
         <div class="k">Local-only commits</div><div class="v">{{ update_status.ahead or 0 }}</div>
       </div>
 
@@ -71,7 +72,7 @@
               data-mark="{{ branding.mark }}" data-instance="{{ process_instance }}" data-status-url="{{ url_for('updates_status') }}">
           <input type="hidden" name="action" value="update">
           <button class="btn btn-primary" type="submit"
-            {% if not update_status.ok or update_status.dirty or update_status.behind == 0 or (update_status.ahead > 0 and update_status.behind > 0) %}disabled{% endif %}>
+            {% if not update_status.ok or update_status.dirty or not update_status.update_available or not update_status.release_reachable %}disabled{% endif %}>
             Install update
           </button>
         </form>
@@ -91,7 +92,7 @@
         <div class="k">Changelog</div><div class="v mono">CHANGELOG.md</div>
         <div class="k">Convention</div><div class="v"><code>feat:</code> minor · <code>fix:</code> patch · breaking change major</div>
       </div>
-      <div class="field-help" style="margin-top:12px">The in-app updater installs stable mainline commits; Release Please is responsible for the user-facing release version/tag lifecycle.</div>
+      <div class="field-help" style="margin-top:12px">The in-app updater installs the latest release commit on main. Merged commits after it are not offered until Release Please publishes them in a release.</div>
     </div>
   </section>
 </div>

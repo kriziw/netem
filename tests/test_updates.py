@@ -1,4 +1,4 @@
-"""Update progress: the status the update screen polls and the restart marker it waits for."""
+"""Release-based updates, the status the update screen polls and the restart marker it waits for."""
 import tempfile
 import unittest
 from pathlib import Path
@@ -8,7 +8,65 @@ import app as netem
 
 STATUS = {"ok": True, "error": "", "branch": "main", "target_branch": "main", "commit": "abc1234",
           "subject": "release", "remote_url": "https://example.invalid/netem.git", "behind": 2, "ahead": 0,
-          "dirty": False, "installed_version": "0.12.0", "remote_version": "0.13.0"}
+          "dirty": False, "installed_version": "0.12.0", "remote_version": "0.13.0", "release_commit": "f00d123",
+          "release_behind": 2, "release_reachable": True, "unreleased": 0, "update_available": True}
+
+
+def git(outputs):
+    """Fake git: answers by the command's subcommand and first argument."""
+    def run(command, timeout=None):
+        args = command[1:]
+        for key, result in outputs.items():
+            if tuple(args[:len(key)]) == key:
+                return result
+        return 0, "", ""
+    return run
+
+
+def channel(installed, remote, behind, release_behind, unreleased, ancestor=True):
+    return {("branch",): (0, "main", ""), ("log", "-1", "--pretty=%h%x09%s"): (0, "abc1234\tsubject", ""),
+            ("status",): (0, "", ""), ("show",): (0, remote, ""), ("rev-parse",): (0, "deadbeef", ""),
+            ("rev-list", "--count", "HEAD..origin/main"): (0, str(behind), ""),
+            ("rev-list", "--count", "origin/main..HEAD"): (0, "0", ""),
+            ("log", "-1", "--format=%h", "origin/main"): (0, "f00d123", ""),
+            ("rev-list", "--count", "HEAD..f00d123"): (0, str(release_behind), ""),
+            ("rev-list", "--count", "f00d123..origin/main"): (0, str(unreleased), ""),
+            ("merge-base",): (0 if ancestor else 1, "", ""), ("remote",): (0, "https://example.invalid/netem.git", "")}
+
+
+class ReleaseChannelTests(unittest.TestCase):
+    def status(self, installed, *args, **kwargs):
+        with patch.object(netem, "run_process", side_effect=git(channel(installed, *args, **kwargs))), \
+             patch.object(netem, "get_app_version", return_value=installed):
+            return netem.git_update_status()
+
+    def test_merged_commits_without_a_release_are_not_an_update(self):
+        status = self.status("0.13.0", "0.13.0", behind=4, release_behind=0, unreleased=4)
+        self.assertFalse(status["update_available"])
+        self.assertEqual((status["behind"], status["unreleased"]), (4, 4))
+
+    def test_newer_release_is_an_update_to_its_release_commit(self):
+        status = self.status("0.12.0", "0.13.0", behind=5, release_behind=3, unreleased=2)
+        self.assertTrue(status["update_available"])
+        self.assertEqual((status["release_commit"], status["release_behind"]), ("f00d123", 3))
+        self.assertTrue(status["release_reachable"])
+        self.assertFalse(self.status("0.12.0", "0.13.0", behind=5, release_behind=3, unreleased=2, ancestor=False)["release_reachable"])
+        # Without semantic versions, release commits still decide.
+        self.assertTrue(self.status("dev", "dev", behind=1, release_behind=1, unreleased=0)["update_available"])
+
+    def test_page_and_settings_say_up_to_date_while_commits_wait_for_a_release(self):
+        waiting = dict(STATUS, installed_version="0.13.0", update_available=False, release_behind=0, unreleased=4, behind=4)
+        client = netem.app.test_client()
+        with patch.object(netem, "git_update_status", return_value=waiting):
+            page = client.get("/updates").text
+            settings = client.get("/settings").text
+            with patch.object(netem, "run_process") as run:
+                refused = client.post("/updates", data={"action": "update"}).text
+        self.assertIn('<span class="status good">Up to date</span>', page)
+        self.assertNotIn("Update available", page)
+        self.assertIn("latest release installed", settings)
+        run.assert_not_called()
+        self.assertIn("NetEm already runs the latest release. 4 merged commit(s) on main will come with the next release.", refused)
 
 
 class UpdateScreenTests(unittest.TestCase):
@@ -25,7 +83,7 @@ class UpdateScreenTests(unittest.TestCase):
              patch.object(netem, "run_process", return_value=(0, "", "")) as run, \
              patch.object(netem.threading, "Thread") as restart:
             page = self.client.post("/updates", data={"action": "update"}).text
-        self.assertEqual(run.call_args.args[0][1:], ["merge", "--ff-only", "origin/main"])
+        self.assertEqual(run.call_args.args[0][1:], ["merge", "--ff-only", "f00d123"])
         restart.return_value.start.assert_called_once()
         self.assertIn(f'id="update-restarting" data-instance="{netem.PROCESS_INSTANCE}" data-version="0.13.0"', page)
 

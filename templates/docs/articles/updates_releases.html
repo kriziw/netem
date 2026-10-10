@@ -7,8 +7,8 @@
 <thead><tr><th>Field</th><th>Meaning</th></tr></thead>
 <tbody>
 <tr><td>Installed version</td><td>Value from local <code>version.txt</code>.</td></tr>
-<tr><td>Stable version</td><td><code>version.txt</code> read from <code>origin/main</code>.</td></tr>
-<tr><td>Available commits</td><td>Commit count in <code>HEAD..origin/main</code>.</td></tr>
+<tr><td>Latest release</td><td><code>version.txt</code> read from <code>origin/main</code>, and the release commit: the latest commit that changed it.</td></tr>
+<tr><td>Unreleased commits</td><td>Commits merged on <code>origin/main</code> after the latest release. They are installed with the next release.</td></tr>
 <tr><td>Local-only commits</td><td>Commit count in <code>origin/main..HEAD</code>.</td></tr>
 <tr><td>Working tree</td><td>Whether tracked application files have local changes.</td></tr>
 </tbody></table></div>
@@ -17,14 +17,14 @@
 <p><strong>Check stable channel</strong> performs a Git fetch of <code>origin main</code>, refreshes the remote version and recalculates ahead/behind state.</p>
 
 <h2 id="install">Install update</h2>
-<p>Updates are fast-forward only. The updater refuses to install when:</p>
+<p>An update is available only when <code>origin/main</code> has a newer release than the installed version. Merged commits that are not yet released do not count. Updates are fast-forward only. The updater refuses to install when:</p>
 <ul>
   <li>tracked application files are modified;</li>
-  <li>the local checkout and <code>origin/main</code> have diverged;</li>
+  <li>the installation has commits that are not part of the release;</li>
   <li>the stable remote branch cannot be found;</li>
   <li>Git fetch/merge fails.</li>
 </ul>
-<p>On success, NetEm performs <code>git merge --ff-only origin/main</code>, then exits intentionally. A correctly configured systemd unit with <code>Restart=on-failure</code> starts the updated application again.</p>
+<p>On success, NetEm fast-forwards to the release commit (<code>git merge --ff-only &lt;release commit&gt;</code>), then exits intentionally. A correctly configured systemd unit with <code>Restart=on-failure</code> starts the updated application again.</p>
 <p>While this happens, a progress screen steps through <strong>Installing update</strong>, <strong>Restarting NetEm</strong> and <strong>Reconnecting</strong>, then reloads the page on the new version. It knows the restart has finished when a new NetEm process answers, so it also works when an update does not change the version number. If the update is refused, for example because of local changes, the screen says why and nothing restarts. If NetEm takes more than two minutes to come back, it suggests checking <code>journalctl -u netem -n 50</code> on the appliance.</p>
 
 <h2 id="permissions">Repository ownership</h2>

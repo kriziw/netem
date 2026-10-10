@@ -228,6 +228,11 @@ def git_update_status(fetch=False):
         "dirty": False,
         "installed_version": get_app_version(),
         "remote_version": None,
+        "release_commit": "",
+        "release_behind": 0,
+        "release_reachable": False,
+        "unreleased": 0,
+        "update_available": False,
     }
 
     rc, branch, err = run_process([GIT, "branch", "--show-current"])
@@ -283,8 +288,28 @@ def git_update_status(fetch=False):
 
     status["behind"] = int(behind or 0)
     status["ahead"] = int(ahead or 0)
+
+    # Release Please changes version.txt only in the commit that publishes a release, so the
+    # latest commit touching it is the latest release. Commits merged after it wait for the next one.
+    rc, release_commit, _ = run_process([GIT, "log", "-1", "--format=%h", remote_ref, "--", "version.txt"])
+    if rc == 0 and release_commit:
+        status["release_commit"] = release_commit
+        rc, count, _ = run_process([GIT, "rev-list", "--count", f"HEAD..{release_commit}"])
+        status["release_behind"] = int(count or 0) if rc == 0 else 0
+        rc, count, _ = run_process([GIT, "rev-list", "--count", f"{release_commit}..{remote_ref}"])
+        status["unreleased"] = int(count or 0) if rc == 0 else 0
+        rc, _out, _err = run_process([GIT, "merge-base", "--is-ancestor", "HEAD", release_commit])
+        status["release_reachable"] = rc == 0
+    remote, installed = version_tuple(status["remote_version"]), version_tuple(status["installed_version"])
+    newer = remote > installed if remote and installed else status["release_behind"] > 0
+    status["update_available"] = bool(newer and status["release_behind"] > 0)
     status["ok"] = True
     return status
+
+
+def version_tuple(value):
+    match = re.fullmatch(r"v?(\d+)\.(\d+)\.(\d+)", str(value or "").strip())
+    return tuple(int(part) for part in match.groups()) if match else None
 
 
 def restart_after_update():
@@ -6200,17 +6225,19 @@ def updates():
                     "Update blocked because tracked application files have local changes.",
                     "error",
                 )
-            elif status["ahead"] > 0 and status["behind"] > 0:
+            elif not status["update_available"]:
+                flash("NetEm already runs the latest release." + (
+                    f' {status["unreleased"]} merged commit(s) on main will come with the next release.'
+                    if status["unreleased"] else ""), "info")
+            elif not status["release_reachable"]:
                 flash(
-                    "Update blocked because the local and remote branches have diverged.",
+                    "Update blocked because this installation has commits that are not in the release.",
                     "error",
                 )
-            elif status["behind"] == 0:
-                flash("The application is already up to date.", "info")
             else:
-                remote_ref = f'origin/{status["target_branch"]}'
+                # Install the release itself, not commits merged after it.
                 rc, out, err = run_process(
-                    [GIT, "merge", "--ff-only", remote_ref],
+                    [GIT, "merge", "--ff-only", status["release_commit"]],
                     timeout=90,
                 )
                 if rc == 0:
