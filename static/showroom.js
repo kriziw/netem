@@ -214,6 +214,18 @@
   };
   const pageSize = () => window.innerWidth <= 850 ? 1 : window.innerHeight >= 1400 ? 3 : 2;
 
+  // The SD-WAN vendor under test, next to the MSP brand in the header.
+  function renderPartner() {
+    const appliance = latest.appliance || {};
+    const partner = document.getElementById('partner');
+    partner.hidden = !appliance.vendor_name;
+    const logo = document.getElementById('partner-logo');
+    logo.hidden = !appliance.vendor;
+    if (appliance.vendor && logo.getAttribute('src') !== `/assets/vendors/${appliance.vendor}.svg`) logo.setAttribute('src', `/assets/vendors/${appliance.vendor}.svg`);
+    logo.alt = appliance.vendor_name || '';
+    text('partner-name', [appliance.vendor ? null : appliance.vendor_name, appliance.model || appliance.product].filter(Boolean).join(' · '));
+  }
+
   function renderSite() {
     const view = siteView(latest.site, latest.session);
     text('site-title', view.title);
@@ -347,6 +359,7 @@
   function render() {
     if (!latest) return;
     renderSite();
+    renderPartner();
     renderRunning();
     renderOutcome();
     renderReport();

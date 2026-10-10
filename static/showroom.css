@@ -70,6 +70,9 @@ p{margin:.2rem 0}.eyebrow{text-transform:uppercase;letter-spacing:.15em;color:va
 .impact.resolved{border-left-color:var(--showroom-2f7c66);opacity:.75}.impact.resolved strong{color:var(--showroom-b0c5db)}
 .routes{display:grid;gap:.45rem;margin-top:.55rem}.route{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.55rem .8rem;border:1px solid var(--showroom-263c54);border-radius:.6rem;font-size:1rem}
 .route strong{font-size:1.05rem}.route.pass strong{color:var(--showroom-7cebc3)}.route.pass strong:after{content:"  \2713"}.route.warn strong{color:var(--showroom-ffd28f)}.route.warn strong:after{content:"  !"}.route.unknown strong{color:var(--showroom-a5b9cf);font-weight:500}
+/* MSP brand and SD-WAN vendor side by side */
+header{gap:1.5rem}.partner{display:flex;flex-direction:column;align-items:flex-start;gap:.3rem;margin-right:auto;padding-left:1.5rem;border-left:1px solid var(--showroom-31475e)}
+.partner[hidden]{display:none}.partner img{height:2.2rem;max-width:14rem;object-fit:contain;background:#fff;border-radius:.4rem;padding:.25rem .5rem}.partner img[hidden]{display:none}.partner strong{font-size:.95rem;color:var(--showroom-b0c5db)}
 footer{font-size:.68rem;color:var(--showroom-8ba4bf);margin-top:.9rem}
 body.disconnected .traffic strong,body.disconnected .result strong{color:var(--showroom-a5b9cf)}body.disconnected .spark{opacity:.35}
 @media(min-width:2200px){.paths{grid-template-columns:repeat(3,minmax(0,1fr))}}

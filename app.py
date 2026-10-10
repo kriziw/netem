@@ -39,6 +39,7 @@ from flask import (
     jsonify,
     Response,
     send_file,
+    send_from_directory,
     abort,
     session,
 )
@@ -59,7 +60,11 @@ CAPTURE_DIR = RUNTIME_DIR / "captures"
 BRANDING_DIR = os.environ.get("NETEM_BRANDING_DIR")
 if not BRANDING_DIR and (RUNTIME_DIR / "branding" / "branding.json").is_file():
     BRANDING_DIR = str(RUNTIME_DIR / "branding")
-branding.init_app(app, BRANDING_DIR)
+# Brand packs made in Settings -> Branding stay private: runtime/ is not part of the repository.
+BRANDS_DIR = Path(os.environ.get("NETEM_BRANDS_DIR") or RUNTIME_DIR / "brands")
+BRAND_STORE = branding.init_app(app, branding.BrandStore(BRANDS_DIR, BRANDING_DIR))
+# Brand uploads are the largest requests: two fonts, a logo and a favicon of up to 2 MB each.
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024
 
 def _session_secret():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -89,6 +94,7 @@ def protect_integration_forms():
     if request.method == "POST" and request.endpoint in (
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
+        "branding_activate", "branding_save", "branding_delete", "appliance_save",
         "site_save", "site_apply_wan", "site_run", "site_stop",
     ):
         supplied = request.form.get("integration_csrf", "")
@@ -633,6 +639,75 @@ def workload_finding(status, signals, expected_run=None):
                            "but no WAN carried traffic: its route to the target bypasses the appliance and NetEm.",
                     hint="Check the traffic path on the Command Center and repair it.")
     return None
+
+
+# ---------- Appliance under test ----------
+#
+# Clients see the SD-WAN vendor next to the MSP brand. NetEm takes the vendor of the appliance
+# selected in the Traffic Simulator; Settings can name it instead. The vendor marks are part of
+# the application (static/vendors), unlike private MSP brand packs.
+
+SDWAN_VENDORS = {
+    "fortinet": {"name": "Fortinet", "product": "FortiGate Secure SD-WAN", "aliases": ("fortinet", "fortigate")},
+    "velocloud": {"name": "VeloCloud", "product": "VeloCloud SD-WAN", "aliases": ("velocloud", "vmwarevelocloud", "aristavelocloud")},
+    "cisco": {"name": "Cisco", "product": "Cisco SD-WAN", "aliases": ("cisco", "meraki", "viptela")},
+    "hpe-aruba": {"name": "HPE Aruba Networking", "product": "EdgeConnect SD-WAN", "aliases": ("hpearuba", "aruba", "edgeconnect", "silverpeak")},
+    "palo-alto": {"name": "Palo Alto Networks", "product": "Prisma SD-WAN", "aliases": ("paloalto", "prisma")},
+    "versa": {"name": "Versa Networks", "product": "Versa SASE", "aliases": ("versa",)},
+    "juniper": {"name": "Juniper Networks", "product": "Session Smart SD-WAN", "aliases": ("juniper", "mist", "128technology")},
+    "check-point": {"name": "Check Point", "product": "Quantum SD-WAN", "aliases": ("checkpoint",)},
+    "sophos": {"name": "Sophos", "product": "Sophos Firewall SD-WAN", "aliases": ("sophos",)},
+    "forcepoint": {"name": "Forcepoint", "product": "Forcepoint SD-WAN", "aliases": ("forcepoint",)},
+    "barracuda": {"name": "Barracuda", "product": "CloudGen Firewall", "aliases": ("barracuda",)},
+    "peplink": {"name": "Peplink", "product": "SpeedFusion SD-WAN", "aliases": ("peplink", "pepwave")},
+    "huawei": {"name": "Huawei", "product": "Huawei SD-WAN", "aliases": ("huawei",)},
+    "ekinops": {"name": "Ekinops", "product": "OneOS SD-WAN", "aliases": ("ekinops", "oneaccess")},
+    "cato": {"name": "Cato Networks", "product": "Cato SASE Cloud", "aliases": ("cato",)},
+    "sonicwall": {"name": "SonicWall", "product": "SonicWall SD-WAN", "aliases": ("sonicwall",)},
+    "watchguard": {"name": "WatchGuard", "product": "WatchGuard SD-WAN", "aliases": ("watchguard",)},
+}
+APPLIANCE_CACHE = {"checked": None, "payload": None}
+APPLIANCE_CACHE_SECONDS = 60
+
+
+def vendor_id(label):
+    """The built-in vendor for a label such as the simulator's "Palo Alto Networks"."""
+    key = re.sub(r"[^a-z0-9]", "", str(label or "").lower())
+    return next((vendor for vendor, info in SDWAN_VENDORS.items()
+                 if key and any(key.startswith(alias) for alias in info["aliases"])), None)
+
+
+def appliance_view(vendor, model=None, name=None, source=None, label=None):
+    info = SDWAN_VENDORS.get(vendor) or {}
+    return {"vendor": vendor if info else None,
+            "vendor_name": info.get("name") or (str(label)[:60] if label and label != "Other" else None),
+            "product": info.get("product"), "model": str(model)[:60] if model else None,
+            "name": str(name)[:60] if name else None, "source": source}
+
+
+def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
+    """The SD-WAN appliance being tested: from Settings, else the simulator's selected appliance."""
+    cfg = load_config()
+    setting = cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {}
+    if setting.get("vendor") in SDWAN_VENDORS:
+        return appliance_view(setting["vendor"], setting.get("model"), None, "setting")
+    cached = dict(APPLIANCE_CACHE)
+    if cached["payload"] is not None and cached["checked"] is not None and time.monotonic() - cached["checked"] <= max_age:
+        return cached["payload"]
+    payload = appliance_view(None)
+    if traffic_generator_config(cfg).get("host") and traffic_generator_api_key():
+        try:
+            network = traffic_generator_request("/api/v1/network", timeout=8.0)
+            selected = network.get("selected") or {}
+            match = next((row for row in network.get("appliances") or [] if selected
+                          and all(row.get(key) == selected.get(key) for key in ("interface", "gateway", "target"))), None)
+            if match:
+                payload = appliance_view(vendor_id(match.get("vendor")), match.get("model") or setting.get("model"),
+                                         match.get("name"), "simulator", label=match.get("vendor"))
+        except RuntimeError:
+            pass
+    APPLIANCE_CACHE.update(checked=time.monotonic(), payload=payload)
+    return payload
 
 
 def _management_broadcast_addresses(cfg=None):
@@ -5010,6 +5085,7 @@ def overview():
         quality_curves=QUALITY_CURVES,
         traffic_generator=traffic_generator_snapshot(),
         traffic_path=traffic_path_readiness() if traffic_generator_config(cfg).get("host") else None,
+        appliance=appliance_under_test(),
         site_plan=active_site_plan(cfg),
         site_state=site_plan_snapshot(),
     )
@@ -5607,7 +5683,93 @@ def settings():
         update_status=git_update_status(fetch=False),
         showroom_url=showroom_url(),
         clock_status=platform_clock_status(),
+        brand_packs=BRAND_STORE.describe(),
+        active_brand=BRAND_STORE.active_id(),
+        appliance=appliance_under_test(),
+        appliance_setting=cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {},
+        vendors=SDWAN_VENDORS,
     )
+
+
+@app.route("/settings/appliance", methods=["POST"])
+def appliance_save():
+    vendor = request.form.get("vendor") or None
+    if vendor is not None and vendor not in SDWAN_VENDORS:
+        flash("Choose a listed SD-WAN vendor.", "error")
+        return redirect_after("settings")
+    cfg = load_config()
+    cfg["appliance"] = {"vendor": vendor, "model": (request.form.get("model") or "").strip()[:60] or None}
+    save_config(cfg)
+    APPLIANCE_CACHE.update(checked=None)
+    flash(f"Appliance under test: {SDWAN_VENDORS[vendor]['name']}." if vendor
+          else "The appliance under test now follows the Traffic Simulator's selected appliance.", "success")
+    return redirect_after("settings")
+
+
+@app.route("/settings/branding")
+def branding_settings():
+    packs = BRAND_STORE.describe()
+    editing = request.args.get("pack")
+    if editing not in {pack["id"] for pack in packs}:
+        editing = None
+    return render_template("branding.html", page="settings", packs=packs, active=BRAND_STORE.active_id(),
+                           editing=editing, manifest=BRAND_STORE.manifest(editing) if editing else {},
+                           palette=branding.DEFAULT_PALETTE, brands_dir=str(BRANDS_DIR), store_error=BRAND_STORE.error,
+                           local_pack=branding.LOCAL_PACK)
+
+
+@app.route("/settings/branding/preview/<pack_id>/<path:filename>")
+def branding_preview(pack_id, filename):
+    """Logos of brands that are not active, for the brand menu."""
+    directory = BRAND_STORE.packs().get(pack_id)
+    if not directory:
+        abort(404)
+    try:
+        _root, brand = branding.load_pack(directory)
+    except (OSError, ValueError, TypeError):
+        abort(404)
+    if filename not in brand["assets"]:
+        abort(404)
+    return branding.asset_headers(send_from_directory(Path(directory) / "assets", filename))
+
+
+@app.route("/settings/branding/activate", methods=["POST"])
+def branding_activate():
+    pack_id = request.form.get("pack") or None
+    try:
+        BRAND_STORE.set_active(pack_id)
+        flash("Default look restored." if pack_id is None else "Brand switched. Open screens follow on their next refresh.", "success")
+    except ValueError as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("branding_settings"))
+
+
+@app.route("/settings/branding/save", methods=["POST"])
+def branding_save():
+    uploads = {}
+    for slot in branding.UPLOAD_SLOTS:
+        upload = request.files.get(slot)
+        if upload and upload.filename:
+            uploads[slot] = (upload.filename, upload.read(branding.UPLOAD_LIMIT + 1))
+    try:
+        pack_id = BRAND_STORE.save(request.form.get("pack") or None, request.form.to_dict(), uploads)
+        if request.form.get("activate"):
+            BRAND_STORE.set_active(pack_id)
+        flash("Brand saved." + (" It is now active." if request.form.get("activate") else ""), "success")
+        return redirect(url_for("branding_settings", pack=pack_id))
+    except (ValueError, OSError) as exc:
+        flash(f"Brand not saved: {exc}", "error")
+        return redirect(url_for("branding_settings", pack=request.form.get("pack") or None))
+
+
+@app.route("/settings/branding/delete", methods=["POST"])
+def branding_delete():
+    try:
+        BRAND_STORE.delete(request.form.get("pack"))
+        flash("Brand deleted.", "success")
+    except (ValueError, OSError) as exc:
+        flash(str(exc), "error")
+    return redirect(url_for("branding_settings"))
 
 
 @app.route("/settings/time-sync", methods=["POST"])
@@ -7051,6 +7213,7 @@ def showroom_snapshot():
     story = showroom_story(diagnosis, links, outcome)
     return {
         "timestamp": now, "links": links, "story": story,
+        "appliance": {key: value for key, value in appliance_under_test().items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phases", "phase_index", "phase",
             "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase")},
@@ -7363,7 +7526,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
                         for item in impacts[:STORY_MAX_IMPACTS]]}
 
 
-showroom_app = create_showroom_app(showroom_snapshot, BRANDING_DIR)
+showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE)
 
 
 def showroom_listener():

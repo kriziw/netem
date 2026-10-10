@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Branding · {{ branding.name }}{% endblock %}
+{% block crumb %}Settings / Branding{% endblock %}
+
+{% block content %}
+<div class="page-head">
+  <div>
+    <div class="eyebrow">Settings</div>
+    <h1>Branding</h1>
+    <p class="page-description">Choose the brand clients see on every page, printed session reports and the showroom. Brands are stored privately on this appliance in <span class="mono">{{ brands_dir }}</span>, never in the public repository. The SD-WAN vendor shown next to it comes from <a href="{{ url_for('settings') }}#appliance">Settings → Appliance under test</a>.</p>
+  </div>
+  <div class="page-actions"><a class="btn" href="{{ url_for('settings') }}">Back to settings</a></div>
+</div>
+
+{% if store_error %}<div class="flash error">The selected brand could not be loaded ({{ store_error }}), so the default look is shown.</div>{% endif %}
+
+<div class="section-title">Brand in use</div>
+<div class="brand-grid">
+  <section class="card brand-option {{ 'selected' if not active }}">
+    <div class="card-pad">
+      <div class="brand-preview">N</div>
+      <strong>Default look</strong>
+      <div class="card-sub">NetEm WAN Lab · no brand</div>
+      <div class="actions">
+        {% if active %}
+        <form method="post" action="{{ url_for('branding_activate') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="pack" value=""><button class="btn btn-sm" type="submit">Use</button></form>
+        {% else %}<span class="status good">In use</span>{% endif %}
+      </div>
+    </div>
+  </section>
+  {% for pack in packs %}
+  <section class="card brand-option {{ 'selected' if pack.id == active }}">
+    <div class="card-pad">
+      {% if pack.logo %}<img class="brand-preview" src="{{ url_for('branding_preview', pack_id=pack.id, filename=pack.logo) }}" alt="">{% else %}<div class="brand-preview">{{ pack.name[:2] }}</div>{% endif %}
+      <strong>{{ pack.name }}</strong>
+      <div class="card-sub">{{ pack.subtitle }}{% if pack.id == local_pack %} · installed on the appliance{% endif %}</div>
+      <div class="actions">
+        {% if pack.id == active %}<span class="status good">In use</span>
+        {% elif pack.valid %}<form method="post" action="{{ url_for('branding_activate') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="pack" value="{{ pack.id }}"><button class="btn btn-sm" type="submit">Use</button></form>
+        {% else %}<span class="status bad">Invalid</span>{% endif %}
+        <a class="btn btn-sm" href="{{ url_for('branding_settings', pack=pack.id) }}#brand-editor">{{ 'Edit' if pack.editable else 'Copy and edit' }}</a>
+        {% if pack.editable %}
+        <form method="post" action="{{ url_for('branding_delete') }}" onsubmit="return confirm('Delete this brand from the appliance?');"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="pack" value="{{ pack.id }}"><button class="btn btn-sm btn-danger" type="submit">Delete</button></form>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+</div>
+
+<section class="card" id="brand-editor" style="margin-top:14px">
+  <div class="card-head">
+    <div>
+      <div class="card-title">{% if editing and editing != local_pack %}Edit {{ manifest.name }}{% elif editing %}Copy {{ manifest.name }}{% else %}New brand{% endif %}</div>
+      <div class="card-sub">Logo: SVG, PNG, JPEG or WebP · favicon: ICO, PNG or SVG · fonts: WOFF or WOFF2 · up to 2 MB each. Leave a file empty to keep the current one.</div>
+    </div>
+    {% if editing %}<a class="btn btn-sm" href="{{ url_for('branding_settings') }}#brand-editor">New brand</a>{% endif %}
+  </div>
+  <div class="card-pad">
+    {% if editing == local_pack %}<div class="field-help" style="margin-bottom:10px">This brand is installed on the appliance and is read-only here. Saving creates an editable copy that keeps its logo and fonts.</div>{% endif %}
+    <form method="post" action="{{ url_for('branding_save') }}" enctype="multipart/form-data">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      <input type="hidden" name="pack" value="{{ editing or '' }}">
+      <div class="form-grid">
+        <div><label for="brand-name">Name</label><input id="brand-name" type="text" name="name" maxlength="120" required value="{{ manifest.name or '' }}" placeholder="BT International"></div>
+        <div><label for="brand-subtitle">Subtitle</label><input id="brand-subtitle" type="text" name="subtitle" maxlength="120" value="{{ manifest.subtitle or '' }}" placeholder="WAN resilience lab"></div>
+        <div><label for="brand-mark">Mark, shown without a logo</label><input id="brand-mark" type="text" name="mark" maxlength="4" value="{{ manifest.mark or '' }}" placeholder="BT"></div>
+        <div><label for="brand-font">Font family name</label><input id="brand-font" type="text" name="font_family" maxlength="64" value="{{ manifest.font_family or '' }}" placeholder="BT Curve"></div>
+      </div>
+      <div class="form-grid">
+        <div><label for="brand-logo">Logo</label><input id="brand-logo" type="file" name="logo" accept=".svg,.png,.jpg,.jpeg,.webp"></div>
+        <div><label for="brand-favicon">Favicon</label><input id="brand-favicon" type="file" name="favicon" accept=".ico,.png,.svg"></div>
+        <div><label for="brand-regular">Font · regular</label><input id="brand-regular" type="file" name="font_regular" accept=".woff,.woff2"></div>
+        <div><label for="brand-bold">Font · bold</label><input id="brand-bold" type="file" name="font_bold" accept=".woff,.woff2"></div>
+      </div>
+      <div class="section-title">Colours</div>
+      <div class="color-grid">
+        {% for key, default in palette.items() %}
+        <label class="color-field"><input type="color" name="token_{{ key }}" value="{{ ((manifest.tokens or {}).get(key) or default)|lower }}"><span>{{ key|replace('-', ' ')|capitalize }}</span></label>
+        {% endfor %}
+      </div>
+      <label class="check-row"><input type="checkbox" name="activate" value="1" checked> Use this brand after saving</label>
+      <button class="btn btn-primary" type="submit">Save brand</button>
+    </form>
+  </div>
+</section>
+{% endblock %}

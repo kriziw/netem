@@ -35,8 +35,9 @@
       <div class="live-topology">
         <div class="live-topology-stage">
           <div class="live-node">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>
-            <div><strong>SD-WAN / Firewall</strong><div class="card-sub">appliance under test</div></div>
+            {% if appliance and appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.svg') }}" alt="{{ appliance.vendor_name }}">
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>{% endif %}
+            <div><strong>{{ (appliance.vendor_name if appliance) or 'SD-WAN / Firewall' }}</strong><div class="card-sub">{% if appliance and (appliance.model or appliance.product) %}{{ appliance.model or appliance.product }} · {% endif %}appliance under test</div></div>
           </div>
 
           <div class="live-paths">

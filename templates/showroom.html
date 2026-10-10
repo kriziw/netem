@@ -17,6 +17,7 @@
       {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">{% endif %}
       <div class="eyebrow">{{ branding.name }} · Showroom</div><h1>Network resilience, live</h1>
     </div>
+    <div class="partner" id="partner" hidden><span class="eyebrow">SD-WAN under test</span><img id="partner-logo" alt="" hidden><strong id="partner-name"></strong></div>
     <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
   </header>
   <main>

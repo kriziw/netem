@@ -1,18 +1,17 @@
 """A separate, deliberately small HTTP surface for unattended showroom screens."""
+import re
 from pathlib import Path
 
-from flask import Flask, jsonify, render_template, send_from_directory
+from flask import Flask, abort, jsonify, render_template, send_from_directory
 import branding
 
 
-def create_showroom_app(snapshot, branding_directory=None):
+def create_showroom_app(snapshot, branding_source=None):
+    """`branding_source` is the operator's BrandStore (so brand switches show here too) or a pack directory."""
     root = Path(__file__).resolve().parent
     viewer = Flask("netem_showroom", static_folder=None,
                    template_folder=str(root / "templates"))
-    if branding_directory:
-        branding.init_app(viewer, branding_directory)
-    else:
-        viewer.context_processor(lambda: {"branding": branding.DEFAULT_BRAND, "branding_enabled": False})
+    branding.init_app(viewer, branding_source)
 
     @viewer.before_request
     def read_only():
@@ -46,5 +45,11 @@ def create_showroom_app(snapshot, branding_directory=None):
     @viewer.get("/assets/showroom.js")
     def javascript():
         return send_from_directory(root / "static", "showroom.js")
+
+    @viewer.get("/assets/vendors/<vendor>.svg")
+    def vendor_mark(vendor):
+        if not re.fullmatch(r"[a-z0-9-]{1,40}", vendor) or not (root / "static" / "vendors" / f"{vendor}.svg").is_file():
+            abort(404)
+        return send_from_directory(root / "static" / "vendors", f"{vendor}.svg")
 
     return viewer

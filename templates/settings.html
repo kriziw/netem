@@ -62,6 +62,37 @@
     </div>
   </a>
 
+  <a class="card" href="{{ url_for('branding_settings') }}">
+    <div class="card-head"><div><div class="card-title">Branding</div><div class="card-sub">The MSP brand on every page, reports and the showroom</div></div><span class="status {{ 'good' if active_brand else 'info' }}">{{ (brand_packs|selectattr('id', 'equalto', active_brand)|map(attribute='name')|first) or 'Default look' }}</span></div>
+    <div class="card-pad">
+      <div class="kv">
+        <div class="k">Brands</div><div class="v">{{ brand_packs|length }} installed · switch, upload a logo, favicon and fonts, set colours</div>
+        <div class="k">Storage</div><div class="v">private to this appliance, not in the repository</div>
+      </div>
+    </div>
+  </a>
+
+  <section class="card" id="appliance">
+    <div class="card-head"><div><div class="card-title">Appliance under test</div><div class="card-sub">The SD-WAN vendor clients see next to the MSP brand</div></div>
+      {% if appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.svg') }}" alt="{{ appliance.vendor_name }}">{% else %}<span class="status info">Not set</span>{% endif %}</div>
+    <div class="card-pad">
+      <div class="field-help" style="margin-bottom:8px">{% if appliance.source == 'simulator' %}From the Traffic Simulator's selected appliance{% if appliance.name %} ({{ appliance.name }}){% endif %}.{% elif appliance.source == 'setting' %}Set here.{% else %}Select an appliance in the Traffic Simulator, or name it here.{% endif %}</div>
+      <form method="post" action="{{ url_for('appliance_save') }}">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <input type="hidden" name="return_to" value="settings">
+        <div class="form-grid">
+          <div><label for="appliance-vendor">Vendor</label>
+            <select id="appliance-vendor" name="vendor">
+              <option value="">From the Traffic Simulator</option>
+              {% for key, vendor in vendors.items() %}<option value="{{ key }}" {{ 'selected' if appliance_setting.vendor == key }}>{{ vendor.name }} · {{ vendor.product }}</option>{% endfor %}
+            </select></div>
+          <div><label for="appliance-model">Model</label><input id="appliance-model" type="text" name="model" maxlength="60" value="{{ appliance_setting.model or '' }}" placeholder="FortiGate-VM04"></div>
+        </div>
+        <button class="btn btn-sm" type="submit" style="margin-top:8px">Save</button>
+      </form>
+    </div>
+  </section>
+
   <section class="card">
     <div class="card-head"><div><div class="card-title">Showroom display</div><div class="card-sub">Read-only live dashboard for a demo screen</div></div><span class="status {{ 'good' if showroom_url else 'warn' }}">{{ 'Enabled' if showroom_url else 'Disabled' }}</span></div>
     <div class="card-pad">
