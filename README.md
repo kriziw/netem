@@ -277,6 +277,7 @@ WantedBy=multi-user.target
 Then:
 
 ```bash
+sudo timedatectl set-ntp true
 sudo systemctl daemon-reload
 sudo systemctl enable --now netem
 sudo systemctl status netem
