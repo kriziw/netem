@@ -115,6 +115,7 @@ jobs:
                   "/analytics",
                   "/integrations",
                   "/settings",
+                  "/settings/branding",
                   "/setup",
                   "/presets",
                   "/updates",

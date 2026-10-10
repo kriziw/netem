@@ -1,6 +1,21 @@
 <h2 id="purpose">What branding changes</h2>
 <p>One brand per appliance sets the product name, subtitle, logo, favicon, font and colour palette. It applies to the operator interface, these help pages, printed session reports and the <a href="{{ url_for('documentation_page', slug='showroom') }}">showroom</a>. Project credits and technical NetEm references stay in place.</p>
 
+<h2 id="menu">Choose and edit brands in the app</h2>
+<p><a href="{{ url_for('branding_settings') }}">Settings → Branding</a> lists the brands installed on this appliance and the default look. <strong>Use</strong> switches brand at once: open pages, reports and the showroom follow on their next refresh, with no restart.</p>
+<p><strong>New brand</strong>, or <strong>Edit</strong> on an existing one, opens the editor:</p>
+<ul>
+<li>name, subtitle and the short mark shown when there is no logo;</li>
+<li>a logo (SVG, PNG, JPEG or WebP) and a favicon (ICO, PNG or SVG);</li>
+<li>a font family name with regular and bold WOFF or WOFF2 files;</li>
+<li>every colour token.</li>
+</ul>
+<p>Uploads are limited to 2 MB each and are checked to be what they claim. SVGs must be plain pictures, without scripts, event handlers or external links.</p>
+<p>Brands made here are stored privately on the appliance in <code>runtime/brands</code>, or in <code>NETEM_BRANDS_DIR</code> when that is set. They are never part of the public repository. A pack installed the original way, below, appears as <em>installed on the appliance</em>. It is read-only in the editor; <strong>Copy and edit</strong> makes an editable copy with its logo and fonts.</p>
+
+<h2 id="vendor">SD-WAN vendor</h2>
+<p>Next to the MSP brand, the showroom header and the Command Center show the SD-WAN vendor under test. NetEm takes it from the appliance selected in the Traffic Simulator. <a href="{{ url_for('settings') }}#appliance">Settings → Appliance under test</a> can name the vendor and model instead. The official logos of Fortinet, VeloCloud, Cisco, HPE Aruba, Palo Alto Networks, Versa, Juniper, Check Point, Sophos, Forcepoint, Barracuda, Peplink, Huawei, Ekinops, Cato Networks, SonicWall and WatchGuard are built into NetEm and shown on a white card. A vendor without a logo is shown by name. The logos are trademarks of their owners and only name the appliance under test.</p>
+
 <h2 id="install">Install a brand pack</h2>
 <p>A brand pack is a folder with a <code>branding.json</code> manifest and an <code>assets/</code> folder. Keep it outside the Git checkout, for example in <code>/etc/netem/branding/</code>, so updates never touch it.</p>
 <pre><code>branding/
@@ -13,7 +28,7 @@
 <p>Point the service at it with <code>sudo systemctl edit netem</code>:</p>
 <pre><code>[Service]
 Environment=NETEM_BRANDING_DIR=/etc/netem/branding</code></pre>
-<p>Then run <code>sudo systemctl daemon-reload</code> and <code>sudo systemctl restart netem</code>. The service user needs read access to the folder. Branding is read at startup, so restart after every change. Remove the setting to return to the default appearance.</p>
+<p>Then run <code>sudo systemctl daemon-reload</code> and <code>sudo systemctl restart netem</code>. The service user needs read access to the folder. NetEm notices changes to the pack's files while it runs. Remove the setting to return to the default appearance.</p>
 <p>For local development, <code>runtime/branding/branding.json</code> is picked up when no environment setting is present. An explicit setting always wins, even when its pack is invalid.</p>
 
 <h2 id="manifest">Manifest</h2>
