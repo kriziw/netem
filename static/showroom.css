@@ -60,6 +60,16 @@ p{margin:.2rem 0}.eyebrow{text-transform:uppercase;letter-spacing:.15em;color:va
 .phase-table .pill{font-size:.66rem;padding:.1rem .45rem;margin:0 .2rem .2rem 0}
 .remediation{margin-top:.7rem}.remediation p{font-size:.85rem;margin-top:.3rem}.fix:before{content:"\2713  ";color:var(--showroom-6aebbd)}.fix.fail:before{content:"\2717  ";color:var(--showroom-ff9dac)}
 
+/* Calm live view: a status line, user impacts with causes, and where the appliance sends traffic */
+.plan-progress{font-size:.8rem;color:var(--showroom-a5b9cf)}
+.impairment{min-height:1.1rem;font-size:.85rem;color:var(--showroom-b0c5db);margin:.35rem 0 0}.path.warn .impairment,.path.bad .impairment{color:var(--showroom-ffd28f)}
+.path .traffic strong{font-size:2.6rem}.path .spark{height:7rem}.carries{font-size:.85rem;color:var(--showroom-eef5ff);margin-top:.5rem;min-height:1.1rem}
+.story-status{font-size:1.25rem;line-height:1.35;margin:.45rem 0 .2rem;color:var(--showroom-eef5ff)}
+.impacts{display:grid;gap:.5rem;margin-top:.6rem}.impact{border-left:4px solid var(--showroom-ffc58a);padding:.35rem 0 .35rem .8rem;display:grid;gap:.15rem}
+.impact.bad{border-left-color:var(--showroom-ff9dac)}.impact strong{font-size:1.05rem}.impact span{font-size:.85rem;color:var(--showroom-b0c5db)}
+.impact.resolved{border-left-color:var(--showroom-2f7c66);opacity:.75}.impact.resolved strong{color:var(--showroom-b0c5db)}
+.routes{display:grid;gap:.45rem;margin-top:.55rem}.route{display:flex;justify-content:space-between;align-items:center;gap:1rem;padding:.55rem .8rem;border:1px solid var(--showroom-263c54);border-radius:.6rem;font-size:1rem}
+.route strong{font-size:1.05rem}.route.pass strong{color:var(--showroom-7cebc3)}.route.pass strong:after{content:"  \2713"}.route.warn strong{color:var(--showroom-ffd28f)}.route.warn strong:after{content:"  !"}.route.unknown strong{color:var(--showroom-a5b9cf);font-weight:500}
 footer{font-size:.68rem;color:var(--showroom-8ba4bf);margin-top:.9rem}
 body.disconnected .traffic strong,body.disconnected .result strong{color:var(--showroom-a5b9cf)}body.disconnected .spark{opacity:.35}
 @media(min-width:2200px){.paths{grid-template-columns:repeat(3,minmax(0,1fr))}}

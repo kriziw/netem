@@ -185,3 +185,86 @@ class ListenerTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StoryTests(unittest.TestCase):
+    """The showroom tells a stable story: changes show once they last, impacts linger as resolved."""
+
+    def setUp(self):
+        mock = patch.object(netem, "SHOWROOM_STATE", {"values": {}, "impacts": {}})
+        mock.start()
+        self.addCleanup(mock.stop)
+        self.outcome = {"experience": {"available": True, "verdicts": {"experience": "pass", "success": "pass"}}, "steering": []}
+
+    def links(self, health="healthy", fault="normal", quality=100):
+        return [{"id": "wan1", "name": "WAN1", "fault": fault, "health": health, "sla_pass": True, "quality": quality,
+                 "delay_ms": 45, "loss_pct": 2}, {"id": "wan2", "name": "WAN2", "fault": "normal", "health": "healthy",
+                                                  "sla_pass": True, "quality": 100, "delay_ms": 15, "loss_pct": 0.1}]
+
+    def diagnosis(self, failing=True, voice_wan="WAN2"):
+        findings = [{"source": "experience", "id": "media_loss", "severity": "bad", "applications": ["video", "voice"],
+                     "title": "Video meeting: 29 of 31 bursts lost packets",
+                     "wans": [{"link_id": "wan1", "label": "WAN1", "affected": 29, "cause_kinds": ["injected_loss"]}]}] if failing else []
+        findings.append({"source": "experience", "id": "bandwidth_bound", "severity": "warn", "applications": ["updates"], "wans": []})
+        classes = [{"class": "realtime", "label": "Voice & video", "verdict": "steered",
+                    "shares": [{"label": voice_wan, "health": "healthy", "pct": 90}, {"label": "WAN1", "health": "degraded", "pct": 10}]},
+                   {"class": "bulk", "label": "File transfers", "verdict": "stuck",
+                    "shares": [{"label": "WAN1", "health": "degraded", "pct": 100}]}]
+        return {"findings": findings, "steering": {"classes": classes}}
+
+    def test_words_for_impairments_and_causes(self):
+        self.assertEqual(netem.impairment_text({"fault": "blackhole"}), "Outage injected")
+        self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 100}), "No impairment")
+        self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 60, "delay_ms": 45, "loss_pct": 2}),
+                         "Impaired to 60% quality: 45 ms delay, 2% loss")
+        link = {"name": "WAN1", "loss_pct": 2, "delay_ms": 45}
+        self.assertEqual(netem.cause_text(["queue_drops"], link), "WAN1 is full")
+        self.assertEqual(netem.cause_text(["injected_loss", "queue_drops"], link), "2% packet loss on WAN1")
+        self.assertEqual(netem.cause_text(["fault"], link), "WAN1 is down")
+        self.assertIsNone(netem.cause_text([], link))
+
+    def test_impacts_settle_then_linger_as_resolved(self):
+        links = self.links("degraded", quality=60)
+        first = netem.showroom_story(self.diagnosis(), links, self.outcome, now=100)
+        # A new impact is not shown until it has lasted a few seconds; bandwidth-bound transfers never are.
+        self.assertEqual(first["impacts"], [])
+        settled = netem.showroom_story(self.diagnosis(), self.links("degraded", quality=60), self.outcome, now=109)
+        self.assertEqual(settled["impacts"], [{"impact": "Voice and video: breaking up", "cause": "2% packet loss on WAN1",
+                                               "wan": "WAN1", "severity": "bad", "state": "active"}])
+        self.assertTrue(settled["status"].startswith("Users are affected."))
+        resolved = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=115)
+        self.assertEqual(resolved["impacts"][0]["state"], "resolved")
+        gone = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=150)
+        self.assertEqual(gone["impacts"], [])
+        # A blip shorter than the settle time never appears.
+        netem.showroom_story(self.diagnosis(), self.links(), self.outcome, now=200)
+        blip = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=203)
+        self.assertEqual(blip["impacts"], [])
+
+    def test_health_routes_and_carried_traffic_settle(self):
+        links = self.links("congested")
+        story = netem.showroom_story(self.diagnosis(failing=False), links, self.outcome, now=10)
+        self.assertEqual(links[0]["display_health"], "congested")
+        self.assertEqual(story["routes"], [{"label": "Voice and video", "wan": "WAN2", "state": "good"},
+                                           {"label": "File transfers", "wan": "WAN1", "state": "warn"}])
+        self.assertEqual(links[0]["carries"], ["file transfers"])
+        self.assertEqual(links[1]["carries"], ["voice and video"])
+        # A brief flip in health or route does not show; one that lasts does.
+        links = self.links("healthy")
+        netem.showroom_story(self.diagnosis(failing=False, voice_wan="WAN1"), links, self.outcome, now=12)
+        self.assertEqual(links[0]["display_health"], "congested")
+        links = self.links("healthy")
+        story = netem.showroom_story(self.diagnosis(failing=False, voice_wan="WAN1"), links, self.outcome, now=21)
+        self.assertEqual(links[0]["display_health"], "healthy")
+        self.assertEqual(story["routes"][0]["wan"], "WAN1")
+        # An outage shows at once.
+        links = self.links(fault="blackhole")
+        netem.showroom_story(self.diagnosis(failing=False), links, self.outcome, now=22)
+        self.assertEqual((links[0]["display_health"], links[0]["impairment"]), ("failed", "Outage injected"))
+
+    def test_status_reads_as_one_sentence_per_question(self):
+        outcome = dict(self.outcome, steering=[{"label": "Voice & video", "reactions": [{"label": "WAN1", "steered_after_seconds": 12}]}])
+        story = netem.showroom_story({"findings": [], "steering": {"classes": []}}, self.links(), outcome, now=5)
+        self.assertEqual(story["status"], "Users are fine. All WANs are healthy. The appliance moved voice & video off WAN1 in 12 s.")
+        waiting = netem.showroom_story({}, self.links(), {"experience": {"available": False}}, now=50)
+        self.assertTrue(waiting["status"].startswith("Waiting for simulated users."))

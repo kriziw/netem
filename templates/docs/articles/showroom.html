@@ -20,17 +20,18 @@
 
 <h2 id="activity">Network &amp; activity</h2>
 <ul>
-<li><strong>Running now</strong>: the test name, the WAN it runs on, the current phase and step, the phase timeline and elapsed time against the planned length, and when the next phase starts. When the operator pauses a test, the panel turns amber and the countdown waits until the test resumes. Site test plans show each test's status.</li>
-<li><strong>Simulated users</strong>: users currently running in the Traffic Simulator, the activity level, the voice/video judging mode and the busiest applications.</li>
-<li><strong>WAN cards</strong>: measured download and upload, the share of each shaped limit in use, a two-minute traffic chart, the health of the path with the reason, the requested impairment and how the users on that WAN fare. With more WANs than fit the screen, the cards rotate every 12 seconds.</li>
+<li><strong>Running now</strong>: the test name, the WAN it runs on, the current phase and step, the phase timeline and elapsed time against the planned length, and when the next phase starts. When the operator pauses a test, the panel turns amber and the countdown waits until the test resumes. A site test plan shows which test of the plan is running.</li>
+<li><strong>Simulated users</strong>: users currently running in the Traffic Simulator, the activity level and the voice/video judging mode.</li>
+<li><strong>WAN cards</strong>: the WAN's health in a word (Healthy, Busy, Degraded, Down), what NetEm is doing to it in plain words (for example "Impaired to 60% quality: 45 ms delay, 2% loss" or "Outage injected"), measured download and upload averaged over about 10 seconds, a two-minute traffic chart, and which kinds of traffic the appliance sends over it. With more WANs than fit the screen, the cards rotate every 12 seconds.</li>
 </ul>
 
 <h2 id="outcome">Experience outcome</h2>
 <ul>
-<li><strong>Result tiles</strong>: experience score, request success and interactive response (P95) over the last minute, green when the site target is met and red when missed.</li>
-<li><strong>Where it happens &amp; why</strong>: the top findings from the live diagnosis, each naming the WAN and the cause, such as a full queue or injected loss.</li>
-<li><strong>SD-WAN steering</strong>: for voice and video, web and collaboration, and file transfers, the share of traffic on each WAN coloured by that WAN's health, and how long the appliance took to move traffic away from an impaired WAN.</li>
+<li><strong>Result tiles</strong>: experience score, request success and response time (P95) over the last minute, green when the site target is met and red when missed.</li>
+<li><strong>What's happening</strong>: one sentence about users, the WANs and the appliance's latest move, for example "Users are affected. WAN1 is degraded. The appliance moved voice and video off WAN1 in 12 s." Below it are up to three user impacts, each with its cause in plain words, for example "Voice and video: breaking up", caused by "2% packet loss on WAN1". An impact shows once it has lasted about 8 seconds and stays for 30 seconds after it ends, marked resolved. Transfers that are only limited by the line speed are left out.</li>
+<li><strong>Where the appliance sends traffic</strong>: for voice and video, web and business apps, and file transfers, the WAN that carries most of it, with a tick when that WAN is healthy and a warning when it is not.</li>
 </ul>
+<p>Health, routes and the target verdicts change on screen only after a change has lasted about 8 seconds, so the screen reads calmly from across a room. An outage shows at once. The Command Center keeps the detailed, second-by-second diagnosis for operators.</p>
 
 <h2 id="report">Test report</h2>
 <p>When a test ends, its report replaces the live findings for 30 minutes, or until the next test starts. The report shows:</p>

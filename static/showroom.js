@@ -120,7 +120,7 @@
     };
   }
 
-  const HEALTH = {healthy: 'Healthy', congested: 'Congested', degraded: 'Degraded', failed: 'Failed'};
+  const HEALTH = {healthy: 'Healthy', congested: 'Busy', degraded: 'Degraded', failed: 'Down'};
   const VERDICTS_SHORT = {steered: 'steered', unaffected: 'unaffected', balanced: 'healthy', stuck: 'on impaired WAN',
     stuck_impact: 'users affected', no_healthy: 'no healthy WAN', idle: 'no traffic', partial: 'partly traced', unattributed: 'WAN unknown'};
   const VERDICT_TONE = {steered: 'pass', unaffected: 'pass', balanced: 'pass', stuck: 'warn', partial: 'warn',
@@ -128,10 +128,6 @@
   const CLASS_SHORT = {'Voice & video': 'Voice', 'Web, collaboration & DNS': 'Web', 'File transfers': 'Files'};
   const classOrder = label => { const index = Object.keys(CLASS_SHORT).indexOf(label); return index < 0 ? 9 : index; };
   const REPORT_SECONDS = 1800;
-  const VERDICTS = {steered: 'Steered away', unaffected: 'Unaffected', balanced: 'All WANs healthy', stuck: 'On impaired WAN',
-    stuck_impact: 'Users affected', no_healthy: 'No healthy WAN', idle: 'No traffic', partial: 'Partly attributed',
-    unattributed: 'WAN unknown'};
-
   // The three questions the screen answers: who the site is, what runs on the network, what users get.
   function siteView(site, session) {
     if (!site) {
@@ -171,26 +167,40 @@
     };
   }
 
-  function steeringView(item, targetSeconds) {
-    const segments = (item.shares || []).filter(share => number(share.pct) && share.pct > 0)
-      .map(share => ({width: share.pct, health: share.health || 'unknown', label: `${share.label} ${Math.round(share.pct)}%`}));
-    if (number(item.unattributed_pct) && item.unattributed_pct > 0) {
-      segments.push({width: item.unattributed_pct, health: 'unknown', label: `Unknown ${Math.round(item.unattributed_pct)}%`});
-    }
-    const reactions = (item.reactions || []).map(reaction => reaction.steered_after_seconds != null
-      ? `moved off ${reaction.label} in ${reaction.steered_after_seconds} s` +
-        (reaction.within_target === false ? ` · target ≤ ${targetSeconds} s missed` : reaction.within_target ? ' · within target' : '')
-      : `${reaction.label} ${words(reaction.health)} for ${reaction.impaired_for_seconds} s`);
-    return {label: item.label, verdict: VERDICTS[item.verdict] || words(item.verdict),
-      tone: {good: 'pass', warn: 'warn', bad: 'fail'}[item.severity] || 'unknown',
-      segments, note: [item.text, ...reactions].filter(Boolean).join(' · ')};
+  // Rates settle over the last ~10 s so the numbers read calmly from across a room.
+  function smoothedRate(points, key) {
+    const values = (points || []).map(point => point[key]).filter(number).slice(-5);
+    return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+  }
+
+  const rateText = value => !number(value) ? '—' : value >= 10 ? `${Math.round(value)}` : `${Math.round(value * 10) / 10}`;
+
+  function carriesText(carries) {
+    if (!Array.isArray(carries)) return '';
+    if (!carries.length) return 'No simulated users on this WAN';
+    const list = carries.length > 1 ? `${carries.slice(0, -1).join(', ')} and ${carries[carries.length - 1]}` : carries[0];
+    return `Carries ${list}`;
+  }
+
+  function routeView(route) {
+    if (route.state === 'idle') return {label: route.label, text: 'No traffic', tone: 'unknown'};
+    if (!route.wan) return {label: route.label, text: 'Not identified', tone: 'unknown'};
+    return {label: route.label, text: route.wan, tone: route.state === 'good' ? 'pass' : 'warn'};
+  }
+
+  function planProgress(plan) {
+    const tests = (plan && plan.tests) || [];
+    const index = tests.findIndex(test => test.status === 'running');
+    if (!plan || !plan.active || index < 0) return '';
+    return `Site test plan · test ${index + 1} of ${tests.length}`;
   }
 
   // A finished test's report replaces the live findings for half an hour, until the next test starts.
   const showReport = data => Boolean(data && data.last_test && !(data.scenario || {}).active &&
     number(data.last_test.ended_at) && data.timestamp - data.last_test.ended_at < REPORT_SECONDS);
 
-  window.ShowroomUI = {format, total, chart, siteView, resultView, steeringView, phaseTimeline, summaryRows, reportView, showReport, clock, phaseCountdown, advance};
+  window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
+    phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -209,9 +219,6 @@
     text('site-title', view.title);
     text('site-meta', view.meta);
     text('site-people', view.people);
-    text('targets-heading', view.heading);
-    text('site-lines', view.lines);
-    document.getElementById('site-targets').replaceChildren(...view.targets.map(item => element('span', 'chip', item)));
     const session = latest.session || {};
     text('session-name', session.active ? session.name || 'Lab session' : 'No session running');
     text('session-site', session.active ? (session.site ? `Validating ${session.site}` : 'Session without a recorded site') : '');
@@ -242,24 +249,13 @@
     document.querySelector('.demo').classList.toggle('paused', Boolean(scenario.active && scenario.paused));
     text('demo-time', scenario.active && phases.length ? [`${clock(scenario.elapsed_s)} of about ${clock(scenario.planned_s)}`,
       scenario.paused ? `Paused by the operator, holding ${scenario.phase}` : null, phaseCountdown(scenario)].filter(Boolean).join(' · ') : '');
-    document.getElementById('plan-tests').replaceChildren(...(plan.tests || []).map(test =>
-      element('span', `chip ${{passed: 'pass', failed: 'fail', running: 'run', stopped: 'warn', skipped: 'warn'}[test.status] || ''}`,
-        `${{passed: '✓', failed: '✗', running: '▶', stopped: '■', skipped: '–'}[test.status] || '·'} ${test.name}`)));
+    text('plan-progress', planProgress(plan));
     const running = ['starting', 'running'].includes(traffic.status);
     text('workload-users', running && number(traffic.users) ? traffic.users.toLocaleString() : traffic.connected ? 'Idle' : '—');
     text('workload-summary', !traffic.configured ? 'Traffic Simulator not connected'
       : !traffic.connected ? 'Traffic Simulator unavailable'
       : [traffic.label, traffic.activity && `${traffic.activity} activity`, traffic.media_mode && `${traffic.media_mode} voice/video`]
         .filter(Boolean).join(' · ') || (running ? 'Simulated corporate users' : 'No workload running'));
-    document.getElementById('app-mix').replaceChildren(...(running ? traffic.applications || [] : []).slice(0, 5).map(app => {
-      const row = element('div', 'mix-row');
-      const bar = element('div', 'bar');
-      const fill = element('i');
-      fill.style.width = `${Math.max(0, Math.min(100, app.share_pct))}%`;
-      bar.append(fill);
-      row.append(element('span', '', app.name), bar, element('span', '', `${Math.round(app.share_pct)}%`));
-      return row;
-    }));
   }
 
   function renderOutcome() {
@@ -272,37 +268,19 @@
     }
     const traffic = latest.traffic || {};
     text('outcome-window', number(traffic.requests) ? `Last ${traffic.window_seconds || 60} s · ${traffic.requests.toLocaleString()} transactions` : '');
-    const findings = document.getElementById('findings');
-    const items = (latest.findings || []).slice(0, 3);
-    findings.replaceChildren(...(items.length ? items.map(item => {
-      const card = element('article', `finding ${item.severity || 'info'}`);
-      card.append(element('h4', '', item.title));
-      for (const wan of item.wans || []) {
-        card.append(element('p', 'where', `${wan.label}${wan.affected ? ` · ${wan.affected} affected` : ''}${wan.causes.length ? ` ← ${wan.causes.join('; ')}` : ''}`));
-      }
-      if (item.unattributed) card.append(element('p', 'where', `${item.unattributed} without a reply to show the WAN`));
-      if (item.hint || item.detail) card.append(element('p', 'detail', item.hint || item.detail));
+    const story = latest.story || {};
+    text('story-status', online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
+    document.getElementById('impacts').replaceChildren(...(story.impacts || []).map(item => {
+      const card = element('article', `impact ${item.state} ${item.severity}`);
+      card.append(element('strong', '', item.impact), element('span', '', `${item.state === 'resolved' ? 'Resolved · ' : ''}${item.cause}`));
       return card;
-    }) : [element('p', 'muted', latest.experience && latest.experience.available
-      ? 'No problems detected: users are getting the expected experience.' : 'No simulated user traffic yet.')]));
-    const target = ((latest.experience || {}).targets || {}).steering_max_s;
-    const steering = document.getElementById('steering');
-    const classes = latest.steering || [];
-    steering.replaceChildren(...(classes.length ? classes.map(item => {
-      const view = steeringView(item, target);
-      const row = element('div', 'steer');
-      const head = element('div', 'steer-head');
-      head.append(element('strong', '', view.label), element('span', `pill ${view.tone}`, view.verdict));
-      const bar = element('div', 'steer-bar');
-      for (const segment of view.segments) {
-        const part = element('span', segment.health, segment.width >= 18 ? segment.label : '');
-        part.style.width = `${segment.width}%`;
-        part.title = segment.label;
-        bar.append(part);
-      }
-      row.append(head, bar, element('p', 'detail', view.note));
+    }));
+    document.getElementById('routes').replaceChildren(...((story.routes || []).length ? story.routes.map(route => {
+      const view = routeView(route);
+      const row = element('div', `route ${view.tone}`);
+      row.append(element('span', '', view.label), element('strong', '', view.text));
       return row;
-    }) : [element('p', 'muted', 'Steering is shown once simulated traffic can be traced to each WAN.')]));
+    }) : [element('p', 'muted', 'Shown once simulated users are running.')]));
   }
 
   function renderReport() {
@@ -337,10 +315,6 @@
 
   function renderPaths() {
     const links = latest.links;
-    text('path-count', links.length);
-    text('healthy-count', online ? `${links.filter(link => link.sla_pass && link.fault === 'normal').length} / ${links.length}` : '—');
-    text('total-down', online ? `${format(total(links, 'down_mbps'))} Mbit/s` : '—');
-    text('total-up', online ? `${format(total(links, 'up_mbps'))} Mbit/s` : '—');
     const pages = Math.max(1, Math.ceil(links.length / pageSize()));
     page %= pages;
     text('page-number', pages > 1 ? `Page ${page + 1} of ${pages} · rotates every 12 seconds` : '');
@@ -352,31 +326,17 @@
     for (const link of links.slice(page * pageSize(), (page + 1) * pageSize())) {
       const node = document.getElementById('path-template').content.firstElementChild.cloneNode(true);
       const field = (name, value) => { node.querySelector(`[data-field="${name}"]`).textContent = value; };
-      const health = link.fault !== 'normal' ? 'failed' : link.health || (link.sla_pass ? 'healthy' : 'degraded');
+      const health = link.display_health || (link.fault !== 'normal' ? 'failed' : link.health || 'healthy');
       node.classList.add({healthy: 'good', congested: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good');
       field('name', link.name);
-      field('profile', link.profile);
-      field('health', `${online ? '' : 'Last known · '}${link.fault !== 'normal' ? words(link.fault) : HEALTH[health] || (link.sla_pass ? 'Model SLA pass' : 'Model SLA fail')}`);
-      field('reason', link.health_reason || (link.sla_pass ? '' : 'Model SLA fails on the requested impairment'));
-      field('down', format(online ? link.down_mbps : null));
-      field('up', format(online ? link.up_mbps : null));
-      for (const direction of ['down', 'up']) {
-        const util = online ? link[`${direction}_util_pct`] : null;
-        node.querySelector(`[data-bar="${direction}"]`).style.width = `${number(util) ? Math.max(0, Math.min(100, util)) : 0}%`;
-        node.querySelector(`[data-bar="${direction}"]`).className = number(util) ? (util >= 90 ? 'full' : util >= 70 ? 'busy' : '') : '';
-        field(`${direction}-util`, number(util) ? `${Math.round(util)}% of limit` : 'limit use unknown');
-      }
-      field('limits', `Configured limits · ↓ ${format(link.download_limit_mbit)} / ↑ ${format(link.upload_limit_mbit)} Mbit/s`);
-      field('delay', `${format(link.delay_ms)} ms`);
-      field('jitter', `${format(link.jitter_ms)} ms`);
-      field('loss', `${format(link.loss_pct)}%`);
-      field('quality', `${format(link.quality)}%`);
-      field('users', number(link.users_success_pct) ? `Users on this WAN: ${pct(link.users_success_pct)} success` +
-        (link.worst_app ? ` · worst ${link.worst_app} ${pct(link.worst_app_success_pct, 0)}` : '') : 'No simulated users traced to this WAN');
-      field('sample', !online ? 'Connection lost · live traffic unavailable' : !link.traffic_available
-        ? 'Traffic measurement unavailable · waiting for a fresh sample'
-        : link.down_mbps === 0 && link.up_mbps === 0 ? 'Measured idle · no traffic crossing this path' : 'Live measured traffic');
+      field('profile', [link.profile, number(link.download_limit_mbit) && number(link.upload_limit_mbit)
+        ? `${format(link.download_limit_mbit)}/${format(link.upload_limit_mbit)} Mbit/s` : null].filter(Boolean).join(' · '));
+      field('health', `${online ? '' : 'Last known · '}${HEALTH[health] || words(health)}`);
+      field('impairment', link.impairment || '');
       const points = histories.get(link.id) || [];
+      field('down', rateText(online ? smoothedRate(points, 'down_mbps') : null));
+      field('up', rateText(online ? smoothedRate(points, 'up_mbps') : null));
+      field('carries', online ? carriesText(link.carries) : '');
       const max = Math.max(1, ...points.flatMap(point => [point.down_mbps, point.up_mbps]).filter(number));
       node.querySelector('.download').setAttribute('d', chart(points, 'down_mbps', latest.timestamp, max));
       node.querySelector('.upload').setAttribute('d', chart(points, 'up_mbps', latest.timestamp, max));
