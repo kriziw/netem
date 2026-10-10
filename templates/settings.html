@@ -33,11 +33,11 @@
   </a>
 
   <a class="card" href="{{ url_for('updates') }}">
-    <div class="card-head"><div><div class="card-title">Application &amp; updates</div><div class="card-sub">Release channel, versioning and Git update status</div></div><span class="status {{ 'good' if update_status.ok and update_status.behind == 0 else 'warn' }}">v{{ app_version }}</span></div>
+    <div class="card-head"><div><div class="card-title">Application &amp; updates</div><div class="card-sub">Release channel, versioning and Git update status</div></div><span class="status {{ 'good' if update_status.ok and not update_status.update_available else 'warn' }}">v{{ app_version }}</span></div>
     <div class="card-pad">
       <div class="kv">
         <div class="k">Channel</div><div class="v mono">origin/main</div>
-        <div class="k">Status</div><div class="v">{% if update_status.ok %}{{ update_status.behind }} stable commit(s) available{% else %}update status unavailable{% endif %}</div>
+        <div class="k">Status</div><div class="v">{% if not update_status.ok %}update status unavailable{% elif update_status.update_available %}v{{ update_status.remote_version }} available{% else %}latest release installed{% endif %}</div>
       </div>
     </div>
   </a>
