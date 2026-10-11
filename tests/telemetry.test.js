@@ -106,7 +106,9 @@ test('WAN quick controls use the URL attribute when an action input masks form.a
   const form={action:{name:'action',value:'quality'},getAttribute:name=>name==='action'?'/wan/quick':null,
     append(){},querySelectorAll:()=>[],addEventListener:(name,fn)=>{submit=fn;}};
   class Data {constructor(value){this.form=value;}}
+  const after=[];
   const ctx={document:{querySelectorAll:()=>[form],createElement:()=>feedback},URL,
+    window:{NetEmActions:{notify:message=>after.push('notify '+message),refresh:()=>after.push('refresh')}},
     location:{href:'https://netem.example/'},FormData:Data,
     fetch:async(url,options)=>{sent={url,options};return {ok:true,json:async()=>({ok:true,messages:[{message:'Applied'}]})};}};
   vm.createContext(ctx);
@@ -117,6 +119,8 @@ test('WAN quick controls use the URL attribute when an action input masks form.a
   assert.equal(sent.options.headers.Accept,'application/json');
   assert.equal(sent.options.body.form,form);
   assert.equal(feedback.textContent,'Applied');
+  // The cards, top bar and banner follow at once, and the result outlives that refresh.
+  assert.deepEqual(after,['notify Applied','refresh']);
 });
 
 test('generic controls resolve relative URLs despite a named action input', async () => {

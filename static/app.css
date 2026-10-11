@@ -249,6 +249,11 @@ h1 { margin:0; font-size:25px; line-height:1.15; letter-spacing:-.025em; font-we
 .flash.success { border-color:rgba(var(--color-54d889-rgb), .35); background:var(--success-soft); color:var(--color-c8f8d9); }
 .flash.error { border-color:rgba(var(--color-ff6b7a-rgb), .35); background:var(--danger-soft); color:var(--color-ffd0d5); }
 .flash.info { border-color:rgba(var(--color-5da8ff-rgb), .35); background:var(--blue-soft); color:var(--color-cfe5ff); }
+/* The top bar's live pills sit in the bar's own row; action results outlive page refreshes. */
+.top-status { display:contents; }
+.stale-notice { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:14px; }
+.action-toasts { position:fixed; right:18px; bottom:18px; z-index:60; display:grid; gap:8px; width:min(380px, calc(100vw - 36px)); }
+.action-toasts .flash { box-shadow:0 10px 30px rgba(0,0,0,.35); }
 
 .grid { display:grid; gap:14px; }
 .grid-2 { grid-template-columns:repeat(2,minmax(0,1fr)); }

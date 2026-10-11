@@ -274,6 +274,8 @@ jobs:
           node --test tests/update-screen.test.js
           node --check static/update-screen.js
           node --check static/simulator-dialog.js
+          node --test tests/actions.test.js
+          node --check static/actions.js
 
       - name: Validate release configuration
         run: |
