@@ -42,6 +42,12 @@ ip link show br-wan2
 bridge link</pre>
 <p>If the bridges are absent, check the service log for startup errors.</p>
 
+<h2 id="bridge-port">One WAN passes no traffic although its shaping looks applied</h2>
+<p>Each WAN is a bridge joining the appliance side and the provider side. When one of its ports drops out of the bridge, after a failed restore or because another tool reconfigured the VM's interfaces, the WAN passes nothing while its profile and live values still look normal. With two equal routes, an appliance usually sends a given source over one WAN, so the traffic generator's requests can time out completely while the other WAN is fine.</p>
+<p>NetEm checks its bridges every 10 seconds and before simulated users start. While <strong>Restore WAN bridges on application startup</strong> is on, it puts a port back into its bridge, brings it and the bridge up, and logs <em>bridge broken … repairing</em> and <em>bridge repaired</em> in the activity log. The Command Center's diagnosis leads with <em>WAN2 passes no traffic: its bridge is broken</em> and names the port, and the traffic path check adds what it found. An interface that is missing or has no link is reported but not changed: connect the VM's virtual NIC in Proxmox. To check by hand, every WAN port should be listed with its bridge:</p>
+<pre>bridge link
+ip link set enp6s21 master br-wan2</pre>
+
 <h2 id="service">Service will not start</h2>
 <pre>systemctl status techkarma-netem --no-pager
 journalctl -u techkarma-netem -n 100 --no-pager</pre>

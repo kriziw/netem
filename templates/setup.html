@@ -95,7 +95,7 @@
       <div class="card-pad">
         <label style="display:flex;gap:9px;align-items:flex-start;color:var(--text-soft);margin-bottom:12px">
           <input type="checkbox" name="restore_bridges_on_startup" {% if config.get('restore_bridges_on_startup', True) %}checked{% endif %}>
-          <span><strong>Restore WAN bridges on application startup</strong><br><span class="field-help">Recommended for persistent lab appliances.</span></span>
+          <span><strong>Restore WAN bridges on application startup</strong><br><span class="field-help">Recommended for persistent lab appliances. While NetEm runs, it also puts a port back when it drops out of its WAN bridge.</span></span>
         </label>
         <label style="display:flex;gap:9px;align-items:flex-start;color:var(--text-soft)">
           <input type="checkbox" name="restore_shaping_on_startup" {% if config.get('restore_shaping_on_startup', True) %}checked{% endif %}>
