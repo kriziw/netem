@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.16.0](https://github.com/kriziw/netem/compare/v0.15.0...v0.16.0) (2026-10-11)
+
+
+### Features
+
+* run sequence results with insights on the showroom and Tests page ([#54](https://github.com/kriziw/netem/issues/54)) ([368e756](https://github.com/kriziw/netem/commit/368e75657c2638bc35087c228a01bfc45ba0cb31))
+* showroom waits for the session and announces each test before it starts ([#53](https://github.com/kriziw/netem/issues/53)) ([547aa8a](https://github.com/kriziw/netem/commit/547aa8a4392aa4acdf3e5443819f033a5b3d23e0))
+
+
+### Bug Fixes
+
+* keep NetEm pages up to date without reloading ([#55](https://github.com/kriziw/netem/issues/55)) ([8110f5d](https://github.com/kriziw/netem/commit/8110f5d62132ccef5f23ed581484cec9fd21c142))
+
 ## [0.15.0](https://github.com/kriziw/netem/compare/v0.14.0...v0.15.0) (2026-10-10)
 
 
