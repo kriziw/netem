@@ -1,6 +1,6 @@
 {% set selection = inventory.selection %}
 <section class="card" id="traffic-paths" style="margin-bottom:18px">
-<div class="card-head"><div><div class="card-title">Traffic steering</div><div class="card-sub">Full workloads are pinned to one selected path. Independent health probes run on every configured path.</div></div><a class="btn" href="{{ url_for('tests') }}#corporate-traffic">Run full workload</a></div>
+<div class="card-head"><div><div class="card-title">Traffic steering</div><div class="card-sub">Full workloads are pinned to one selected path. Independent health probes run on every configured path.</div></div><a class="btn" href="{{ url_for('traffic_settings',section='network') }}">Configure paths & network</a></div>
 <div class="card-pad"><p><strong>Workload path:</strong> <span data-workload-path>{{ selection.get('name') or 'Appliance / existing route' }} · {{ selection.get('mode','appliance')|replace('_',' ') }}</span></p>
 <p class="field-help">No automatic failover. Path changes are blocked during tests/workloads. Management API traffic keeps its separate management route.</p>
 <div class="inventory-table-wrap"><table class="inventory-table"><thead><tr><th>Path</th><th>Workload scope</th><th>Interface / gateway</th><th>Independent health probe</th><th>Full simulated traffic</th></tr></thead><tbody>

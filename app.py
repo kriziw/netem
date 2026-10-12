@@ -486,44 +486,14 @@ def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
             connection.close()
 
 
-@app.route('/simulator/', defaults={'panel_path': ''}, methods=['GET', 'POST'])
-@app.route('/simulator/<path:panel_path>', methods=['GET', 'POST'])
+@app.get('/simulator/', defaults={'panel_path': ''})
+@app.get('/simulator/<path:panel_path>')
 def simulator_controller(panel_path):
-    """NetEm operator UI; the executing agent only accepts fixed authenticated views."""
-    session.setdefault('integration_csrf', secrets.token_urlsafe(32))
-    path = '/' + panel_path
-    if request.method == 'POST':
-        supplied = request.form.get('csrf_token', '')
-        if not supplied or not hmac.compare_digest(supplied.encode(), session['integration_csrf'].encode()):
-            abort(400, 'Invalid form token. Reload the page and retry.')
-        if scenario_snapshot().get('active') and path not in ('/workloads/adjust', '/workloads/stop'):
-            abort(409, 'Stop the current test before changing simulator configuration.')
-    try:
-        if request.method == 'POST' and path == '/workloads/start':
-            APPLIANCE_PLATFORM.preflight(request.form)
-            ensure_traffic_path('Corporate workload')
-        result = traffic_generator_request('/api/v1/controller/view', method='POST', timeout=15,
-            payload={'path': path, 'method': request.method, 'fields': request.form.to_dict(),
-                     'query': request.args.to_dict(), 'csrf_token': session['integration_csrf'],
-                     'messages': session.pop('_flashes', [])})
-        if result.get('api_key'):
-            values = load_secrets()
-            values['traffic_generator_api_key'] = result['api_key']
-            save_secrets(values)
-        for category, message in result.get('messages') or []:
-            flash(message, category)
-        location = result.get('location')
-        if location:
-            if not location.startswith('/simulator/') or '\\' in location:
-                raise RuntimeError('The agent returned an invalid controller navigation target.')
-            return redirect(location)
-        response = Response(result.get('body', ''), status=int(result.get('status', 502)),
-                            content_type=result.get('content_type', 'text/html'))
-        response.headers['Cache-Control'] = 'no-store'
-        response.headers['X-Content-Type-Options'] = 'nosniff'
-        return response
-    except (RuntimeError, ValueError) as exc:
-        return render_template('simulator_controller_error.html', error=str(exc)), 502
+    # Preserve bookmarks only. No agent HTML, assets or browser forms are relayed.
+    destination = 'experience' if panel_path == 'dem' else 'maintenance' if panel_path.startswith('settings/system') or panel_path.startswith('settings/api') else 'network'
+    if panel_path in ('', 'workloads'):
+        return redirect(url_for('tests') + '#corporate-traffic')
+    return redirect(url_for('traffic_settings', section=destination))
 
 
 def traffic_generator_snapshot(include_catalog=False):
@@ -5944,6 +5914,9 @@ def traffic_generator_test():
 
 @app.route("/traffic-generator/start", methods=["POST"])
 def traffic_generator_start():
+    if scenario_snapshot().get("active"):
+        flash("The test controls this workload. Use Stop & restore before starting manual traffic.", "error")
+        return redirect_after("tests")
     payload = {
         "profile": request.form.get("profile") or "office",
         "users": request.form.get("users") or 50,
@@ -5984,6 +5957,9 @@ def traffic_generator_start():
 
 @app.route("/traffic-generator/adjust", methods=["POST"])
 def traffic_generator_adjust():
+    if scenario_snapshot().get("active"):
+        flash("The test controls this workload. Use the test controls to pause or stop it.", "error")
+        return redirect_after("tests")
     payload = {}
     for key in ("users", "spawn_rate", "activity", "media_mode"):
         value = request.form.get(key)
@@ -6011,6 +5987,9 @@ def traffic_generator_adjust():
 
 @app.route("/traffic-generator/stop", methods=["POST"])
 def traffic_generator_stop():
+    if scenario_snapshot().get("active"):
+        flash("The test controls this workload. Use the test controls to pause or stop it.", "error")
+        return redirect_after("tests")
     try:
         try:
             status_before = traffic_generator_request("/api/v1/status", timeout=3.0)
@@ -8229,6 +8208,9 @@ def run_servers():
                 viewer_thread.join(timeout=5)
             viewer.server_close()
 
+
+from traffic_controls import install as install_traffic_controls
+install_traffic_controls(app, sys.modules[__name__])
 
 if __name__ == "__main__":
     run_servers()

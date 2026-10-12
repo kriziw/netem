@@ -12,7 +12,9 @@
 </div>
 
 <div class="grid grid-3">
-  <a class="card" href="{{ url_for('simulator_controller',panel_path='') }}"><div class="card-head"><div><div class="card-title">Simulator controls</div><div class="card-sub">NetEm commands the executing agent</div></div></div><div class="card-pad">Workloads · network setup · experience targets · updates · target management</div></a>
+  {% for section,title,description in [('network','Traffic paths & network','Agent interfaces, verified test paths and saved unverified connections'),('experience','Application experience targets','Business-critical apps, deadlines, UDP quality and throughput limits'),('maintenance','Traffic agent & target','Service updates, management connections and agent recovery')] %}
+  <a class="card" href="{{ url_for('traffic_settings',section=section) }}"><div class="card-head"><div><div class="card-title">{{ title }}</div><div class="card-sub">{{ description }}</div></div></div><div class="card-pad">Configure automatic test execution</div></a>
+  {% endfor %}
   <a class="card" href="{{ url_for('setup') }}">
     <div class="card-head"><div><div class="card-title">Topology &amp; interfaces</div><div class="card-sub">Management NIC, transparent WAN bridges and startup restore</div></div><span class="status info">{{ link_count }} WAN</span></div>
     <div class="card-pad">

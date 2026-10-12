@@ -23,7 +23,7 @@
 {% if last_test and not scenario_state.active %}{{ test_summary(last_test) }}{% endif %}
 
 <div class="section-title">Generic tests</div>
-<p class="field-help">NetEm starts the active site's workload when the simulator is idle (Office, 50 users if no site is saved), confirms active users before starting the phase clock, and stops only traffic started by this test. Existing workloads stay running. Configure the executing agent under <a href="{{ url_for('simulator_controller',panel_path='settings/network-setup') }}">Simulator controls</a>.</p>
+<p class="field-help">NetEm starts the active site's workload when the simulator is idle (Office, 50 users if no site is saved), confirms active users before starting the phase clock, and stops only traffic started by this test. Existing workloads stay running. Configure the executing agent under <a href="{{ url_for('traffic_settings',section='network') }}">Paths & network</a>.</p>
 <div class="test-grid">
   {% for scenario in scenarios if not scenario.id.startswith('custom_') %}
   <section class="test-card {% if selected_scenario == scenario.id %}selected{% endif %}" id="test-{{ scenario.id }}">
@@ -46,8 +46,9 @@
   {% endfor %}
 </div>
 
-<div class="section-title" id="corporate-traffic">Corporate traffic &amp; endpoint experience</div>
-<p class="field-help">Full simulated traffic follows the pinned workload path. <a href="{{ url_for('platform_health') }}#traffic-paths">Choose appliance, direct NetEm/ISP, or clean router baseline</a>. Independent path health probes keep running alongside the workload.</p>
+<details class="traffic-advanced" id="manual-traffic"><summary>Advanced · run traffic independently of a test</summary><p class="field-help">Tests manage traffic automatically. Use these controls only for calibration or a standalone workload.</p>
+<div class="section-title" id="corporate-traffic">Advanced · manual traffic</div>
+<p class="field-help">Full simulated traffic follows the pinned workload path. <a href="{{ url_for('platform_health') }}#traffic-paths">Choose the workload path</a>. Independent path health probes keep running alongside the workload.</p>
 {% if not traffic_generator.configured %}
 <section class="card">
   <div class="empty-state">
@@ -99,7 +100,8 @@
       </div>
     </div>
 
-    {% if tg.status in ('starting','running') and tg.run %}
+    {% if scenario_state.active %}<div class="flash info">The current test controls this workload. Use Pause phase or Stop &amp; restore above.</div>
+    {% elif tg.status in ('starting','running') and tg.run %}
     <div class="section-title">Live workload</div>
     <div class="kv">
       <div class="k">Run</div><div class="v mono">{{ tg.run.run_id }}</div>
@@ -192,6 +194,8 @@
 </section>
 {% endif %}
 
+
+</details>
 <div class="section-title">Security &amp; diagnostics</div>
 <div class="test-grid">
   <section class="test-card">
