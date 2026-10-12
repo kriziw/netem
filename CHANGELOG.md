@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.17.0](https://github.com/kriziw/netem/compare/v0.16.0...v0.17.0) (2026-10-12)
+
+
+### Features
+
+* monitor appliance inventory and verify lab appliance selection ([#58](https://github.com/kriziw/netem/issues/58)) ([4d94cd9](https://github.com/kriziw/netem/commit/4d94cd941d71be6792aecbed5e8b21ddd49f34c0))
+
+
+### Bug Fixes
+
+* find and repair WAN bridges that lost a port ([#57](https://github.com/kriziw/netem/issues/57)) ([ef9bf1b](https://github.com/kriziw/netem/commit/ef9bf1b69de86fe338213934aae912f07d781b14))
+
 ## [0.16.0](https://github.com/kriziw/netem/compare/v0.15.0...v0.16.0) (2026-10-11)
 
 
