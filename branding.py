@@ -6,13 +6,16 @@ service runs, from Settings -> Branding. A pack installed the original way (a si
 directory from NETEM_BRANDING_DIR or runtime/branding) is offered as the "local" pack.
 """
 import json
+import base64
+import hashlib
 import re
 import shutil
 import tempfile
 import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 
-from flask import Response, abort, send_from_directory, url_for
+from flask import Response, abort, jsonify, send_from_directory, url_for
 
 DEFAULT_PALETTE = {
     "bg": "#08101c",
@@ -124,6 +127,20 @@ HEX_COLOR = re.compile(r"#[0-9a-fA-F]{6}")
 FONT_NAME = re.compile(r"[A-Za-z][A-Za-z0-9 -]{0,63}")
 
 
+def image_url(value):
+    """Remote assets are browser-loaded HTTPS URLs; never fetched by the server."""
+    if not isinstance(value, str) or len(value) > 2048 or not re.fullmatch(r"[A-Za-z0-9:/?&=._~%+#@!$()*;,\[\]-]+", value):
+        raise ValueError("Use an HTTPS image or font URL without credentials or whitespace.")
+    parsed = urlsplit(value)
+    if parsed.scheme != 'https' or not parsed.hostname or parsed.username or parsed.password:
+        raise ValueError("Use an HTTPS image or font URL without credentials or whitespace.")
+    return value
+
+
+def asset_url(filename):
+    return image_url(filename) if filename.startswith('https://') else url_for('branding_asset', filename=filename)
+
+
 def _asset(root, filename, suffixes):
     if not isinstance(filename, str) or not filename or "\\" in filename:
         raise ValueError("Invalid branding asset name")
@@ -151,8 +168,11 @@ def load_pack(directory):
     brand["assets"] = set()
     for key in ("logo", "favicon"):
         if data.get(key):
-            brand[key] = _asset(root, data[key], ASSET_SUFFIXES - {".woff", ".woff2"})
-            brand["assets"].add(brand[key])
+            if str(data[key]).startswith('https://'):
+                brand[key] = image_url(data[key])
+            else:
+                brand[key] = _asset(root, data[key], ASSET_SUFFIXES - {".woff", ".woff2"})
+                brand["assets"].add(brand[key])
     tokens = data.get("tokens", {})
     if not isinstance(tokens, dict):
         raise ValueError("Branding tokens must be an object")
@@ -164,6 +184,10 @@ def load_pack(directory):
     if not isinstance(family, str) or not FONT_NAME.fullmatch(family):
         raise ValueError("Invalid branding font family")
     brand["font_family"] = family
+    heading = data.get("heading_font_family", family)
+    if not isinstance(heading, str) or not FONT_NAME.fullmatch(heading):
+        raise ValueError("Invalid heading font family")
+    brand["heading_font_family"] = heading
     brand["fonts"] = []
     fonts = data.get("fonts", [])
     if not isinstance(fonts, list) or len(fonts) > 12:
@@ -171,12 +195,16 @@ def load_pack(directory):
     for font in fonts:
         if not isinstance(font, dict):
             raise ValueError("Invalid branding font")
-        filename = _asset(root, font.get("file"), {".woff", ".woff2"})
+        filename = image_url(font['file']) if str(font.get('file', '')).startswith('https://') else _asset(root, font.get("file"), {".woff", ".woff2"})
         weight = font.get("weight", 400)
         if type(weight) is not int or not 100 <= weight <= 900:
             raise ValueError("Invalid branding font weight")
-        brand["fonts"].append({"file": filename, "weight": weight})
-        brand["assets"].add(filename)
+        role = font.get("family", "body")
+        if role not in ("body", "heading"):
+            raise ValueError("Invalid font role")
+        brand["fonts"].append({"file": filename, "weight": weight, "family": role})
+        if not filename.startswith('https://'):
+            brand["assets"].add(filename)
     return root, brand
 
 
@@ -195,11 +223,13 @@ def stylesheet(brand):
     declarations.append(f'--font-family:"{brand["font_family"]}",Arial,sans-serif')
     rules = [":root{" + ";".join(declarations) + "}"]
     for font in brand["fonts"]:
-        source = url_for("branding_asset", filename=font["file"])
+        source = asset_url(font["file"])
+        family = brand.get("heading_font_family", brand["font_family"]) if font.get("family") == "heading" else brand["font_family"]
         rules.append(
-            f'@font-face{{font-family:"{brand["font_family"]}";src:url("{source}");'
+            f'@font-face{{font-family:"{family}";src:url("{source}");'
             f'font-weight:{font["weight"]};font-style:normal;font-display:swap}}'
         )
+    rules.append(f'h1,h2,h3{{font-family:"{brand.get("heading_font_family", brand["font_family"])}",Arial,sans-serif}}')
     rules.append(".btn-primary,.btn-primary:hover{color:#fff;background:var(--accent-strong)}")
     rules.append(".nav-link.active,.docs-side-link.active{color:var(--text)}")
     return "\n".join(rules)
@@ -214,6 +244,7 @@ UPLOAD_SLOTS = {
     "favicon": {".ico", ".png", ".svg"},
     "font_regular": {".woff", ".woff2"},
     "font_bold": {".woff", ".woff2"},
+    "font_headline": {".woff", ".woff2"},
 }
 MAGIC = {".png": (b"\x89PNG\r\n\x1a\n",), ".jpg": (b"\xff\xd8\xff",), ".jpeg": (b"\xff\xd8\xff",),
          ".webp": (b"RIFF",), ".ico": (b"\x00\x00\x01\x00",), ".woff": (b"wOFF",), ".woff2": (b"wOF2",)}
@@ -360,6 +391,8 @@ class BrandStore:
         manifest["tokens"] = tokens
         if fields.get("font_family"):
             manifest["font_family"] = str(fields["font_family"]).strip()
+        if fields.get("heading_font_family"):
+            manifest["heading_font_family"] = str(fields["heading_font_family"]).strip()
         # Build the pack beside the others, check it, then swap it in.
         self.packs_dir.mkdir(parents=True, exist_ok=True)
         work = Path(tempfile.mkdtemp(prefix=f".{target_id}-", dir=self.packs_dir))
@@ -367,7 +400,19 @@ class BrandStore:
             if source and (source / "assets").is_dir():
                 shutil.copytree(source / "assets", work / "assets")
             (work / "assets").mkdir(exist_ok=True)
-            fonts = {font.get("weight"): font for font in manifest.get("fonts") or [] if isinstance(font, dict)}
+            fonts = {(font.get("weight"), font.get("family", "body")): font for font in manifest.get("fonts") or [] if isinstance(font, dict)}
+            for slot in UPLOAD_SLOTS:
+                remote = str(fields.get(slot + '_url') or '').strip()
+                if remote and uploads.get(slot):
+                    raise ValueError(f"Choose either an upload or a URL for {slot.replace('_', ' ')}.")
+                if remote:
+                    remote = image_url(remote)
+                    if slot in ('logo', 'favicon'):
+                        manifest[slot] = remote
+                    else:
+                        weight = 700 if slot == 'font_bold' else 400
+                        role = 'heading' if slot == 'font_headline' else 'body'
+                        fonts[(weight, role)] = {'file': remote, 'weight': weight, **({'family': role} if role == 'heading' else {})}
             for slot, upload in uploads.items():
                 if not upload:
                     continue
@@ -381,7 +426,8 @@ class BrandStore:
                     manifest[slot] = stored
                 else:
                     weight = 700 if slot == "font_bold" else 400
-                    fonts[weight] = {"file": stored, "weight": weight}
+                    role = "heading" if slot == "font_headline" else "body"
+                    fonts[(weight, role)] = {"file": stored, "weight": weight, **({"family": role} if role == "heading" else {})}
                     manifest.setdefault("font_family", name if FONT_NAME.fullmatch(name) else "Brand")
             manifest["fonts"] = [fonts[weight] for weight in sorted(fonts)]
             (work / "branding.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
@@ -394,6 +440,64 @@ class BrandStore:
             if work.exists():
                 shutil.rmtree(work, ignore_errors=True)
         return target_id
+
+    def export_config(self, pack_id=None):
+        pack_id = pack_id if pack_id is not None else self.active_id()
+        directory = self.packs().get(pack_id)
+        if not directory:
+            return {'schema_version': 1, 'branding': dict(DEFAULT_BRAND), 'assets': {}}
+        root, brand = load_pack(directory)
+        return {'schema_version': 1, 'branding': self.manifest(pack_id),
+                'assets': {filename: base64.b64encode((root / 'assets' / filename).read_bytes()).decode('ascii') for filename in sorted(brand['assets'])}}
+
+    def import_config(self, raw):
+        if not isinstance(raw, dict) or set(raw) - {'schema_version', 'branding', 'assets'} or raw.get('schema_version') != 1:
+            raise ValueError('Choose a version 1 branding JSON configuration.')
+        manifest, assets = raw.get('branding'), raw.get('assets', {})
+        if not isinstance(manifest, dict) or not isinstance(assets, dict) or len(assets) > 16:
+            raise ValueError('Invalid branding configuration or assets.')
+        if set(manifest) - {'name', 'subtitle', 'mark', 'logo', 'favicon', 'font_family', 'heading_font_family', 'fonts', 'tokens'}:
+            raise ValueError('Unknown branding configuration fields.')
+        if not self.packs_dir:
+            raise ValueError('No private brand directory is configured.')
+        self.packs_dir.mkdir(parents=True, exist_ok=True)
+        work = Path(tempfile.mkdtemp(prefix='.import-', dir=self.packs_dir))
+        try:
+            asset_root = work / 'assets'
+            asset_root.mkdir()
+            total = 0
+            for filename, encoded in assets.items():
+                if not isinstance(filename, str) or not re.fullmatch(r'[A-Za-z0-9_./-]+', filename):
+                    raise ValueError('Invalid branding asset name.')
+                target = (asset_root / filename).resolve()
+                if not target.is_relative_to(asset_root.resolve()):
+                    raise ValueError('Branding asset must remain inside assets/.')
+                if not isinstance(encoded, str) or len(encoded) > (UPLOAD_LIMIT * 4 // 3 + 8):
+                    raise ValueError('Each embedded asset must be at most 2 MB.')
+                try:
+                    data = base64.b64decode(encoded, validate=True)
+                except ValueError as exc:
+                    raise ValueError('Embedded assets must use valid base64.') from exc
+                total += len(data)
+                if total > 8 * 1024 * 1024:
+                    raise ValueError('Embedded assets must total at most 8 MB.')
+                slot = next((key for key in ('logo', 'favicon') if manifest.get(key) == filename), 'font_regular')
+                check_upload(slot, filename, data)
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(data)
+            (work / 'branding.json').write_text(json.dumps(manifest), encoding='utf-8')
+            _, brand = load_pack(work)
+            if set(assets) != brand['assets']:
+                raise ValueError('Embed exactly the local assets referenced by the configuration.')
+            pack_id, index = slugify(brand['name']), 2
+            base = pack_id
+            while pack_id in self.packs() or pack_id == LOCAL_PACK:
+                pack_id, index = f'{base[:36]}-{index}', index + 1
+            work.rename(self.packs_dir / pack_id)
+            return pack_id
+        finally:
+            if work.exists():
+                shutil.rmtree(work)
 
     def delete(self, pack_id):
         if pack_id == LOCAL_PACK or not self.packs_dir or not PACK_ID.fullmatch(str(pack_id or "")):
@@ -423,7 +527,7 @@ def init_app(app, source=None):
     @app.context_processor
     def branding_context():
         root, brand = store.current(app.logger)
-        return {"branding": brand, "branding_enabled": root is not None}
+        return {"branding": brand, "branding_enabled": root is not None, "branding_asset_url": asset_url}
 
     @app.get("/branding/theme.css")
     def branding_stylesheet():
@@ -434,6 +538,14 @@ def init_app(app, source=None):
         response.headers["Cache-Control"] = "no-cache"
         response.headers["X-Content-Type-Options"] = "nosniff"
         return response
+
+    @app.get('/branding/status')
+    def branding_status():
+        root, brand = store.current(app.logger)
+        revision = hashlib.sha256(repr(store._cache[0]).encode()).hexdigest()[:20]
+        return jsonify(enabled=root is not None, revision=revision, name=brand['name'], subtitle=brand['subtitle'],
+                       mark=brand['mark'], logo=asset_url(brand['logo']) if brand.get('logo') else None,
+                       favicon=asset_url(brand['favicon']) if brand.get('favicon') else None)
 
     @app.get("/branding/assets/<path:filename>")
     def branding_asset(filename):
