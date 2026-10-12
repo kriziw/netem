@@ -31,8 +31,9 @@ window.NetEmInventory = (() => {
     text('[data-platform-freshness]', stale ? 'Stale / unknown' : 'Current observation');
     text('[data-platform-simulator]', stale ? 'Unknown / stale' : platform.connected ? 'Connected' : 'Unavailable');
     text('[data-platform-version]', platform.simulator?.version || 'Unknown');
-    text('[data-platform-workload]', stale ? 'Unknown / stale' : network.workload_active ? 'Running' : 'Idle');
-    text('[data-platform-clock]', stale ? 'Unknown / stale' : platform.simulator?.clock?.status || 'Unknown');
+    text('[data-platform-workload]', stale ? 'Unknown / stale' : network.workload_active === true ? 'Running' : network.workload_active === false ? 'Idle' : 'Unknown');
+    const clock = platform.simulator?.clock || {};
+    text('[data-platform-clock]', stale ? 'Unknown / stale' : clock.synchronized === true ? 'Synchronized' : clock.synchronized === false ? 'Not synchronized' : clock.container === true ? 'Shared host clock; sync unverified' : 'Unknown');
     text('[data-platform-target]', stale ? 'Unknown / stale' : path.target?.ok === true ? 'Reachable' : 'Not verified');
     text('[data-platform-target-message]', path.target?.message || 'No verified target observation.');
     text('[data-platform-path]', path.message || 'Not checked');

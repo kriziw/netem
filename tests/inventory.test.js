@@ -10,7 +10,7 @@ function fixture() {
     <span data-inventory-checked></span><span data-inventory-selection></span>
     <div data-inventory-licenses></div></div><span data-platform-simulator></span>
     <span data-platform-target></span><span data-platform-management></span>
-    <span data-platform-freshness></span><div data-platform-errors></div></main>`, {runScripts:'outside-only'});
+    <span data-platform-freshness></span><span data-platform-workload></span><span data-platform-clock></span><div data-platform-errors></div></main>`, {runScripts:'outside-only'});
   dom.window.CSS = {escape: value => value};
   dom.window.eval(fs.readFileSync(path.join(__dirname,'../static/inventory.js'),'utf8'));
   return dom;
@@ -37,6 +37,14 @@ test('vendor strings and API errors are text, and target paths remain independen
   assert.equal(dom.window.document.querySelectorAll('img,script').length,0);
   assert.equal(dom.window.document.querySelector('[data-platform-target]').textContent,'Not verified');
   assert.equal(dom.window.document.querySelector('[data-platform-management]').textContent,'Connected');
+  dom.window.close();
+});
+
+test('missing workload status is unknown and clock uses the simulator synchronization flag', () => {
+  const dom = fixture();
+  dom.window.NetEmInventory.render({platform_stale:false,platform:{simulator:{clock:{synchronized:false}}}});
+  assert.equal(dom.window.document.querySelector('[data-platform-workload]').textContent,'Unknown');
+  assert.equal(dom.window.document.querySelector('[data-platform-clock]').textContent,'Not synchronized');
   dom.window.close();
 });
 

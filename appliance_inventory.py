@@ -390,7 +390,7 @@ def observe(row, token, client_factory=FortiGateClient):
             if isinstance(value, list):
                 return [redact(item) for item in value]
             if isinstance(value, dict):
-                return {redact(key): redact(item) for key, item in value.items()}
+                return {key: redact(item) for key, item in value.items()}
             return value
         observation = redact(observation)
     return observation

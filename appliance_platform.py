@@ -87,9 +87,11 @@ class Platform:
             row["selected"] = row["id"] == selection.get("id")
             row["stale"] = row["checked_at"] is None or not 0 <= now - row["checked_at"] <= STALE_AFTER
             row["readiness"] = readiness(row)
+        names = {row["id"]: row["name"] for row in rows}
+        alerts = [dict(alert, appliance_name=names.get(alert["appliance_id"], "Archived appliance")) for alert in self.store.alerts()]
         return {"appliances": rows, "selection": selection, "platform": platform,
                 "platform_stale": platform_stale, "selection_verified": selection_verified,
-                "alerts": self.store.alerts(), "interval_s": INTERVAL}
+                "alerts": alerts, "interval_s": INTERVAL}
 
     def selected(self):
         return self.store.get(self.store.state("selection").get("id"))
