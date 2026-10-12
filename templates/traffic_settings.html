@@ -16,7 +16,7 @@
 <div data-native-traffic></div>
 <nav class="traffic-settings-tabs" aria-label="Traffic settings">
 {% for id,label in [('network','Paths & network'),('experience','Experience targets'),('maintenance','Agent & target')] %}<a class="btn {{ 'btn-primary' if section == id else '' }}" {% if section == id %}aria-current="page"{% endif %} href="{{ url_for('traffic_settings',section=id) }}">{{ label }}</a>{% endfor %}</nav>
-{% if error %}<div class="flash error" role="alert">{{ error }} <a href="{{ url_for('integrations') }}#traffic-simulator">Review agent connection</a></div>{% endif %}
+{% if error %}<div class="flash error" role="alert">{{ error }} {% if connection_error %}<a href="{{ url_for('integrations') }}#traffic-simulator">Review agent connection</a>{% endif %}</div>{% endif %}
 {% if executor %}
 {% if busy %}<div class="flash warning">Configuration is locked while a test, workload or administration task is running. Stop the test with <strong>Stop & restore</strong> before changing its setup.</div>{% endif %}
 <section class="card traffic-task"><div class="card-head"><div><div class="card-title">Agent task status</div><div class="card-sub">Commands execute on the traffic agent; results appear here.</div></div><a class="btn btn-sm" href="{{ url_for('traffic_settings', section=section) }}">Refresh configuration</a></div><div class="card-pad" data-executor-task role="status" aria-live="polite">{{ (system.job or {}).get('message') or 'No administration task running.' }}</div></section>

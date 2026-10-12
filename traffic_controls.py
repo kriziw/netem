@@ -21,19 +21,20 @@ def install(app, netem):
         cached.update(connection=connection(), state=state)
         return state
 
-    def page(section, state=None, error=None, entered=None, status=200):
+    def page(section, state=None, error=None, entered=None, status=200, stale=False):
         if state is None and error is None:
             try:
                 state = snapshot()
             except (RuntimeError, ValueError, KeyError) as exc:
                 error = str(exc)
+                stale = True
                 state = cached['state'] if cached['connection'] == connection() else None
         state = state or {}
         system = state.get('system') or {}
-        busy = bool(error or system.get('busy') or system.get('workload_active') or netem.scenario_snapshot().get('active'))
+        busy = bool(stale or system.get('busy') or system.get('workload_active') or netem.scenario_snapshot().get('active'))
         return render_template('traffic_settings.html', page='settings', section=section, executor=state,
             system=system, network=state.get('network') or {}, experience=state.get('experience') or {},
-            busy=busy, error=error, entered=entered or {}, path_links=netem.load_config().get('wan_links', [])), status
+            busy=busy, error=error, connection_error=stale, entered=entered or {}, path_links=netem.load_config().get('wan_links', [])), status
 
     @app.get('/settings/traffic/<section>')
     def traffic_settings(section):
@@ -79,8 +80,10 @@ def install(app, netem):
             return redirect(url_for('traffic_settings', section=section))
         except (RuntimeError, ValueError, KeyError) as exc:
             # Retain entered values so validation never discards operator work.
+            stale = False
             try:
                 state = snapshot()
             except (RuntimeError, ValueError, KeyError):
+                stale = True
                 state = cached['state'] if cached['connection'] == connection() else {}
-            return page(section, state=state, error=str(exc), entered=request.form.to_dict(), status=400)
+            return page(section, state=state, error=str(exc), entered=request.form.to_dict(), status=400, stale=stale)

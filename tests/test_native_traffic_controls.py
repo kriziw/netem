@@ -60,6 +60,19 @@ class NativeTrafficControlsTests(unittest.TestCase):
         self.assertEqual(reply.status_code, 400)
         self.assertIn(b'Invalid address', reply.data)
         self.assertIn(b'value="my-entered-address"', reply.data)
+        self.assertNotIn(b'<fieldset disabled', reply.data)
+
+    def test_outage_retains_last_configuration_and_entered_values_but_locks_commands(self):
+        with patch.object(netem, 'scenario_snapshot', return_value={'active': False}), \
+             patch.object(netem.APPLIANCE_PLATFORM.store, 'state', return_value={}):
+            with patch.object(netem, 'traffic_generator_request', return_value=copy.deepcopy(STATE)):
+                self.assertEqual(self.client.get('/settings/traffic/network').status_code, 200)
+            with patch.object(netem, 'traffic_generator_request', side_effect=RuntimeError('Agent offline')):
+                reply = self.client.post('/settings/traffic/network/network-setup', data={
+                    'integration_csrf': 'token', 'role': 'wan1', 'address': 'retained-address'})
+        self.assertEqual(reply.status_code, 400)
+        self.assertIn(b'value="retained-address"', reply.data)
+        self.assertIn(b'<fieldset disabled', reply.data)
 
     def test_configuration_cannot_override_an_active_program(self):
         with patch.object(netem, 'scenario_snapshot', return_value={'active': True}), \
