@@ -7,11 +7,18 @@ from flask import abort, flash, jsonify, redirect, render_template, request, ses
 def install(app, netem):
     sections = {'network', 'experience', 'maintenance'}
     commands = {'network-setup', 'experience', 'system', 'dhcp', 'probe', 'rotate-key'}
+    cached = {'connection': None, 'state': None}
+
+    def connection():
+        cfg = netem.traffic_generator_config()
+        return (cfg.get('host'), cfg.get('port'), cfg.get('tls_sha256'))
 
     def snapshot():
         state = netem.traffic_generator_request('/api/v1/controller/settings', timeout=10)
         # One verified path inventory for native configuration and test preflight.
-        netem.APPLIANCE_PLATFORM.store.state('traffic_paths', {'paths': state['network']['paths']})
+        with netem.APPLIANCE_PLATFORM.operations:
+            netem.APPLIANCE_PLATFORM.store.state('traffic_paths', {'paths': state['network']['paths']})
+        cached.update(connection=connection(), state=state)
         return state
 
     def page(section, state=None, error=None, entered=None, status=200):
@@ -20,9 +27,10 @@ def install(app, netem):
                 state = snapshot()
             except (RuntimeError, ValueError, KeyError) as exc:
                 error = str(exc)
+                state = cached['state'] if cached['connection'] == connection() else None
         state = state or {}
         system = state.get('system') or {}
-        busy = bool(system.get('busy') or system.get('workload_active') or netem.scenario_snapshot().get('active'))
+        busy = bool(error or system.get('busy') or system.get('workload_active') or netem.scenario_snapshot().get('active'))
         return render_template('traffic_settings.html', page='settings', section=section, executor=state,
             system=system, network=state.get('network') or {}, experience=state.get('experience') or {},
             busy=busy, error=error, entered=entered or {}, path_links=netem.load_config().get('wan_links', [])), status
@@ -74,5 +82,5 @@ def install(app, netem):
             try:
                 state = snapshot()
             except (RuntimeError, ValueError, KeyError):
-                state = {}
+                state = cached['state'] if cached['connection'] == connection() else {}
             return page(section, state=state, error=str(exc), entered=request.form.to_dict(), status=400)
