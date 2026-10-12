@@ -198,7 +198,7 @@ class PlatformTests(unittest.TestCase):
         route = {key: DEFINITION[key] for key in ("gateway", "target", "interface")}
         network = {"selected": route, "route_health": {"active": True}, "appliances": []}
         with patch.object(self.platform, "configured", return_value=True), \
-             patch.object(netem, "traffic_generator_request", side_effect=[{"service": "netem-traffic-simulator"}, network, {"ready": True}, {}]):
+             patch.object(netem, "traffic_generator_request", side_effect=[{"service": "netem-traffic-simulator"}, network, {"ready": True}, {}, {}]):
             self.platform.check_platform()
         self.assertEqual(self.platform.store.state("selection")["id"], self.id)
 

@@ -26,6 +26,13 @@ window.NetEmInventory = (() => {
       }
     }
     const platform = snapshot.platform || {}, path = platform.path || {}, network = platform.network || {};
+    text('[data-workload-path]', (snapshot.selection?.name || 'Appliance / existing route') + ' · ' + (snapshot.selection?.mode || 'appliance').replaceAll('_', ' '));
+    const observations = platform.path_health?.paths || [];
+    document.querySelectorAll('[data-path-health]').forEach(node => {
+      const observation = observations.find(item => item.id === node.dataset.pathHealth);
+      const fresh = observation?.checked_at && Date.now()/1000 - observation.checked_at >= 0 && Date.now()/1000 - observation.checked_at <= 90;
+      node.textContent = !fresh ? 'Unknown / not observed' : observation.reachable === true ? 'Reachable · ' + observation.latency_ms + ' ms (HTTP health)' : observation.reachable === false ? 'No target reply on this path' : 'Path inactive / unknown';
+    });
     const stale = snapshot.platform_stale;
     text('[data-platform-time]', 'Last check: ' + date(platform.checked_at));
     text('[data-platform-freshness]', stale ? 'Stale / unknown' : 'Current observation');
@@ -70,6 +77,7 @@ window.NetEmInventory = (() => {
           text('[data-inventory-availability]', 'Unknown / connection lost');
           text('[data-inventory-health]', 'Health unknown');
           text('[data-inventory-licenses]', 'Unknown / connection lost');
+          text('[data-path-health]', 'Unknown / connection lost');
         }
       } finally { fetching = false; }
     }

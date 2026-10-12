@@ -46,6 +46,7 @@
 </div>
 
 <div class="section-title" id="corporate-traffic">Corporate traffic &amp; endpoint experience</div>
+<p class="field-help">Full simulated traffic follows the pinned workload path. <a href="{{ url_for('platform_health') }}#traffic-paths">Choose appliance, direct NetEm/ISP, or clean router baseline</a>. Independent path health probes keep running alongside the workload.</p>
 {% if not traffic_generator.configured %}
 <section class="card">
   <div class="empty-state">

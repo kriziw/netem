@@ -1,5 +1,13 @@
 # Appliance inventory and platform monitoring
 
+**Platform Health → Traffic steering** also configures direct NetEm/ISP and clean
+router paths. Every path can carry the full HTTP/UDP simulated workload. Workloads
+stay pinned while source-bound health probes independently check other paths.
+See the [simulator traffic-path guide](https://github.com/kriziw/netem-traffic-simulator/blob/main/docs/TRAFFIC-PATHS.md)
+for Proxmox NIC placement and router return routes. Direct modes keep appliance
+monitoring active but do not require an unused appliance's license. Their route
+readiness still cannot be overridden.
+
 NetEm owns a persistent inventory in `runtime/inventory.db`. Add devices in
 **Appliances** or import the Traffic Simulator's saved appliances. Virtual and
 physical devices share the inventory model. FortiGate is the first monitoring
