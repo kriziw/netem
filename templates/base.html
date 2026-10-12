@@ -12,6 +12,7 @@
   {% block head %}{% endblock %}
 </head>
 <body>
+{% set inventory_summary = inventory_summary|default({'critical': 0, 'warnings': 0}) %}
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
@@ -152,8 +153,10 @@
     <a class="command-item" data-command-search="tests scenarios brownout failover security capture" href="{{ url_for('tests') }}"><span>Tests</span><small>Run repeatable tests</small></a>
     <a class="command-item" data-command-search="analytics charts throughput sla" href="{{ url_for('analytics') }}"><span>Analytics</span><small>Inspect live data</small></a>
     <a class="command-item" data-command-search="sessions lab session history results" href="{{ url_for('sessions') }}"><span>Sessions</span><small>Track a lab run</small></a>
+    {% if inventory_enabled is defined %}
     <a class="command-item" data-command-search="appliances inventory vendor license fortigate vm gateway" href="{{ url_for('inventory') }}"><span>Appliances</span><small>Inventory, health and routing</small></a>
     <a class="command-item" data-command-search="platform health simulator target agent status" href="{{ url_for('platform_health') }}"><span>Platform Health</span><small>Simulator and target status</small></a>
+    {% endif %}
     {% for link in global_links %}
     <a class="command-item" data-command-search="{{ link.label|lower }} wan controls degrade blackhole mtu restore" href="{{ url_for('overview') }}?wan={{ link.id }}">
       <span>Open {{ link.label }} controls</span><small>{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</small>
