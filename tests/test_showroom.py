@@ -18,6 +18,20 @@ STATE = {
 
 
 class SnapshotTests(unittest.TestCase):
+    def test_overall_requires_every_user_experience_target(self):
+        targets = {"experience_min": 80, "success_min_pct": 99, "interactive_p95_max_ms": 400}
+        for success, latency, expected in ((95.54, 1184, "fail"), (100, 1184, "fail"),
+                                           (95.54, 300, "fail"), (100, None, "unknown"),
+                                           (100, 300, "pass")):
+            with self.subTest(success=success, latency=latency):
+                diagnosis = {"traffic_generator": {"connected": True, "status": {"dem": {
+                    "requests": 100, "experience_score": 82, "availability_pct": success,
+                    "interactive_p95_ms": latency}}}}
+                result = netem.showroom_outcome(diagnosis, {"targets": targets})
+                self.assertEqual(result["experience"]["verdicts"]["experience"], expected)
+        diagnosis["traffic_generator"]["status"]["dem"]["scoring_complete"] = False
+        self.assertEqual(netem.showroom_outcome(diagnosis, {"targets": targets})["experience"]["verdicts"]["experience"], "unknown")
+
     def setUp(self):
         for name, value in (
             ("load_config", {"integration_token": "secret-token"}),

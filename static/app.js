@@ -350,9 +350,21 @@ window.NetEmUI = (() => {
       rows.forEach((row, index) => {
         const [actual, target, op, unit] = checks[index];
         row.tone = actual == null ? 'unknown' : (op === '≥' ? actual >= target : actual <= target) ? 'good' : 'bad';
-        const measurement = index === 0 ? 'The simulator combines request success and application response scores.' : index === 1 ? (100-actual).toFixed(2)+'% of simulated transactions failed.' : '95% of successful interactive application transactions finished within '+actual+' ms.'+blended;
+        const measurement = index === 0 ? 'The worst measured business-critical application sets the score, including deadlines and configured delivery-quality targets.'+(dem.limiting_application ? ' Limiting application: '+String(dem.limiting_application).replace(/_/g,' ')+'.' : '') : index === 1 ? (100-actual).toFixed(2)+'% of simulated transactions failed.' : '95% of successful interactive application transactions finished within '+actual+' ms.'+blended;
         row.explanation = actual == null ? (connected ? 'Waiting for the measurements required by the active site.' : missing) : 'Active site target: '+op+' '+target+unit+'. '+(row.tone === 'good' ? 'Target met. ' : 'Target missed. ')+measurement;
       });
+      const missed = rows.slice(1).filter(row => row.tone === 'bad');
+      if (missed.length) {
+        rows[0].tone = 'bad';
+        rows[0].explanation = 'Overall target missed: '+missed.map(row => row.key === 'success' ? 'request success' : 'interactive response time').join(' and ')+' missed the active site target. The numeric score cannot override these failures.';
+      } else if (rows[0].tone === 'good' && (dem.scoring_complete === false || rows.slice(1).some(row => row.tone === 'unknown'))) {
+        rows[0].tone = 'unknown';
+        rows[0].explanation = 'Waiting for all measurements required by the active site.';
+      }
+    }
+    if (rows[0].tone === 'good' && dem.scoring_complete === false) {
+      rows[0].tone = 'unknown';
+      rows[0].explanation = 'Required experience measurements are missing; an overall pass cannot be established.';
     }
     for (const row of rows) {
       const element = root.querySelector('[data-dem-indicator="'+row.key+'"]');
