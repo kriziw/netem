@@ -16,6 +16,7 @@ import shutil
 import socket
 import sqlite3
 import ssl
+import sys
 import subprocess
 import threading
 import time
@@ -28,6 +29,7 @@ from urllib import request as urllib_request
 import site_catalog
 from showroom import create_showroom_app
 import branding
+import appliance_platform
 
 from flask import (
     Flask,
@@ -694,6 +696,10 @@ def appliance_view(vendor, model=None, name=None, source=None, label=None):
 
 def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
     """The SD-WAN appliance being tested: from Settings, else the simulator's selected appliance."""
+    if "APPLIANCE_PLATFORM" in globals():
+        selected = APPLIANCE_PLATFORM.selected()
+        if selected:
+            return appliance_view(selected["vendor"], selected.get("model"), selected["name"], "inventory")
     cfg = load_config()
     setting = cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {}
     if setting.get("vendor") in SDWAN_VENDORS:
@@ -3632,6 +3638,7 @@ def start_background_workers():
     global TELEMETRY_THREAD, PROBE_THREAD, DIAGNOSIS_THREAD
     init_telemetry_db()
     BACKGROUND_STOP.clear()
+    APPLIANCE_PLATFORM.start()
     ensure_time_sync()
     if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
         TELEMETRY_THREAD = threading.Thread(
@@ -3839,6 +3846,8 @@ def build_session_report(session_id: str, end_time=None):
         "event_counts": event_counts,
         "event_count": len(events),
         "events": events[-250:],
+        "appliance_evidence": [event for event in events if event.get("kind") in
+                               ("appliance-readiness", "appliance-override", "appliance-selection", "appliance-health")],
     }
 
 
@@ -4914,6 +4923,8 @@ def redirect_after(default_endpoint):
 
 
 DOC_HELP_BY_ENDPOINT = {
+    "inventory": "appliances",
+    "platform_health": "appliances",
     "overview": "overview",
     "index": "overview",
     "tests": "tests",
@@ -4952,6 +4963,13 @@ def inject_nav():
                 ],
             },
             {
+                "label": "Infrastructure",
+                "items": [
+                    {"id": "inventory", "label": "Appliances", "endpoint": "inventory", "icon": "wan"},
+                    {"id": "platform_health", "label": "Platform Health", "endpoint": "platform_health", "icon": "shield"},
+                ],
+            },
+            {
                 "label": "System",
                 "items": [
                     {"id": "settings", "label": "Settings", "endpoint": "settings", "icon": "settings"},
@@ -4975,6 +4993,14 @@ def inject_nav():
 
 
 DOCS_PAGES = [
+    {
+        "slug": "appliances",
+        "title": "Appliances & Platform Health",
+        "category": "Configure",
+        "summary": "Persistent device inventory, FortiGate license/health monitoring and verified simulator routing.",
+        "template": "docs/articles/appliances.html",
+        "keywords": "inventory vm proxmox fortigate fortiflex license health monitor target agent routing override",
+    },
     {
         "slug": "getting-started",
         "title": "Getting started",
@@ -6760,6 +6786,11 @@ def ui_state_version():
     simulator = ((DIAGNOSIS_CACHE.get("payload") or {}).get("traffic_generator") or {})
     status = simulator.get("status") or {}
     parts.append([simulator.get("connected"), status.get("status"), (status.get("run") or {}).get("run_id")])
+    if "APPLIANCE_PLATFORM" in globals():
+        store = APPLIANCE_PLATFORM.store
+        parts.append([store.state("selection").get("id"),
+                      [(row["id"], row["revision"]) for row in store.rows()],
+                      [(alert["key"], alert["severity"], alert["acknowledged_at"]) for alert in store.alerts()]])
     return hashlib.sha256(json.dumps(parts, default=str).encode()).hexdigest()[:16]
 
 
@@ -7816,6 +7847,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
                         for item in impacts[:STORY_MAX_IMPACTS]]}
 
 
+APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
 showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE)
 
 

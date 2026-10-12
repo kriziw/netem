@@ -57,6 +57,8 @@
       </div>
 
       <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:13px">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        {% include "_appliance_override.html" %}
         <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
         <input type="hidden" name="return_to" value="scenarios">
         <label>Run against WAN</label>

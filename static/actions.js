@@ -71,7 +71,7 @@ window.NetEmActions = (() => {
     document.querySelector('main.page').replaceWith(page);
     document.getElementById('page-scripts').replaceWith(scripts);
     // The top bar's session, test and impairment pills and the impairment banner follow too.
-    for (const id of ['top-status', 'global-alert-slot']) {
+    for (const id of ['top-status', 'global-alert-slot', 'inventory-alerts']) {
       const fresh = next.getElementById(id), current = document.getElementById(id);
       if (fresh && current) current.replaceWith(fresh);
     }

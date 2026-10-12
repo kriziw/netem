@@ -12,6 +12,8 @@ The primary interaction model is:
 - **Tests** — guided resilience/security/diagnostic workflows plus advanced custom scenario definitions.
 - **Analytics** — persistent + live WAN telemetry, active measurements, expected SLA and injected/measured comparison.
 - **Sessions** — named validation runs and completed evidence reports.
+- **Appliances** — database-backed vendor inventory, independent health/license observations and verified selection of the device under test.
+- **Platform Health** — simulator service, target management agent and target data path, observed separately.
 - **Settings** — topology, access profiles, integrations, updates and system configuration.
 - **Help & documentation** — lower-sidebar searchable wiki plus contextual Guide links.
 

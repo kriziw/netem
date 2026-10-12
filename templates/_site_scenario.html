@@ -18,6 +18,7 @@
     </form>
     <div id="site-preview" aria-live="polite">Loading site preview…</div>
     <form method="post" action="{{ url_for('site_run') }}" id="site-run" data-connected="{{ 'true' if traffic_generator.connected else 'false' }}" data-busy="{{ 'true' if scenario_state.active or site_state.active else 'false' }}">
+      {% include "_appliance_override.html" %}
       <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
       <input type="hidden" name="return_to" value="tests">
       <div class="grid grid-3">
