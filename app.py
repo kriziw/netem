@@ -7,6 +7,7 @@ import hashlib
 import hmac
 import http.client
 import secrets
+import shlex
 import tempfile
 import json
 import math
@@ -558,7 +559,11 @@ def traffic_path_summary(path):
                 + (" · target answers" if target.get("ok") else "") + ".")
     if path.get("ready") is None:
         return path.get("message") or "Traffic path not checked."
-    return "Traffic path not ready: " + (path.get("message") or "simulated traffic would not cross the appliance.")
+    text = "Traffic path not ready: " + (path.get("message") or "simulated traffic would not cross the appliance.")
+    bridges = path.get("wan_bridges") or []
+    if bridges:
+        text += " NetEm found " + "; ".join(f"{problem['label']}: {', '.join(problem['issues'])}" for problem in bridges) + "."
+    return text
 
 
 def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS):
@@ -583,6 +588,7 @@ def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS):
                 payload = {"available": False, "ready": None, "repairable": False, "message": str(exc)}
         payload.setdefault("available", True)
         payload["configured"] = True
+    payload["wan_bridges"] = [{key: problem[key] for key in ("link_id", "label", "issues")} for problem in wan_bridge_snapshot()]
     payload["summary"] = traffic_path_summary(payload)
     payload["checked_at"] = time.time()
     TRAFFIC_PATH_CACHE.update(checked=time.monotonic(), payload=payload)
@@ -615,6 +621,7 @@ def repair_traffic_path(wait=REPAIR_WAIT_SECONDS):
 def ensure_traffic_path(context):
     """Before NetEm starts simulated users: make sure their traffic will cross the appliance, repairing it if the
     simulator can. Unknown readiness (older simulator, connection trouble) does not block: the start reports it."""
+    check_wan_bridges()
     readiness = traffic_path_readiness(max_age=0)
     if readiness.get("ready") is not False or not readiness.get("available"):
         return readiness
@@ -1917,6 +1924,151 @@ def delete_bridge(br_name: str):
     run_cmd(f"{IP} link delete {br_name} type bridge")
 
 
+# ---------- WAN bridge watchdog ----------
+#
+# Each WAN is a Linux bridge joining the appliance side (inner) and the provider side (outer).
+# When a port drops out of its bridge (a failed restore, or another tool reconfiguring the
+# VM's interfaces), the WAN passes nothing while its shaping still looks applied. NetEm checks
+# the bridges every few seconds, puts ports back while it manages the bridges (Setup →
+# Restore WAN bridges), and reports what it found in the diagnosis and the traffic path check.
+
+BRIDGE_CHECK_SECONDS = 10
+BRIDGE_REPAIR_BACKOFF_SECONDS = 60
+BRIDGE_LOCK = threading.Lock()
+BRIDGE_STATE = {"checked_at": None, "problems": [], "attempts": {}, "reported": {}}
+
+
+def wan_bridge_problems(cfg):
+    """Configured WANs whose bridge is missing or down, or whose ports are missing, down, without
+    a link or outside the bridge. None when the interfaces cannot be read."""
+    rc, out, _err = run_cmd(f"{IP} -j link show")
+    if rc != 0:
+        return None
+    try:
+        interfaces = {item.get("ifname"): item for item in json.loads(out or "[]")}
+    except (ValueError, AttributeError):
+        return None
+    problems = []
+    for link in cfg.get("wan_links", []):
+        bridge = link.get("bridge")
+        ports = [dev for dev in (link.get("inner"), link.get("outer")) if dev]
+        if not bridge or not ports:
+            continue
+        state = {"bridge_missing": bridge not in interfaces, "bridge_down": False,
+                 "missing": [], "outside": [], "down": [], "no_link": []}
+        if not state["bridge_missing"]:
+            state["bridge_down"] = "UP" not in (interfaces[bridge].get("flags") or [])
+        for dev in ports:
+            item = interfaces.get(dev)
+            if item is None:
+                state["missing"].append(dev)
+                continue
+            flags = item.get("flags") or []
+            if item.get("master") != bridge:
+                state["outside"].append(dev)
+            if "UP" not in flags:
+                state["down"].append(dev)
+            elif "LOWER_UP" not in flags:
+                state["no_link"].append(dev)
+        issues = ([f"bridge {bridge} is missing"] if state["bridge_missing"] else []) + \
+                 ([f"bridge {bridge} is down"] if state["bridge_down"] else []) + \
+                 [f"{dev} is missing" for dev in state["missing"]] + \
+                 [f"{dev} is not in {bridge}" for dev in state["outside"]] + \
+                 [f"{dev} is down" for dev in state["down"]] + \
+                 [f"{dev} has no link" for dev in state["no_link"]]
+        if issues:
+            # A missing interface or a port without a link needs the VM's NICs looked at; the rest NetEm can fix.
+            fixable = state["bridge_missing"] or state["bridge_down"] or bool(state["outside"] or state["down"])
+            problems.append(dict(state, link_id=link.get("id"), label=link.get("name") or link.get("id"),
+                                 bridge=bridge, ports=ports, issues=issues, fixable=fixable))
+    return problems
+
+
+def repair_wan_bridge(problem):
+    """Put a WAN bridge back together without disturbing ports that are already in place."""
+    bridge = problem["bridge"]
+    errors = []
+
+    def step(command):
+        rc, _out, err = run_cmd(command)
+        if rc != 0:
+            errors.append(err or command)
+
+    if problem["bridge_missing"]:
+        step(f"{IP} link add name {shlex.quote(bridge)} type bridge")
+    for dev in problem["ports"]:
+        if dev in problem["missing"]:
+            continue
+        if problem["bridge_missing"] or dev in problem["outside"]:
+            step(f"{IP} link set {shlex.quote(dev)} master {shlex.quote(bridge)}")
+        if dev in problem["down"]:
+            step(f"{IP} link set {shlex.quote(dev)} up")
+    step(f"{IP} link set {shlex.quote(bridge)} up")
+    return errors
+
+
+def check_wan_bridges():
+    """Find broken WAN bridges, repair them while NetEm manages bridges, and log each change once.
+    The telemetry loop and a starting test may both call it; one check runs at a time."""
+    with BRIDGE_LOCK:
+        return _check_wan_bridges()
+
+
+def _check_wan_bridges():
+    cfg = load_config()
+    problems = wan_bridge_problems(cfg)
+    if problems is None:
+        return None
+    manage = cfg.get("restore_bridges_on_startup", True)
+    now = time.monotonic()
+    attempted = []
+    for problem in problems:
+        last = BRIDGE_STATE["attempts"].get(problem["link_id"])
+        if not manage or not problem["fixable"] or (last is not None and now - last < BRIDGE_REPAIR_BACKOFF_SECONDS):
+            continue
+        BRIDGE_STATE["attempts"][problem["link_id"]] = now
+        errors = repair_wan_bridge(problem)
+        log_event("bridge", f"{problem['label']}: bridge broken ({'; '.join(problem['issues'])}), repairing",
+                  link_id=problem["link_id"], issues=problem["issues"], errors=errors[:4])
+        attempted.append(problem)
+    if attempted:
+        problems = wan_bridge_problems(cfg) or []
+    remaining = {problem["link_id"]: problem for problem in problems}
+    for problem in attempted:
+        if problem["link_id"] not in remaining:
+            BRIDGE_STATE["attempts"].pop(problem["link_id"], None)
+            log_event("bridge", f"{problem['label']}: bridge repaired", link_id=problem["link_id"])
+    # Problems NetEm leaves alone are logged when they appear, change or clear.
+    reported = BRIDGE_STATE["reported"]
+    for link_id, problem in remaining.items():
+        if reported.get(link_id) != problem["issues"] and not any(item["link_id"] == link_id for item in attempted):
+            log_event("bridge", f"{problem['label']}: bridge broken ({'; '.join(problem['issues'])})",
+                      link_id=link_id, issues=problem["issues"])
+        reported[link_id] = problem["issues"]
+    for link_id in [link_id for link_id in reported if link_id not in remaining]:
+        reported.pop(link_id)
+    BRIDGE_STATE.update(checked_at=time.time(), problems=problems)
+    return problems
+
+
+def wan_bridge_snapshot():
+    with BRIDGE_LOCK:
+        return list(BRIDGE_STATE["problems"])
+
+
+def bridge_finding(problems):
+    if not problems:
+        return None
+    labels = [problem["label"] for problem in problems]
+    names = labels[0] if len(labels) == 1 else ", ".join(labels[:-1]) + " and " + labels[-1]
+    return {"source": "platform", "id": "wan_bridge", "severity": "bad",
+            "title": f"{names} pass{'es' if len(labels) == 1 else ''} no traffic: {'its bridge is' if len(labels) == 1 else 'their bridges are'} broken",
+            "detail": "; ".join(f"{problem['label']}: {', '.join(problem['issues'])}" for problem in problems) + ".",
+            "wans": [], "unattributed": 0, "candidates": [],
+            "hint": "NetEm puts ports back into their bridge while Setup → Restore WAN bridges is on. "
+                    "A missing interface or one without a link needs its virtual NIC connected in Proxmox."}
+
+
 def restore_runtime_state():
     """
     Restore optional runtime state from config.json.
@@ -2420,9 +2572,16 @@ def telemetry_worker():
     if removed:
         note_clock_step(0.0, removed)
     next_prune = time.monotonic() + 300
+    next_bridge_check = time.monotonic() + BRIDGE_CHECK_SECONDS
     wall, clock = time.time(), time.monotonic()
     while not BACKGROUND_STOP.is_set():
         started = time.monotonic()
+        if started >= next_bridge_check:
+            next_bridge_check = started + BRIDGE_CHECK_SECONDS
+            try:
+                check_wan_bridges()
+            except Exception as exc:
+                log_event("bridge", "WAN bridge check failed", error=str(exc)[:240])
         try:
             # Wall time should advance with the monotonic clock; a difference is a clock step.
             step = (time.time() - wall) - (time.monotonic() - clock)
@@ -3097,6 +3256,9 @@ def build_diagnosis():
     clock = clock_finding(platform_clock_status())
     if clock:
         findings.append(clock)
+    bridges = bridge_finding(wan_bridge_snapshot())
+    if bridges:
+        findings.insert(0, bridges)
     track_diagnosis_events(findings)
     return {
         "timestamp": time.time(),
