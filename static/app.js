@@ -493,13 +493,13 @@ window.NetEmUI = (() => {
     set('[data-run-name]', scenario.scenario_name || 'Running test');
     // Announced on the showroom for a few seconds before it changes anything.
     const announced = Boolean(scenario.intro);
-    set('[data-run-phase]', announced ? 'shown on the showroom as coming up'
+    set('[data-run-phase]', scenario.preparing_workload ? 'waiting for the executing agent' : announced ? 'shown on the showroom as coming up'
       : count ? (scenario.paused ? 'Paused in ' : '') + 'phase ' + ((scenario.phase_index ?? 0) + 1) + ' of ' + count + ' · ' + (scenario.phase || '') : '');
     set('[data-run-step]', announced ? 'starts in ' + Math.max(0, Math.ceil(Number(scenario.starts_in_s) || 0)) + ' s' : scenario.step_label || 'running');
     set('[data-run-condition]', scenario.condition?.description ? 'Waiting for ' + scenario.condition.description +
       (scenario.condition.observed != null ? ' · observed ' + scenario.condition.observed : '') : '');
     const countdown = phaseCountdown(scenario);
-    set('[data-run-time]', announced ? 'About ' + clock(scenario.planned_s) + ' once it starts' : clock(scenario.elapsed_s) + ' of about ' + clock(scenario.planned_s) +
+    set('[data-run-time]', scenario.preparing_workload ? 'Phase clock starts when traffic is running.' : announced ? 'About ' + clock(scenario.planned_s) + ' once it starts' : clock(scenario.elapsed_s) + ' of about ' + clock(scenario.planned_s) +
       (countdown ? ' · ' + countdown : '') +
       (scenario.paused ? ' · paused, holding the current phase' : '') + (scenario.paused_total_s ? ' · paused ' + clock(scenario.paused_total_s) + ' so far' : ''));
     const form = root.querySelector('[data-run-pause-form]');
@@ -507,7 +507,7 @@ window.NetEmUI = (() => {
       form.setAttribute('action', scenario.paused ? root.dataset.resumeUrl : root.dataset.pauseUrl);
       set('[data-run-pause]', scenario.paused ? 'Resume' : 'Pause phase');
       const button = root.querySelector('[data-run-pause]');
-      if (button) button.disabled = announced;
+      if (button) button.disabled = announced || scenario.preparing_workload;
     }
     const track = root.querySelector('[data-run-phases]');
     if (track) {

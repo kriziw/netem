@@ -12,6 +12,7 @@
 </div>
 
 <div class="grid grid-3">
+  <a class="card" href="{{ url_for('simulator_controller',panel_path='') }}"><div class="card-head"><div><div class="card-title">Simulator controls</div><div class="card-sub">NetEm commands the executing agent</div></div></div><div class="card-pad">Workloads · network setup · experience targets · updates · target management</div></a>
   <a class="card" href="{{ url_for('setup') }}">
     <div class="card-head"><div><div class="card-title">Topology &amp; interfaces</div><div class="card-sub">Management NIC, transparent WAN bridges and startup restore</div></div><span class="status info">{{ link_count }} WAN</span></div>
     <div class="card-pad">

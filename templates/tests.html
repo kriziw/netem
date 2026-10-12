@@ -23,6 +23,7 @@
 {% if last_test and not scenario_state.active %}{{ test_summary(last_test) }}{% endif %}
 
 <div class="section-title">Generic tests</div>
+<p class="field-help">NetEm starts the active site's workload when the simulator is idle (Office, 50 users if no site is saved), confirms active users before starting the phase clock, and stops only traffic started by this test. Existing workloads stay running. Configure the executing agent under <a href="{{ url_for('simulator_controller',panel_path='settings/network-setup') }}">Simulator controls</a>.</p>
 <div class="test-grid">
   {% for scenario in scenarios if not scenario.id.startswith('custom_') %}
   <section class="test-card {% if selected_scenario == scenario.id %}selected{% endif %}" id="test-{{ scenario.id }}">

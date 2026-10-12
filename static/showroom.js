@@ -68,7 +68,7 @@
 
   // Between snapshots the clocks keep running locally, so countdowns tick every second.
   function advance(scenario, seconds) {
-    if (!scenario || !scenario.active || scenario.paused || !(seconds > 0)) return scenario;
+    if (!scenario || !scenario.active || scenario.paused || scenario.preparing_workload || !(seconds > 0)) return scenario;
     const moved = Object.assign({}, scenario);
     if (number(moved.elapsed_s)) moved.elapsed_s += seconds;
     if (number(moved.phase_elapsed_s)) moved.phase_elapsed_s += seconds;
@@ -314,7 +314,7 @@
       : plan.active ? plan.label || 'Site test plan' : 'Live network observation'}`);
     const phases = scenario.active ? phaseTimeline(scenario) : [];
     text('demo-stage', scenario.active
-      ? [scenario.link && `On ${scenario.link}`, phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}: ${scenario.phase}` : null,
+      ? [scenario.link && `On ${scenario.link}`, scenario.preparing_workload ? 'Waiting for traffic execution' : phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}: ${scenario.phase}` : null,
         scenario.step_label].filter(Boolean).join(' · ')
       : showReport(latest) ? `Last test: ${latest.last_test.name} ${latest.last_test.result || 'finished'} · report on the right`
       : plan.result ? `Last site test plan: ${plan.result}` : 'Waiting for the next test');
