@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.18.1](https://github.com/kriziw/netem/compare/v0.18.0...v0.18.1) (2026-10-12)
+
+
+### Bug Fixes
+
+* require complete business experience targets for an overall pass ([#62](https://github.com/kriziw/netem/issues/62)) ([180e57e](https://github.com/kriziw/netem/commit/180e57ea75c545b21168dc58fe292d2cb5089a78))
+
 ## [0.18.0](https://github.com/kriziw/netem/compare/v0.17.0...v0.18.0) (2026-10-12)
 
 
