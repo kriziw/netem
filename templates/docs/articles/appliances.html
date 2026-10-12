@@ -1,0 +1,12 @@
+<h2>Appliances and Platform Health</h2>
+<p>Use Appliances to add vendor VMs or physical devices to the persistent inventory. Use Platform Health for the simulator service, independent target management agent and target data path.</p>
+<h3>Add your FortiGate</h3>
+<ol><li>Enter a name, Fortinet vendor, VM type, model and FortiOS version. Proxmox host/VM ID are optional labels.</li><li>Configure the management HTTPS address and a read-only FortiOS API token. Use a trusted certificate or verified SHA-256 pin.</li><li>Keep <code>vm</code> as the required entitlement for FortiFlex. Add service-license keys only when a test needs those subscriptions.</li><li>Enter the simulator data interface, appliance LAN gateway and controlled target address.</li><li>Choose Inspect, then Verify &amp; select. The simulator verifies the path and retains successful selections across reboot.</li></ol>
+<h3>Monitoring</h3>
+<p>Vendor checks run every 15 minutes, platform checks every 30 seconds, and test starts refresh appliance evidence. License-expiry warnings use 30/14/7-day bands when the API returns a date. Unknown fields, unsupported endpoints and unavailable measurements never count as healthy.</p>
+<p>FortiFlex is observed through the FortiGate's reported VM entitlement. NetEm does not renew the license or manage the FortiFlex cloud account. Check the first observation against your VM's dashboard.</p>
+<h3>Readiness and overrides</h3>
+<p>Confirmed critical health and expired/invalid required licenses block test starts. Unknown status warns. Expand Appliance readiness override in a test's start form and enter a reason to run despite a confirmed failure. The override applies to that request and is retained in session evidence. It never overrides an unfinished routing job.</p>
+<p>Appliance switching is blocked during tests, plans and workloads. A failed verification restores the prior managed route. Expected WAN impairments do not mean the target management agent is offline.</p>
+<h3>Other vendors and physical devices</h3>
+<p>All listed vendors support inventory and routing. FortiGate is the first health/license adapter; others explicitly show unsupported monitoring. Physical appliances use separate management and traffic gateway addresses. Additional ISP-router requirements need a topology decision.</p>

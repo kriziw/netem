@@ -31,6 +31,8 @@
     <div class="test-card-desc">{{ scenario.description }}</div>
     <div class="test-card-meta">~{{ "%.1f"|format(scenario.planned_s / 60) }} min · {{ scenario.phases|join(" → ") }} · restores baseline when complete</div>
     <form method="post" action="{{ url_for('lab_scenario_start') }}" class="test-card-actions">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      {% include "_appliance_override.html" %}
       <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
       <input type="hidden" name="return_to" value="tests">
       <select name="link_id" required>
@@ -137,6 +139,7 @@
     {% else %}
     <div class="section-title">Start workload</div>
     <form method="post" action="{{ url_for('traffic_generator_start') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      {% include "_appliance_override.html" %}
       <input type="hidden" name="return_to" value="tests">
       <div class="form-grid">
         <div>
@@ -245,6 +248,8 @@
         {% endfor %}
       </div>
       <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:12px;display:flex;gap:8px">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        {% include "_appliance_override.html" %}
         <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
         <input type="hidden" name="return_to" value="tests">
         <select name="link_id" required>{% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}</select>

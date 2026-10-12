@@ -38,9 +38,14 @@ The interface uses progressive disclosure so the full feature set is available w
 - **Analytics** — rolling live throughput/PPS/impairment charts, generic SLA evaluation and persistent event history.
 - **Sessions** — named validation runs that correlate runtime events across tests and manual actions.
 - **Settings** — topology, access profiles, integrations, release/update management and other appliance-level configuration.
+- **Appliances** — persistent VM/physical-device inventory, FortiGate health and license monitoring, and verified selection of the appliance under test.
+- **Platform Health** — independent simulator service, target management-agent and selected traffic-path observations.
 - **Help & documentation** — searchable in-app wiki, moved out of primary navigation and available from the lower sidebar plus contextual Guide links.
 
 A global **Activity** rail is available from every page, and **Ctrl+K** opens a command palette for fast navigation and WAN access. The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
+
+See [Appliance inventory](docs/APPLIANCE-INVENTORY.md) for FortiOS/FortiFlex setup,
+monitoring, readiness overrides and simulator compatibility.
 
 ### Showroom display
 

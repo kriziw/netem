@@ -78,6 +78,7 @@
         <div class="breadcrumb"><span>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
+        <span id="inventory-alerts">{% if inventory_summary.critical %}<a class="top-pill alert" href="{{ url_for('inventory') }}">{{ inventory_summary.critical }} appliance alert{{ '' if inventory_summary.critical == 1 else 's' }}</a>{% elif inventory_summary.warnings %}<a class="top-pill" href="{{ url_for('inventory') }}">{{ inventory_summary.warnings }} appliance warning{{ '' if inventory_summary.warnings == 1 else 's' }}</a>{% endif %}</span>
         {% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
         {% endif %}
@@ -151,6 +152,8 @@
     <a class="command-item" data-command-search="tests scenarios brownout failover security capture" href="{{ url_for('tests') }}"><span>Tests</span><small>Run repeatable tests</small></a>
     <a class="command-item" data-command-search="analytics charts throughput sla" href="{{ url_for('analytics') }}"><span>Analytics</span><small>Inspect live data</small></a>
     <a class="command-item" data-command-search="sessions lab session history results" href="{{ url_for('sessions') }}"><span>Sessions</span><small>Track a lab run</small></a>
+    <a class="command-item" data-command-search="appliances inventory vendor license fortigate vm gateway" href="{{ url_for('inventory') }}"><span>Appliances</span><small>Inventory, health and routing</small></a>
+    <a class="command-item" data-command-search="platform health simulator target agent status" href="{{ url_for('platform_health') }}"><span>Platform Health</span><small>Simulator and target status</small></a>
     {% for link in global_links %}
     <a class="command-item" data-command-search="{{ link.label|lower }} wan controls degrade blackhole mtu restore" href="{{ url_for('overview') }}?wan={{ link.id }}">
       <span>Open {{ link.label }} controls</span><small>{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</small>
@@ -273,6 +276,7 @@
 <script src="{{ url_for('static', filename='actions.js') }}"></script>
 <script src="{{ url_for('static', filename='update-screen.js') }}"></script>
 <script src="{{ url_for('static', filename='simulator-dialog.js') }}"></script>
+<script src="{{ url_for('static', filename='inventory.js') }}"></script>
 <template id="page-scripts">{% block scripts %}{% endblock %}</template>
 <script>NetEmActions.mount();</script>
 </body>
