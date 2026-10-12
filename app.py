@@ -7813,6 +7813,15 @@ def showroom_outcome(diagnosis, site_plan):
     has_data = bool(dem.get("requests"))
     score, success, interactive = (dem.get(key) if has_data else None
                                    for key in ("experience_score", "availability_pct", "interactive_p95_ms"))
+    verdicts = {
+        "experience": showroom_verdict(score, targets.get("experience_min")),
+        "success": showroom_verdict(success, targets.get("success_min_pct")),
+        "interactive": showroom_verdict(interactive, targets.get("interactive_p95_max_ms"), higher_is_better=False),
+    }
+    if "fail" in verdicts.values():
+        verdicts["experience"] = "fail"
+    elif "unknown" in verdicts.values() or dem.get("scoring_complete") is False:
+        verdicts["experience"] = "unknown"
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -7828,11 +7837,7 @@ def showroom_outcome(diagnosis, site_plan):
         "experience": {
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
-            "verdicts": {
-                "experience": showroom_verdict(score, targets.get("experience_min")),
-                "success": showroom_verdict(success, targets.get("success_min_pct")),
-                "interactive": showroom_verdict(interactive, targets.get("interactive_p95_max_ms"), higher_is_better=False),
-            },
+            "verdicts": verdicts,
         },
         "findings": [{
             "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),

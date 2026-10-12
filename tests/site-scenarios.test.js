@@ -72,6 +72,24 @@ test('active site targets judge DEM and late steering and require interactive ti
   root.innerHTML = ['experience','success','response'].map(key => `<div data-dem-indicator="${key}"><span data-dem-symbol></span><span data-dem-value></span><span data-dem-status></span><p data-dem-explanation></p></div>`).join('');
   dom.window.NetEmUI.renderDemSummary(root,{requests:100,experience_score:85,availability_pct:99.5,interactive_p95_ms:300},true,{experience_min:90,success_min_pct:99.9,interactive_p95_max_ms:200});
   assert.equal(root.querySelectorAll('.bad').length,3);
+  const targets = {experience_min:80,success_min_pct:99,interactive_p95_max_ms:400};
+  for (const sample of [
+    {availability_pct:95.54,interactive_p95_ms:1184},
+    {availability_pct:95.54,interactive_p95_ms:300},
+    {availability_pct:100,interactive_p95_ms:1184}
+  ]) {
+    dom.window.NetEmUI.renderDemSummary(root,{requests:100,experience_score:82,...sample},true,targets);
+    const overall = root.querySelector('[data-dem-indicator="experience"]');
+    assert.ok(overall.classList.contains('bad'));
+    assert.equal(overall.querySelector('[data-dem-status]').textContent,'Target missed');
+    assert.match(overall.querySelector('[data-dem-explanation]').textContent,/Overall target missed/);
+  }
+  dom.window.NetEmUI.renderDemSummary(root,{requests:100,experience_score:100,availability_pct:100},true,targets);
+  assert.ok(root.querySelector('[data-dem-indicator="experience"]').classList.contains('unknown'));
+  dom.window.NetEmUI.renderDemSummary(root,{requests:100,experience_score:100,availability_pct:100,interactive_p95_ms:300},true,targets);
+  assert.ok(root.querySelector('[data-dem-indicator="experience"]').classList.contains('good'));
+  dom.window.NetEmUI.renderDemSummary(root,{requests:100,experience_score:100,availability_pct:100,interactive_p95_ms:300,scoring_complete:false},true,targets);
+  assert.ok(root.querySelector('[data-dem-indicator="experience"]').classList.contains('unknown'));
   dom.window.NetEmUI.renderDemSummary(root,{requests:100,p95_ms:100},true,{experience_min:90,success_min_pct:99.9,interactive_p95_max_ms:200});
   assert.ok(root.querySelector('[data-dem-indicator="response"]').classList.contains('unknown'));
   const html = dom.window.NetEmUI.steeringHtml({classes:[{label:'Voice',severity:'good',verdict:'steered',shares:[],text:'Moved',reactions:[{was_used:true,steered_after_seconds:15,label:'WAN1'}]}]}, {steering_max_s:10});
