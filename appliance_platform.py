@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import threading
 import time
+import ipaddress
+import uuid
 
 from flask import abort, flash, g, jsonify, redirect, render_template, request, url_for
 
@@ -39,7 +41,7 @@ class Platform:
     def check_platform(self):
         with self.platform_checks:
             result = {"checked_at": time.time(), "configured": self.configured(), "connected": False,
-                      "simulator": {}, "network": {}, "path": {}, "target_management": {}, "errors": []}
+                      "simulator": {}, "network": {}, "path": {}, "target_management": {}, "path_health": {}, "errors": []}
             if result["configured"]:
                 for name, path in (("simulator", "/api/v1/health"), ("network", "/api/v1/network"),
                                    ("path", "/api/v1/network/readiness"), ("target_management", "/api/v1/target/health")):
@@ -53,13 +55,18 @@ class Platform:
                 if result["network"]:
                     previous = self.store.state("selection")
                     selection = {"id": match["id"] if match else None, "checked_at": time.time(),
-                                 "route": {key: selected.get(key) for key in ("interface", "gateway", "target")},
+                                 "mode": selected.get("mode", "appliance"), "name": selected.get("name"), "path_id": selected.get("id"),
+                                 "route": {key: selected.get(key) for key in ("interface", "gateway", "target", "source", "wan_id", "policy_table")},
                                  "active": bool((result["network"].get("route_health") or {}).get("active"))}
                     self.store.state("selection", selection)
-                    if previous.get("id") != selection["id"]:
+                    if (previous.get("id"), previous.get("path_id"), previous.get("mode")) != (selection["id"], selection["path_id"], selection["mode"]):
                         self.netem.APPLIANCE_CACHE.update(checked=None, payload=None)
                         self.netem.log_event("appliance-selection", "Selected traffic appliance changed",
                                              appliance_id=selection["id"], route=selection["route"])
+                try:
+                    result["path_health"] = self.netem.traffic_generator_request("/api/v1/network/paths/health", timeout=12)
+                except RuntimeError:
+                    result["path_health"] = {"paths": [], "message": "Independent path checks unavailable; update/configure the simulator."}
             old = self.store.state("platform")
             # Report connectivity transitions once, rather than on every polling cycle.
             if old.get("connected") != result["connected"] and result["configured"]:
@@ -69,7 +76,9 @@ class Platform:
 
     @staticmethod
     def route_matches(row, selected):
-        return bool(row.get("gateway") and all(row.get(key) == selected.get(key) for key in ("interface", "gateway", "target")))
+        return bool(row.get("gateway") and row.get("mode", "appliance") == selected.get("mode", "appliance")
+                    and (not row.get("source") or row["source"] == selected.get("source"))
+                    and all(row.get(key) == selected.get(key) for key in ("interface", "gateway", "target")))
 
     def snapshot(self):
         rows = self.store.rows()
@@ -91,7 +100,7 @@ class Platform:
         alerts = [dict(alert, appliance_name=names.get(alert["appliance_id"], "Archived appliance")) for alert in self.store.alerts()]
         return {"appliances": rows, "selection": selection, "platform": platform,
                 "platform_stale": platform_stale, "selection_verified": selection_verified,
-                "alerts": alerts, "interval_s": INTERVAL}
+                "alerts": alerts, "interval_s": INTERVAL, "traffic_paths": self.store.state("traffic_paths").get("paths", [])}
 
     def selected(self):
         return self.store.get(self.store.state("selection").get("id"))
@@ -112,7 +121,8 @@ class Platform:
         self.check_platform()
         self.ensure_idle()
         if self.route_matches(row, self.store.state("platform").get("network", {}).get("selected") or {}):
-            if self.store.state("selection").get("active"):
+            if (self.store.state("selection").get("active")
+                    and (self.store.state("platform").get("network", {}).get("selected") or {}).get("policy_table")):
                 return "This appliance's route is already active."
         remote_id = row.get("simulator_id") or row["id"]
         payload = {key: row[key] for key in ("name", "model", "firmware", "interface", "gateway", "target")}
@@ -126,6 +136,9 @@ class Platform:
             raise
         job = self.netem.traffic_generator_request("/api/v1/network/select", method="POST",
                                                   payload={"appliance_id": remote_id}, timeout=5)
+        return self.wait_selection(job, row, wait)
+
+    def wait_selection(self, job, row, wait=35, selecting=True):
         if not job.get("id"):
             raise ValueError("Simulator did not return a routing job ID. Check Platform Health.")
         self.store.state("pending", {"id": job["id"], "appliance_id": row["id"], "started_at": time.time()})
@@ -144,16 +157,75 @@ class Platform:
                 raise ValueError("Route verification failed. The simulator attempted to restore the previous route; inspect Platform Health.")
             if state.get("state") == "completed":
                 self.store.state("pending", {})
+                if not selecting:
+                    return "Path configured and verified. Independent health checks are active; workload selection is unchanged."
                 if (self.route_matches(row, platform["network"].get("selected") or {})
                         and (platform["network"].get("route_health") or {}).get("active")
                         and platform["path"].get("ready") is True):
                     self.netem.TRAFFIC_PATH_CACHE.update(checked=None, payload=None)
-                    return "Appliance selected. Target path verified; the simulator restores this selection after reboot."
+                    return "Workload path selected and verified. Full HTTP/UDP traffic is pinned here; independent health checks keep their own paths."
                 raise ValueError("Routing job completed but the target path is not verified. Check Platform Health.")
         raise ValueError("Route verification is still pending. Check Platform Health before starting tests.")
 
+    def configure_path(self, form):
+        definition = validate(dict(form, vendor="other", kind="physical"), self.netem.SDWAN_VENDORS)
+        mode = form.get("mode")
+        if mode not in ("direct_netem", "direct_baseline") or not definition["gateway"]:
+            raise ValueError("Choose a direct path mode, data interface and router gateway.")
+        wan_id = form.get("wan_id", "") if mode == "direct_netem" else ""
+        if mode == "direct_netem" and not self.netem.get_link(self.netem.load_config(), wan_id):
+            raise ValueError("Choose the NetEm WAN this path is physically wired through.")
+        source = str(form.get("source") or "").strip()
+        if source:
+            try:
+                source = str(ipaddress.IPv4Address(source))
+            except ValueError as exc:
+                raise ValueError("Source must be an IPv4 address assigned to that data interface.") from exc
+        paths = self.store.state("traffic_paths").get("paths", [])
+        if len(paths) >= 8:
+            raise ValueError("Up to eight traffic paths can be configured.")
+        row = {key: definition[key] for key in ("name", "gateway", "interface", "target")}
+        row.update(id=uuid.uuid4().hex, mode=mode, wan_id=wan_id, source=source)
+        self.check_platform()
+        self.ensure_idle()
+        payload = {key: value for key, value in row.items() if key != "id"}
+        try:
+            job = self.netem.traffic_generator_request("/api/v1/network/paths/" + row["id"], method="PUT", payload=payload, timeout=5)
+        except RuntimeError as exc:
+            raise ValueError("Path registration failed. Update the simulator for purpose-based paths, and verify the NIC addresses and router return routes.") from exc
+        self.store.state("traffic_paths", {"paths": paths + [row]})
+        message = self.wait_selection(job, row, selecting=False)
+        self.netem.log_event("traffic-path", "Independent traffic path configured", traffic_path=row)
+        return message
+
+    def select_path(self, path_id):
+        row = next((row for row in self.store.state("traffic_paths").get("paths", []) if row["id"] == path_id), None)
+        if not row:
+            raise ValueError("Choose a configured traffic path.")
+        self.check_platform()
+        self.ensure_idle()
+        job = self.netem.traffic_generator_request("/api/v1/network/paths/select", method="POST", payload={"id": path_id}, timeout=5)
+        return self.wait_selection(job, row)
+
+    def remove_path(self, path_id):
+        paths = self.store.state("traffic_paths").get("paths", [])
+        row = next((row for row in paths if row["id"] == path_id), None)
+        if not row:
+            raise ValueError("Choose a configured path.")
+        current = self.check_platform()
+        self.ensure_idle()
+        if (current.get("network", {}).get("selected") or {}).get("id") == path_id:
+            raise ValueError("Choose another workload path before removing this one.")
+        remote = self.netem.traffic_generator_request("/api/v1/network/paths", timeout=5)
+        if any(path["id"] == path_id for path in remote.get("paths", [])):
+            job = self.netem.traffic_generator_request("/api/v1/network/paths/" + path_id, method="DELETE", timeout=5)
+            self.wait_selection(job, row, selecting=False)
+        self.store.state("traffic_paths", {"paths": [path for path in paths if path["id"] != path_id]})
+        self.netem.log_event("traffic-path", "Unused direct path removed", traffic_path=row)
+        return "Unused path removed; workload/management routes remain unchanged."
+
     def preflight(self, form):
-        if not self.store.rows():
+        if not self.store.rows() and not self.store.state("traffic_paths"):
             return
         platform = self.check_platform()
         pending = self.store.state("pending")
@@ -163,6 +235,24 @@ class Platform:
             pending = {}
         if pending or platform.get("network", {}).get("busy"):
             raise ValueError("Wait for appliance route verification to finish before starting a test.")
+        selected = platform.get("network", {}).get("selected") or {}
+        mode = selected.get("mode", self.store.state("selection").get("mode", "appliance"))
+        if mode != "appliance":
+            if not platform.get("path", {}).get("ready"):
+                raise ValueError("The direct path is not verified. Check Platform Health before starting traffic.")
+            if request.endpoint in ("site_run", "lab_scenario_start"):
+                if mode == "direct_baseline":
+                    raise ValueError("Clean baseline bypasses NetEm. Run the full workload here; choose a direct NetEm path to tune WAN scenarios.")
+                if request.endpoint == "site_run":
+                    raise ValueError("Site plans include appliance/multi-WAN behavior. Use generic/custom tests on the directly wired NetEm WAN.")
+                if form.get("link_id") != selected.get("wan_id"):
+                    raise ValueError("Run the scenario on the WAN assigned to this direct NetEm path.")
+                scenario = next((item for item in self.netem.get_scenarios(self.netem.load_config()) if item["id"] == form.get("scenario_id")), {})
+                if any((step.get("condition") or {}).get("type") == "steering" for step in scenario.get("steps", [])):
+                    raise ValueError("Appliance steering assertions are not applicable on a direct-router path.")
+            self.netem.log_event("traffic-path", f"{mode}: {selected.get('name')} workload/test preflight verified", traffic_path=selected,
+                                 scope="generator/router/target" if mode == "direct_baseline" else "generator/NetEm/router/target")
+            return
         row = self.selected()
         if row:
             row = self.check_appliance(row)
@@ -222,7 +312,7 @@ def init_app(app, netem):
     platform = Platform(netem)
     app.extensions["appliance_platform"] = platform
     mutating = {"inventory_save", "inventory_archive", "inventory_check", "inventory_select", "inventory_import",
-                "inventory_acknowledge", "platform_check"}
+                "inventory_acknowledge", "platform_check", "traffic_path_save", "traffic_path_select", "traffic_path_remove"}
 
     @app.before_request
     def protect_inventory():
@@ -232,7 +322,7 @@ def init_app(app, netem):
         import hmac
         from flask import session
         supplied, expected = request.form.get("integration_csrf", ""), session.get("integration_csrf", "")
-        require_token = request.endpoint in mutating or bool(platform.store.rows())
+        require_token = request.endpoint in mutating or bool(platform.store.rows()) or bool(platform.store.state("traffic_paths"))
         if require_token and (not supplied or not expected or not hmac.compare_digest(supplied.encode(), expected.encode())):
             abort(400, "Invalid form token. Reload the page and retry.")
         platform.operations.acquire()
@@ -269,7 +359,8 @@ def init_app(app, netem):
 
     @app.get("/platform-health", endpoint="platform_health")
     def platform_health():
-        return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot())
+        return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot(),
+                               path_links=netem.load_config().get("wan_links", []))
 
     @app.get("/api/v1/appliances", endpoint="api_inventory")
     def api_inventory():
@@ -366,5 +457,17 @@ def init_app(app, netem):
     @app.post("/platform-health/check", endpoint="platform_check")
     def platform_check():
         return result(lambda: (platform.check_platform() and "Platform check completed."), "platform_health")
+
+    @app.post("/traffic-paths/save", endpoint="traffic_path_save")
+    def traffic_path_save():
+        return result(lambda: platform.configure_path(request.form), "platform_health")
+
+    @app.post("/traffic-paths/select", endpoint="traffic_path_select")
+    def traffic_path_select():
+        return result(lambda: platform.select_path(request.form.get("id")), "platform_health")
+
+    @app.post("/traffic-paths/remove", endpoint="traffic_path_remove")
+    def traffic_path_remove():
+        return result(lambda: platform.remove_path(request.form.get("id")), "platform_health")
 
     return platform

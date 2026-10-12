@@ -638,6 +638,8 @@ def workload_finding(status, signals, expected_run=None):
     """When the simulator's traffic and what NetEm measures cannot both be right."""
     common = {"source": "platform", "severity": "bad", "wans": [], "unattributed": 0, "candidates": []}
     run = (status or {}).get("run") or {}
+    if (run.get("traffic_path") or {}).get("mode") == "direct_baseline" and not expected_run:
+        return None
     if expected_run and ((status or {}).get("status") not in ("starting", "running") or run.get("run_id") != expected_run):
         reported = (status or {}).get("status") or "no status"
         return dict(common, id="workload_missing", title="The test's workload is not running on the Traffic Simulator",
@@ -704,6 +706,10 @@ def appliance_view(vendor, model=None, name=None, source=None, label=None):
 def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
     """The SD-WAN appliance being tested: from Settings, else the simulator's selected appliance."""
     if "APPLIANCE_PLATFORM" in globals():
+        selection = APPLIANCE_PLATFORM.store.state("selection")
+        if selection.get("mode") in ("direct_netem", "direct_baseline"):
+            label = "Direct NetEm path" if selection["mode"] == "direct_netem" else "Clean router baseline"
+            return dict(appliance_view(None, name=selection.get("name"), source=selection["mode"]), vendor_name=label, product=label)
         selected = APPLIANCE_PLATFORM.selected()
         if selected:
             return appliance_view(selected["vendor"], selected.get("model"), selected["name"], "inventory")
@@ -3230,22 +3236,27 @@ def build_diagnosis():
     snapshot = traffic_generator_snapshot()
     status = snapshot.get("status") if snapshot.get("connected") else None
     dem = (status or {}).get("dem") or {}
+    traffic_path = ((status or {}).get("run") or {}).get("traffic_path") or {}
+    traffic_mode = traffic_path.get("mode", "appliance")
     dem_diagnosis = dem.get("diagnosis") if isinstance(dem.get("diagnosis"), dict) else None
     signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
     findings = correlate_findings(dem_diagnosis, signals, cfg)
-    steering = assess_steering(dem, signals, cfg)
+    steering = assess_steering(dem, signals, cfg) if traffic_mode == "appliance" else None
     findings.extend(steering_findings(steering))
     findings.sort(key=lambda finding: (SEVERITY_ORDER.get(finding["severity"], 9), finding["source"] != "experience"))
     experience, unattributed = wan_experience(dem_diagnosis, signals, cfg)
+    if traffic_mode == "direct_baseline":
+        findings, experience, unattributed = [], {}, 0
     for item in signals:
         item["experience"] = experience.get(item["link_id"])
     addresses = {address: resolve_egress(address, cfg)
                  for address in ((dem_diagnosis or {}).get("egress") or {}) if address != "unknown"}
-    maybe_learn_egress(cfg, status, [address for address, mapped in addresses.items() if not mapped])
+    if traffic_mode == "appliance":
+        maybe_learn_egress(cfg, status, [address for address, mapped in addresses.items() if not mapped])
     with DIAGNOSIS_LOCK:
         learn_state = dict(EGRESS_LEARN_STATE)
     tcpdump = bool(shutil.which("tcpdump"))
-    mapping = egress_mapping_finding(addresses, learn_state, tcpdump)
+    mapping = egress_mapping_finding(addresses, learn_state, tcpdump) if traffic_mode == "appliance" else None
     if mapping:
         findings.append(mapping)
     with RUNTIME_LOCK:
@@ -3262,6 +3273,8 @@ def build_diagnosis():
     track_diagnosis_events(findings)
     return {
         "timestamp": time.time(),
+        "traffic_mode": traffic_mode,
+        "workload_path": traffic_path,
         "links": signals,
         "findings": findings,
         "steering": steering,
@@ -4009,7 +4022,7 @@ def build_session_report(session_id: str, end_time=None):
         "event_count": len(events),
         "events": events[-250:],
         "appliance_evidence": [event for event in events if event.get("kind") in
-                               ("appliance-readiness", "appliance-override", "appliance-selection", "appliance-health")],
+                               ("appliance-readiness", "appliance-override", "appliance-selection", "appliance-health", "traffic-path")],
     }
 
 
@@ -6950,7 +6963,8 @@ def ui_state_version():
     parts.append([simulator.get("connected"), status.get("status"), (status.get("run") or {}).get("run_id")])
     if "APPLIANCE_PLATFORM" in globals():
         store = APPLIANCE_PLATFORM.store
-        parts.append([store.state("selection").get("id"),
+        selection = store.state("selection")
+        parts.append([selection.get("id"), selection.get("path_id"), selection.get("mode"), store.state("traffic_paths"),
                       [(row["id"], row["revision"]) for row in store.rows()],
                       [(alert["key"], alert["severity"], alert["acknowledged_at"]) for alert in store.alerts()]])
     return hashlib.sha256(json.dumps(parts, default=str).encode()).hexdigest()[:16]
