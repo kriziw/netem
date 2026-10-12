@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.20.0](https://github.com/kriziw/netem/compare/v0.19.0...v0.20.0) (2026-10-12)
+
+
+### Features
+
+* import branding packs and synchronize lab presentation ([#67](https://github.com/kriziw/netem/issues/67)) ([2fe01f5](https://github.com/kriziw/netem/commit/2fe01f50e2c8a11e25771056c169f1aefa7033a6))
+* integrate native automatic traffic controls into NetEm ([#66](https://github.com/kriziw/netem/issues/66)) ([4f45123](https://github.com/kriziw/netem/commit/4f4512357e752e27e61b3ebe9cfd5e3ea218b741))
+
 ## [0.19.0](https://github.com/kriziw/netem/compare/v0.18.1...v0.19.0) (2026-10-12)
 
 
