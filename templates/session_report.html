@@ -5,7 +5,7 @@
 
 {% block content %}
 <div class="report-brand">
-  {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="">{% endif %}
+  {% if branding.logo %}<img class="brand-logo" src="{{ branding_asset_url(branding.logo) }}" alt="">{% endif %}
   <div><strong>{{ branding.name }}</strong><br>{{ branding.subtitle }}</div>
 </div>
 <div class="page-head">
