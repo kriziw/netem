@@ -486,6 +486,46 @@ def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
             connection.close()
 
 
+@app.route('/simulator/', defaults={'panel_path': ''}, methods=['GET', 'POST'])
+@app.route('/simulator/<path:panel_path>', methods=['GET', 'POST'])
+def simulator_controller(panel_path):
+    """NetEm operator UI; the executing agent only accepts fixed authenticated views."""
+    session.setdefault('integration_csrf', secrets.token_urlsafe(32))
+    path = '/' + panel_path
+    if request.method == 'POST':
+        supplied = request.form.get('csrf_token', '')
+        if not supplied or not hmac.compare_digest(supplied.encode(), session['integration_csrf'].encode()):
+            abort(400, 'Invalid form token. Reload the page and retry.')
+        if scenario_snapshot().get('active') and path not in ('/workloads/adjust', '/workloads/stop'):
+            abort(409, 'Stop the current test before changing simulator configuration.')
+    try:
+        if request.method == 'POST' and path == '/workloads/start':
+            APPLIANCE_PLATFORM.preflight(request.form)
+            ensure_traffic_path('Corporate workload')
+        result = traffic_generator_request('/api/v1/controller/view', method='POST', timeout=15,
+            payload={'path': path, 'method': request.method, 'fields': request.form.to_dict(),
+                     'query': request.args.to_dict(), 'csrf_token': session['integration_csrf'],
+                     'messages': session.pop('_flashes', [])})
+        if result.get('api_key'):
+            values = load_secrets()
+            values['traffic_generator_api_key'] = result['api_key']
+            save_secrets(values)
+        for category, message in result.get('messages') or []:
+            flash(message, category)
+        location = result.get('location')
+        if location:
+            if not location.startswith('/simulator/') or '\\' in location:
+                raise RuntimeError('The agent returned an invalid controller navigation target.')
+            return redirect(location)
+        response = Response(result.get('body', ''), status=int(result.get('status', 502)),
+                            content_type=result.get('content_type', 'text/html'))
+        response.headers['Cache-Control'] = 'no-store'
+        response.headers['X-Content-Type-Options'] = 'nosniff'
+        return response
+    except (RuntimeError, ValueError) as exc:
+        return render_template('simulator_controller_error.html', error=str(exc)), 502
+
+
 def traffic_generator_snapshot(include_catalog=False):
     cfg = load_config()
     integration = traffic_generator_config(cfg)
@@ -4178,6 +4218,9 @@ def apply_runtime_fault(link: dict, fault: str, presets: dict):
 def scenario_snapshot():
     with RUNTIME_LOCK:
         state = dict(SCENARIO_STATE)
+    if state.get("active") and state.get("preparing_workload"):
+        state.update(elapsed_s=0.0, phase=None, phase_index=None, phase_remaining_s=None)
+        return state
     if state.get("active") and state.get("intro"):
         # Announced, not started: nothing has run yet.
         state["elapsed_s"] = 0.0
@@ -4393,6 +4436,7 @@ def wait_for_scenario_condition(
         }
 
     while time.monotonic() <= deadline:
+        check_test_workload()
         if SCENARIO_STOP.is_set():
             return False, last_observed, "stopped", time.monotonic() - clock
         if SCENARIO_PAUSE.is_set():
@@ -4604,9 +4648,11 @@ def scenario_sleep(seconds: float):
     """Wait out a step delay. Paused time does not count, and a paused test holds here
     in its current phase until resumed. Returns True when the test was stopped."""
     remaining = max(0.0, float(seconds))
+    check_test_workload()
     while remaining > 0 or SCENARIO_PAUSE.is_set():
         if SCENARIO_STOP.is_set():
             return True
+        check_test_workload()
         started = time.monotonic()
         SCENARIO_STOP.wait(0.25 if SCENARIO_PAUSE.is_set() else min(0.25, remaining))
         if not SCENARIO_PAUSE.is_set():
@@ -4709,6 +4755,9 @@ def reset_scenario_state(result, error):
                 "paused_total_s": 0.0,
                 "phase_started_s": None,
                 "workload_run_id": None,
+                "preparing_workload": False,
+                "workload_checked": None,
+                "workload_supervised": False,
                 "clock_start": None,
                 "paused_clock": None,
                 "intro": False,
@@ -4748,6 +4797,62 @@ def requested_length_s(raw):
     return minutes * 60
 
 
+def wait_for_test_executor(status, run_id, timeout_s=30):
+    """Do not start impairment phases until the executing agent has active users."""
+    deadline = time.monotonic() + timeout_s
+    while not SCENARIO_STOP.is_set():
+        if (status.get("run") or {}).get("run_id") != run_id or status.get("status") not in ("starting", "running"):
+            raise RuntimeError("Traffic Simulator is not executing the test's workload. No impairment phase started.")
+        if status.get("users", 0) > 0:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError("Traffic Simulator did not start any users within 30 seconds.")
+        if SCENARIO_STOP.wait(.5):
+            break
+        status = traffic_generator_request("/api/v1/controller/heartbeat", method="POST",
+            payload={"run_id": run_id, "phase": "Starting workload"}, timeout=3.0)
+    raise InterruptedError("Test stopped while waiting for the executing agent.")
+
+
+def check_test_workload():
+    """A phase cannot silently outlive its executing workload; check every 5 s."""
+    with RUNTIME_LOCK:
+        expected = SCENARIO_STATE.get("workload_run_id")
+        if not SCENARIO_STATE.get("workload_supervised") or not expected or SCENARIO_STOP.is_set():
+            return
+        now = time.monotonic()
+        checked = SCENARIO_STATE.get("workload_checked")
+        if checked is not None and now - checked < 5:
+            return
+        SCENARIO_STATE["workload_checked"] = now
+    status = traffic_generator_request("/api/v1/controller/heartbeat", method="POST",
+        payload={"run_id": expected, "phase": str(SCENARIO_STATE.get('phase') or '')[:120]}, timeout=3.0)
+    if ((status.get("run") or {}).get("run_id") != expected
+            or status.get("status") not in ("starting", "running") or status.get("users", 0) <= 0):
+        raise RuntimeError("Traffic Simulator stopped executing the test's workload. Test aborted and WAN baseline restored.")
+
+
+def stop_test_owned_workload(run_id):
+    status = traffic_generator_request("/api/v1/status", timeout=3.0)
+    if (status.get("run") or {}).get("run_id") == run_id and status.get("status") in ("starting", "running"):
+        traffic_generator_request("/api/v1/workloads/stop", method="POST", payload={"run_id": run_id}, timeout=5.0)
+
+
+def prepare_manual_workload(cfg, scenario):
+    """NetEm owns automatic starts; an existing executing workload is borrowed."""
+    ensure_traffic_path(scenario["name"])
+    status = traffic_generator_request("/api/v1/status", timeout=3.0)
+    if status.get("status") in ("starting", "running"):
+        return status, False
+    if status.get("status") == "stopping":
+        raise RuntimeError("Wait for the Traffic Simulator workload to stop before starting a test.")
+    plan = active_site_plan(cfg, simulator_catalog())
+    payload = dict(plan["start"]) if plan else {"profile": "office", "users": 50, "spawn_rate": 5, "activity": "normal", "pattern": "steady"}
+    payload.pop("operation", None)
+    payload['controller_lease_seconds'] = 30
+    return traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0), True
+
+
 def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
     cfg = load_config()
     presets = get_presets(cfg)
@@ -4774,13 +4879,41 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
     preview, planned_s, checks = scenario_preview(steps)
     phases = scenario_phases(steps)[0]
     phase_indexes = step_phase_indexes(steps)
+    supervised = bool(scenario.get("controller_managed"))
+    explicit_workload = any(step.get("action") == "traffic_generator" for step in steps)
+    if scenario.get("auto_workload") and not explicit_workload:
+        with RUNTIME_LOCK:
+            SCENARIO_STATE.update(preparing_workload=True, intro=False, phase=None, phase_index=None,
+                                  step_label="Starting traffic on the executing agent", workload_supervised=False)
+        try:
+            status, owned = prepare_manual_workload(cfg, scenario)
+            expected = (status.get("run") or {}).get("run_id")
+            if owned:
+                scenario_workload_id = expected
+            if not expected:
+                raise RuntimeError("Traffic Simulator did not acknowledge a workload run ID.")
+            with RUNTIME_LOCK:
+                SCENARIO_STATE["workload_run_id"] = expected
+            wait_for_test_executor(status, expected)
+            started_at = time.time()
+        except Exception as exc:
+            if scenario_workload_id:
+                try:
+                    stop_test_owned_workload(scenario_workload_id)
+                except Exception as cleanup:
+                    log_event("traffic-generator", "Workload cleanup failed during startup", error=str(cleanup)[:240])
+            result = "stopped" if SCENARIO_STOP.is_set() else "failed"
+            log_event("scenario", f'{scenario["name"]}: workload startup {result}', error=str(exc)[:240])
+            reset_scenario_state(result, str(exc)[:240])
+            return
     with RUNTIME_LOCK:
         # The test clock starts now, after any announcement.
         SCENARIO_STATE.update(phases=preview, phase_index=0 if phases else None, phase=phases[0]["name"] if phases else None,
                               planned_s=planned_s, paused=False, paused_at=None, paused_total_s=0.0,
                               phase_started_s=0.0 if phases else None, intro=False, intro_clock=None,
                               description=scenario.get("description"), checks=checks,
-                              started_at=started_at, clock_start=time.monotonic(), step_label="Starting")
+                              started_at=started_at, clock_start=time.monotonic(), step_label="Starting",
+                              preparing_workload=False, workload_supervised=supervised, workload_checked=None)
     recorder_start(scenario, link_id, phases)
     if phases:
         recorder_note("phase_marks", {"name": phases[0]["name"], "at": time.time()})
@@ -4873,6 +5006,10 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                 operation = payload.pop("operation")
                 if operation == "start":
                     ensure_traffic_path(scenario["name"])
+                    if supervised:
+                        payload['controller_lease_seconds'] = 30
+                elif operation == 'stop' and supervised and scenario_workload_id:
+                    payload['run_id'] = scenario_workload_id
                 result = traffic_generator_request(
                     f"/api/v1/workloads/{operation}", method="POST",
                     payload=payload, timeout=5.0,
@@ -4883,6 +5020,11 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                     scenario_workload_id = None
                 with RUNTIME_LOCK:
                     SCENARIO_STATE["workload_run_id"] = scenario_workload_id
+                    SCENARIO_STATE["workload_checked"] = None
+                if operation == "start" and supervised:
+                    if not scenario_workload_id:
+                        raise RuntimeError("Traffic Simulator did not acknowledge the requested workload.")
+                    wait_for_test_executor(result, scenario_workload_id)
                 log_event("traffic-generator", f'{scenario["name"]}: {label}',
                           scenario_id=scenario.get("id"), link_id=link_id,
                           action=operation, run_id=(result.get("run") or {}).get("run_id"),
@@ -4947,15 +5089,25 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
     finally:
         if scenario_workload_id:
             try:
-                status = traffic_generator_request("/api/v1/status", timeout=3.0)
-                if (status.get("run") or {}).get("run_id") == scenario_workload_id and status.get("status") in ("starting", "running"):
-                    traffic_generator_request("/api/v1/workloads/stop", method="POST", payload={}, timeout=5.0)
-                    log_event("traffic-generator", "Scenario-owned workload stopped during cleanup", scenario_id=scenario.get("id"), run_id=scenario_workload_id, action="stop")
-            except RuntimeError as exc:
+                stop_test_owned_workload(scenario_workload_id)
+                log_event("traffic-generator", "Scenario-owned workload cleanup completed", scenario_id=scenario.get("id"), run_id=scenario_workload_id, action="stop")
+            except Exception as exc:
                 scenario_result = "failed"
                 scenario_error = f"{scenario_error + '; ' if scenario_error else ''}Workload cleanup failed: {exc}"[:240]
-        apply_mtu_limit(original, 0)
-        apply_selected_profile(original, presets)
+        elif supervised and SCENARIO_STATE.get('workload_run_id'):
+            try:
+                traffic_generator_request('/api/v1/controller/heartbeat', method='POST', timeout=3.0,
+                    payload={'run_id': SCENARIO_STATE['workload_run_id'], 'phase': ''})
+            except Exception as exc:
+                log_event('traffic-generator', 'Borrowed workload phase could not be cleared', error=str(exc)[:240])
+        try:
+            mtu_ok, mtu_message = apply_mtu_limit(original, 0)
+            profile_ok, profile_message, _ = apply_selected_profile(original, presets)
+            if not mtu_ok or not profile_ok:
+                raise RuntimeError('; '.join(message for ok, message in ((mtu_ok, mtu_message), (profile_ok, profile_message)) if not ok))
+        except Exception as exc:
+            scenario_result = "failed"
+            scenario_error = f"{scenario_error + '; ' if scenario_error else ''}WAN restoration failed: {exc}"[:240]
         ACTIVE_FAULTS.pop(link_id, None)
         duration_s = round(time.time() - started_at, 3)
         log_event(
@@ -6416,7 +6568,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
         if SITE_PLAN_STOP.is_set():
             break
         link_id = link_for_role[test["role"]]
-        scenario = {"id": f"site_{test['id']}", "name": test["name"], "description": test.get("description"),
+        scenario = {"id": f"site_{test['id']}", "name": test["name"], "description": test.get("description"), "controller_managed": True,
                     "steps": validate_scenario_steps(test["steps"])}
         with RUNTIME_LOCK:
             if SITE_PLAN_STOP.is_set():
@@ -6620,6 +6772,7 @@ def lab_scenario_start():
         return redirect_after("scenarios")
     if length_s:
         scenario = dict(scenario, steps=scale_scenario_steps(scenario["steps"], length_s))
+    scenario = dict(scenario, auto_workload=True, controller_managed=True)
 
     with RUNTIME_LOCK:
         if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
@@ -6657,7 +6810,7 @@ def lab_scenario_start():
 def lab_scenario_pause():
     """Hold the running test in its current phase, impairment applied, until resumed."""
     with RUNTIME_LOCK:
-        announced = SCENARIO_STATE["active"] and SCENARIO_STATE.get("intro")
+        announced = SCENARIO_STATE["active"] and (SCENARIO_STATE.get("intro") or SCENARIO_STATE.get("preparing_workload"))
         active = SCENARIO_STATE["active"] and not SCENARIO_STATE["paused"] and not announced
         if active:
             SCENARIO_PAUSE.set()
@@ -7681,7 +7834,7 @@ def showroom_snapshot():
         "appliance": {key: value for key, value in appliance_under_test().items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
-            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s")},
+            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s", "preparing_workload")},
             link=showroom_link_label(cfg, scenario.get("link_id")),
             # Shown while a test is announced: what each phase does and what is checked.
             phases=[{"name": phase.get("name"), "planned_s": phase.get("planned_s"), "what": showroom_text(phase.get("what")) or None}
