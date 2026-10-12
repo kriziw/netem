@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.19.0](https://github.com/kriziw/netem/compare/v0.18.1...v0.19.0) (2026-10-12)
+
+
+### Features
+
+* control and supervise traffic execution from NetEm ([#64](https://github.com/kriziw/netem/issues/64)) ([6c9a87d](https://github.com/kriziw/netem/commit/6c9a87d7dcdd7656325839026edc8e72c7973c44))
+
 ## [0.18.1](https://github.com/kriziw/netem/compare/v0.18.0...v0.18.1) (2026-10-12)
 
 
