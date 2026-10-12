@@ -1,23 +1,21 @@
 # Test controls and execution ownership
 
-NetEm is the controller. The simulator is an executing agent: its local browser
-pages are read-only execution/experience monitors. Operator screens are accessed
-from **NetEm → Platform Health → Simulator controls**, including workload,
-network setup, experience targets, updates and target management. NetEm serves
-these fixed screens through the bearer-authenticated agent API; the agent retains
-field validation, routing locks and privileged administration queues. Update both
-components together before using the new screens and test lifecycle.
+NetEm is the controller. Tests and site programs automatically start the traffic they require, await active users, supervise execution and clean up only their owned run. The simulator's local browser is an execution/experience monitor.
+
+Native configuration lives in **Settings → Traffic paths & network**, **Application experience targets**, and **Traffic agent & target**. These pages use NetEm's shell, branding, cards, CSRF protection and task feedback. The agent returns JSON state and accepts authenticated commands; it never renders operator HTML for NetEm. Both components must be updated together. Old /simulator bookmarks redirect to native NetEm destinations; POST and asset relaying are removed.
+
+Manual workloads are an advanced option on Tests for standalone calibration. Active tests block manual start/adjust/stop and configuration changes, so their requirements stay authoritative. Paths retain a common verified inventory used by test preflight. Saved unverified interfaces remain visible and can be retried without being selectable.
 
 | Control | Controller action | Executor behavior |
 | --- | --- | --- |
 | Tests generic Run, custom Run, Scenarios Run | Common scenario runner | When idle, start the active site's full workload (Office/50 users without a site), acknowledge run ID and wait for active users before impairment phases |
 | Site Run test / Run all | Site plan with explicit workload steps | Execute the defined start/adjust/stop steps; wait for active users before continuing past start |
-| Start corporate simulation / workload dialog | Authenticated workload start API and path preflight | Execute the selected workload on its source-bound selected traffic path |
+| Tests → Advanced manual traffic | Authenticated workload start API and path preflight | Execute the selected workload on its source-bound selected traffic path |
 | Adjust | Workload adjustment API | Change the existing executing workload; never start another workload |
 | Pause phase / Resume | Hold/resume controller phase clock | Continue traffic and heartbeats under the current impairment |
 | Stop & restore / normal test completion | Stop owned run by matching ID, restore original WAN/MTU | Stop only traffic this test started; borrowed pre-existing traffic remains running |
 | WAN quality/bandwidth/fault controls | Apply WAN impairment | Affect executing traffic; do not independently start a workload |
-| Network setup / scoring / maintenance controls | Fixed delegated operator commands | Validate and enqueue changes; these are configuration actions, not workload starts |
+| Network setup / scoring / maintenance controls | Native forms → JSON configuration commands | Validate and enqueue changes; these are configuration actions, not workload starts |
 
 NetEm checks the exact executing run every five seconds, including while paused
 or waiting on assertions. Lost/mismatched execution fails the test and restores

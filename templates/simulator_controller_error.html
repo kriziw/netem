@@ -1,6 +1,0 @@
-{% extends "base.html" %}
-{% block title %}Simulator controls · {{ branding.name }}{% endblock %}
-{% block content %}<div class="page-head"><div><h1>Simulator controls</h1><p>NetEm is the controller; the Traffic Simulator executes its commands.</p></div></div>
-<p class="docs-warning">{{ error }}</p><p>Check the simulator connection and update both components to use the controller screens.</p>
-<a class="btn" href="{{ url_for('integrations') }}#traffic-simulator">Configure connection</a>
-<a class="btn" href="{{ url_for('platform_health') }}">Platform Health</a>{% endblock %}

@@ -49,9 +49,10 @@ window.NetEmActions = (() => {
     notice.textContent = message;
   }
   async function update(response) {
-    if (!response.ok) throw new Error('Action failed (' + response.status + ').');
+    if (!response.ok && response.status !== 400) throw new Error('Action failed (' + response.status + ').');
     const next = new DOMParser().parseFromString(await response.text(), 'text/html');
     const page = next.querySelector('main.page');
+    if (!response.ok && !page?.querySelector('[data-native-traffic]')) throw new Error('Action failed (' + response.status + ').');
     const scripts = next.getElementById('page-scripts');
     if (!page || !scripts) throw new Error('Unexpected response. Check the service before retrying.');
     const openDrawers = [...document.querySelectorAll('.drawer.open')].map(el => el.id);

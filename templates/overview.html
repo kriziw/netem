@@ -209,19 +209,19 @@
               {% if site_plan %}
               <p>Active site targets: experience ≥{{ site_plan.targets.experience_min }}, request success ≥{{ site_plan.targets.success_min_pct }}%, interactive P95 ≤{{ site_plan.targets.interactive_p95_max_ms }} ms and steering ≤{{ site_plan.targets.steering_max_s }} s. Green meets the target; red misses it. Gray means the required measurements are unavailable.</p>
               {% else %}
-              <p>Experience: green ≥75, amber 55–74, red &lt;55. The simulator weights request success 65% and application-specific response scores 35%; without timing data it uses success alone.</p>
+              <p>Experience: green ≥75, amber 55–74, red &lt;55. The worst measured business-critical application limits the score using request success, deadlines, response time and enabled quality targets. Missing required evidence prevents a pass.</p>
               <p>Request success: green ≥99%, amber 95–98.99%, red &lt;95%. This is successful simulated transactions, rather than service uptime.</p>
               <p>Interactive response P95: green ≤400 ms, amber 401–1800 ms, red &gt;1800 ms, over web, collaboration and DNS transactions. Large downloads and uploads are left out because their time is mostly bandwidth; the explanation also shows the P95 across all applications. These are lab display thresholds. Timing includes application work and transfer time; it is not network ping latency.</p>
               <p>Gray means no measured data. These indicators describe simulator requests, not real employee monitoring.</p>
               {% endif %}
             </details>
           </div>
-          <div class="actions" style="margin-top:10px">
-            <a class="btn btn-sm" data-simulator-modal="workload" href="{{ url_for('tests') }}#corporate-traffic">Control</a>
-            {% if traffic_generator.status.status in ('starting','running') %}
+          <p class="field-help">Traffic starts automatically with a test or site program. <a href="{{ url_for('traffic_settings',section='network') }}">Choose its path</a>.</p><div class="actions" style="margin-top:10px">
+            <a class="btn btn-sm" href="{{ url_for('tests') }}">{{ 'Manage current test' if scenario_state.active else 'Run a test' }}</a>
+            {% if traffic_generator.status.status in ('starting','running') and not scenario_state.active %}
             <form method="post" action="{{ url_for('traffic_generator_stop') }}"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
               <input type="hidden" name="return_to" value="overview">
-              <button class="btn btn-sm btn-danger" type="submit">Stop</button>
+              <button class="btn btn-sm btn-danger" type="submit">Stop manual traffic</button>
             </form>
             {% endif %}
           </div>

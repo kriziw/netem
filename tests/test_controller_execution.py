@@ -100,13 +100,18 @@ class ControllerScreenTests(unittest.TestCase):
         with self.client.session_transaction() as state:
             state['integration_csrf'] = 'token'
 
-    def test_controller_proxy_requires_csrf_and_uses_only_authenticated_agent_api(self):
-        with patch.object(netem, 'traffic_generator_request', return_value={'status': 200, 'body': '<h1>Network setup</h1>', 'content_type': 'text/html'}) as api:
-            self.assertEqual(self.client.post('/simulator/settings/network-setup').status_code, 400)
-            self.assertEqual(self.client.get('/simulator/settings/network-setup').status_code, 200)
-        self.assertEqual(api.call_args.args[0], '/api/v1/controller/view')
-        self.assertEqual(api.call_args.kwargs['payload']['path'], '/settings/network-setup')
+    def test_legacy_bookmarks_go_to_native_pages_without_agent_html(self):
+        with patch.object(netem, 'traffic_generator_request') as api:
+            response = self.client.get('/simulator/settings/network-setup')
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.location, '/settings/traffic/network')
+            self.assertEqual(self.client.post('/simulator/settings/network-setup').status_code, 405)
+        api.assert_not_called()
 
-    def test_external_agent_redirect_is_rejected(self):
-        with patch.object(netem, 'traffic_generator_request', return_value={'location': 'https://evil.example/'}):
-            self.assertEqual(self.client.get('/simulator/').status_code, 502)
+    def test_native_commands_require_csrf_and_active_tests_cannot_be_overridden(self):
+        with patch.object(netem, 'traffic_generator_request', return_value={}) as api:
+            self.assertEqual(self.client.post('/settings/traffic/network/network-setup').status_code, 400)
+            with patch.object(netem, 'scenario_snapshot', return_value={'active': True}):
+                response = self.client.post('/traffic-generator/stop', data={'integration_csrf': 'token'})
+                self.assertEqual(response.status_code, 302)
+        api.assert_not_called()
