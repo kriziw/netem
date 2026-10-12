@@ -486,10 +486,6 @@ def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
             connection.close()
 
 
-from branding_sync import BrandingSync
-BRANDING_SYNC = BrandingSync(BRAND_STORE, traffic_generator_request, BACKGROUND_STOP)
-
-
 @app.route('/simulator/', defaults={'panel_path': ''}, methods=['GET', 'POST'])
 @app.route('/simulator/<path:panel_path>', methods=['GET', 'POST'])
 def simulator_controller(panel_path):
@@ -591,6 +587,10 @@ def legacy_traffic_path():
             "path": {key: selected.get(key) for key in ("interface", "gateway", "target", "source")},
             "message": (f"Traffic to {selected.get('target')} goes through the appliance at {selected.get('gateway')} on "
                         f"{selected.get('interface')}." if ready else health.get("message") or "The selected appliance route is not active.")}
+
+
+from branding_sync import BrandingSync
+BRANDING_SYNC = BrandingSync(BRAND_STORE, traffic_generator_request, BACKGROUND_STOP)
 
 
 def traffic_path_summary(path):
