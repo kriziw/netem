@@ -51,7 +51,8 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   // No session and no test: the waiting screen covers the dashboard, which still renders underneath.
   assert.equal(win.document.body.dataset.mode, 'waiting');
   assert.equal(win.document.getElementById('waiting').hidden, false);
-  assert.equal(win.document.getElementById('waiting-site').hidden, true);
+  // Nothing about the client is shown while waiting: the screen has no client details to hide or show.
+  assert.equal(win.document.getElementById('waiting-site'), null);
   assert.equal(win.document.querySelectorAll('.path').length, 2);
   assert.equal(win.document.querySelector('.path h3').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(win.document.querySelectorAll('.path img').length, 0);

@@ -39,7 +39,7 @@ class SnapshotTests(unittest.TestCase):
             ("scenario_snapshot", {"active": True, "scenario_name": "Brownout",
                                    "step": 1, "step_count": 2, "step_label": "Degrade",
                                    "error": "sensitive diagnostic"}),
-            ("session_snapshot", {"active": True, "name": "Showcase", "id": "internal"}),
+            ("session_snapshot", {"active": True, "name": "Showcase", "id": "internal", "started_at": 0}),
         ):
             mock = patch.object(netem, name, return_value=value)
             mock.start()
@@ -59,7 +59,7 @@ class SnapshotTests(unittest.TestCase):
         self.assertTrue(link["traffic_available"])
         self.assertEqual((link["down_mbps"], link["up_mbps"]), (0, 1.5))
         self.assertEqual(result["scenario"]["scenario_name"], "Brownout")
-        self.assertEqual(result["session"], {"active": True, "name": "Showcase", "site": None})
+        self.assertEqual(result["session"], {"active": True, "name": "Showcase", "site": None, "wan": None})
         self.assertIsNone(result["last_test"])
         for secret in ("secret-token", "private-interface", "192.0.2.1", "sensitive diagnostic", "internal"):
             self.assertNotIn(secret, str(result))

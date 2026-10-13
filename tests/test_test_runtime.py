@@ -168,7 +168,7 @@ class SummaryTests(unittest.TestCase):
 
 class SessionSiteTests(unittest.TestCase):
     def setUp(self):
-        self.cfg = {"wan_links": []}
+        self.cfg = {"wan_links": [{"id": "wan1", "name": "Primary"}, {"id": "wan2", "name": "Backup"}]}
         self.session = dict(active=False, id=None, name=None, started_at=None, site=None)
         for target, kwargs in (("load_config", {"side_effect": lambda: copy.deepcopy(self.cfg)}),
                                ("save_config", {"side_effect": lambda cfg: self.cfg.update(cfg)}),

@@ -1,0 +1,59 @@
+<section class="card session-console" id="session-console" aria-label="Session and site tests">
+  <div class="card-head">
+    <div>
+      <div class="card-title">Session and site tests</div>
+      <div class="card-sub">{% if session_state.active %}Start each test separately. The showcase follows the session.{% else %}Start a session to fix the client, the appliance and the WAN roles.{% endif %}</div>
+    </div>
+    {% if session_state.active %}<span class="status good">Session running</span>{% else %}<span class="status info">No session</span>{% endif %}
+  </div>
+  <div class="card-pad">
+    {% if not session_state.active %}
+      <p class="field-help">The showcase stays on its waiting screen until a session starts. <a href="{{ url_for('sessions') }}">Start a lab session</a>.</p>
+    {% else %}
+      <div class="kv">
+        <div class="k">Session</div><div class="v">{{ session_state.name }}</div>
+        <div class="k">Client site</div><div class="v">{{ session_state.site.label if session_state.site else 'Not recorded' }}</div>
+        {% if session_state.appliance %}<div class="k">Appliance</div><div class="v">{{ session_state.appliance.vendor_name or 'Not named' }}{% if session_state.appliance.model %} · {{ session_state.appliance.model }}{% endif %} <span class="field-help">captured at start</span></div>{% endif %}
+        {% if session_wan %}<div class="k">WAN roles</div><div class="v">Primary {{ session_wan.primary.label }} · backup {{ session_wan.backup.label }}</div>{% endif %}
+        {% if session_state.deadline %}<div class="k">Ends by</div><div class="v"><span data-ts="{{ session_state.deadline }}"></span> at the latest, six hours after it started</div>{% endif %}
+      </div>
+      <div class="actions" style="margin-top:12px">
+        <form method="post" action="{{ url_for('session_stop') }}">
+          <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+          <input type="hidden" name="return_to" value="overview">
+          <button class="btn btn-danger" type="submit">Stop session</button>
+        </form>
+      </div>
+      <h3 class="section-title">Site tests</h3>
+      {% if not session_tests %}
+        <p class="field-help">This session's site has no tests. Check the site on the <a href="{{ url_for('tests') }}#site-scenario">Tests page</a>.</p>
+      {% endif %}
+      {% set test_busy = scenario_state.active or site_state.active or not traffic_generator.connected %}
+      {% for test in session_tests %}
+        <div class="site-test-row">
+          <div>
+            <strong>{{ loop.index }}. {{ test.name }}</strong>
+            <p class="field-help">{{ test.description }} · {{ test.role }} WAN</p>
+          </div>
+          <span class="status {{ {'passed': 'good', 'failed': 'bad', 'stopped': 'warn', 'running': 'info'}.get(test.status, 'info') }}">{{ test.status }}</span>
+          <form method="post" action="{{ url_for('site_run') }}">
+            <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+            <input type="hidden" name="return_to" value="overview">
+            <input type="hidden" name="test_id" value="{{ test.id }}">
+            <input type="hidden" name="primary_link" value="{{ session_wan.primary.link_id if session_wan else '' }}">
+            <input type="hidden" name="backup_link" value="{{ session_wan.backup.link_id if session_wan else '' }}">
+            <button class="btn btn-primary" type="submit" {% if test_busy %}disabled{% endif %}>Start test</button>
+          </form>
+        </div>
+      {% endfor %}
+      <p class="field-help">{% if not traffic_generator.connected %}Connect the Traffic Simulator to start a test. {% elif test_busy %}A test is running. Stop it before you start another. {% endif %}Each test announces itself on the showcase for five seconds before it changes a WAN. Stop &amp; restore ends a running test and puts its WAN back.</p>
+      {% if site_state.active %}
+        <form method="post" action="{{ url_for('site_stop') }}">
+          <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+          <input type="hidden" name="return_to" value="overview">
+          <button class="btn btn-danger" type="submit">Stop test &amp; restore</button>
+        </form>
+      {% endif %}
+    {% endif %}
+  </div>
+</section>

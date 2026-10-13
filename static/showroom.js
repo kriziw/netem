@@ -455,7 +455,8 @@
     }
     if (mode === 'waiting') {
       const view = waitingView(latest.site);
-      document.getElementById('waiting-site').hidden = !view.site;
+      const site = document.getElementById('waiting-site');
+      if (site) site.hidden = !view.site;
       text('waiting-site-title', view.title);
       text('waiting-site-meta', view.meta);
     }

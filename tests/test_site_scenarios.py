@@ -115,7 +115,10 @@ class SiteRoutesTests(unittest.TestCase):
                        patch.object(netem, "log_event"), patch.object(netem, "simulator_catalog", return_value=None),
                        patch.object(netem, "SCENARIO_STATE", dict(active=False)),
                        patch.object(netem, "SITE_PLAN_STATE", dict(active=False, tests=[])),
-                       patch.object(netem, "traffic_generator_snapshot", return_value=dict(connected=True))]
+                       patch.object(netem, "traffic_generator_snapshot", return_value=dict(connected=True)),
+                       patch.object(netem, "session_snapshot", return_value=dict(
+                           active=True, id="session-test", name="PoC", started_at=0, site=dict(copy.deepcopy(SELECTION), label="Plant"),
+                           wan={"primary": {"link_id": "wan1", "label": "Primary"}, "backup": {"link_id": "wan2", "label": "Backup"}}))]
         for item in self.patches:
             item.start()
             self.addCleanup(item.stop)
@@ -135,12 +138,19 @@ class SiteRoutesTests(unittest.TestCase):
         self.assertEqual(self.client.get("/api/v1/site-plan", query_string=dict(SELECTION, size="huge")).status_code, 400)
 
     def test_save_only_changes_sla_with_explicit_choice(self):
-        self.cfg["sla_profile"] = dict(name="Keep", latency_ms=1)
-        self.post("/site/save", **SELECTION)
-        self.assertEqual(self.cfg["sla_profile"]["name"], "Keep")
-        self.post("/site/save", **SELECTION, apply_sla="1")
-        self.assertEqual(self.cfg["sla_profile"]["latency_ms"], 50)
-        self.assertEqual(self.client.post("/site/save", data=SELECTION).status_code, 400)
+        # Saving a site is for setting up between sessions; a running session keeps its site.
+        with patch.object(netem, "session_snapshot", return_value={"active": False}):
+            self.cfg["sla_profile"] = dict(name="Keep", latency_ms=1)
+            self.post("/site/save", **SELECTION)
+            self.assertEqual(self.cfg["sla_profile"]["name"], "Keep")
+            self.post("/site/save", **SELECTION, apply_sla="1")
+            self.assertEqual(self.cfg["sla_profile"]["latency_ms"], 50)
+            self.assertEqual(self.client.post("/site/save", data=SELECTION).status_code, 400)
+
+    def test_saving_the_site_is_refused_while_a_session_runs(self):
+        before = dict(self.cfg)
+        self.post("/site/save", **dict(SELECTION, industry="retail"))
+        self.assertEqual(self.cfg.get("site_profile"), before.get("site_profile"))
 
     def test_wan_apply_validates_both_roles_before_changing_config(self):
         before = copy.deepcopy(self.cfg)

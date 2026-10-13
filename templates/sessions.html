@@ -24,6 +24,9 @@
         <div class="wan-name">{{ active_session.name }}</div>
         {% if active_session.site %}<div class="card-sub"><strong>Site:</strong> {{ active_session.site.label }}</div>{% endif %}
         <div class="card-sub">Started <span data-session-start="{{ active_session.started_at }}"></span> · new runtime events are automatically associated with this session.</div>
+        {% if active_session.appliance %}<div class="card-sub"><strong>Appliance:</strong> {{ active_session.appliance.vendor_name or 'not named' }}{% if active_session.appliance.model %} · {{ active_session.appliance.model }}{% endif %} · captured at start</div>{% endif %}
+        {% if active_session.wan %}<div class="card-sub"><strong>WAN roles:</strong> primary {{ active_session.wan.primary.label }} · backup {{ active_session.wan.backup.label }}</div>{% endif %}
+        {% if active_session.deadline %}<div class="card-sub">Ends at the latest <span data-ts="{{ active_session.deadline }}"></span>, six hours after it started, unless completed sooner.</div>{% endif %}
       </div>
       <form method="post" action="{{ url_for('session_stop') }}">
         <input type="hidden" name="return_to" value="sessions">
@@ -88,6 +91,15 @@
           <div><label for="session-{{ field }}">{{ title }}</label><select id="session-{{ field }}" name="{{ field }}" required></select></div>
           {% endfor %}
         </div>
+        <div class="section-title">WAN roles for site tests</div>
+        <div class="site-selectors">
+          {% for role, title in [('primary', 'Primary WAN'), ('backup', 'Backup WAN')] %}
+          <div><label for="session-{{ role }}-link">{{ title }}</label><select id="session-{{ role }}-link" name="{{ role }}_link" required>
+            {% for link in wan_links %}<option value="{{ link.id }}" {% if (role == 'primary' and loop.index == 1) or (role == 'backup' and loop.index == 2) %}selected{% endif %}>{{ link.name or link.id }}</option>{% endfor %}
+          </select></div>
+          {% endfor %}
+        </div>
+        <div class="field-help">The appliance under test and these roles are captured now and stay fixed until the session ends. The session also ends by itself six hours after it starts.</div>
         <div class="field-help">The session records which site it validates; starting it also makes this the active site, so its experience targets judge the session. Tests → Site scenario shows the full site plan.</div>
         <div class="field-help">While active, scenario, fault, MTU, capture and security events are tagged with this session ID.</div>
         <button class="btn btn-primary" type="submit" style="margin-top:12px">Start session</button>
