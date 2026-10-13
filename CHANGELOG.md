@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.26.0](https://github.com/kriziw/netem/compare/v0.25.0...v0.26.0) (2026-10-13)
+
+
+### Features
+
+* bandwidth calibration steps paced load up to find what the infrastructure carries ([#92](https://github.com/kriziw/netem/issues/92)) ([48be99a](https://github.com/kriziw/netem/commit/48be99a00f871a413970f931f6e6f390311d8771))
+
+
+### Bug Fixes
+
+* self-test judges telemetry age on a fresh clock and does not fail a bridged lab for IP forwarding ([#90](https://github.com/kriziw/netem/issues/90)) ([849d116](https://github.com/kriziw/netem/commit/849d116aaad83a46618219b61a2c833bfccf18d9))
+
 ## [0.25.0](https://github.com/kriziw/netem/compare/v0.24.0...v0.25.0) (2026-10-13)
 
 
