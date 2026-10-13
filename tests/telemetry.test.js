@@ -176,6 +176,7 @@ test('link bottleneck view shows fill level, drops and user experience', () => {
   assert.equal(view.experience, 'Users on this WAN: 82.0% success · worst video 55%');
   assert.equal(view.badge, '↑ full');
   assert.equal(ui.linkBottleneck({directions:{down:{util_pct:null, limit_mbit:null}}}).down.text, '↓ — · unshaped');
+  assert.equal(ui.linkBottleneck({directions:{down:{rate_mbps:30, util_pct:10, limit_mbit:300}}}).down.text, '↓ 30.0 Mbit/s · 10% of 300 Mbit/s');
 });
 
 test('steering view colors WAN shares by health and reports reaction time', () => {

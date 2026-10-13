@@ -269,6 +269,15 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(payloads[2], {"media_mode": "strict"})
 
 
+class MeterWindowTests(unittest.TestCase):
+    def test_the_rate_and_its_share_of_the_limit_come_from_one_average(self):
+        # The WAN meter shows the percentage beside the rate, so both must describe the same window.
+        window = [sample(down_mbps=2.0, down_util_pct=2.0 / 3.0), sample(down_mbps=58.0, down_util_pct=58.0 / 3.0)]
+        down = netem.path_signals(state("wan1", "WAN1", down=300), window)["directions"]["down"]
+        self.assertAlmostEqual(down["rate_mbps"], 30.0)
+        self.assertAlmostEqual(down["util_pct"], 10.0)
+
+
 if __name__ == "__main__":
     unittest.main()
 
