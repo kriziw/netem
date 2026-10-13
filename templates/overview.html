@@ -55,7 +55,7 @@
     <section class="card command-pulse" id="wan-pulse">
       <div class="card-head">
         <div>
-          <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show measured traffic crossing each WAN. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic. Bars show how full each direction is against its configured speed limit. Queue drops are packets the rate limiter discarded because its queue was full; injected loss is NetEm's configured random loss.") }}</div>
+          <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show the recent average of measured traffic crossing each WAN (about 12 seconds), and the bars and percentages use that same average. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic. Bars show how full each direction is against its configured speed limit. Queue drops are packets the rate limiter discarded because its queue was full; injected loss is NetEm's configured random loss.") }}</div>
           <div class="card-sub">Download and upload traffic. Click any card to act on that WAN.</div>
         </div>
       </div>
@@ -71,13 +71,13 @@
               <span class="status {{ 'bad' if not link.sla.pass else 'good' }}" data-live="{{ link.id }}-sla">{{ "Model SLA fail" if not link.sla.pass else "Model SLA pass" }}</span>
             </div>
             <div class="wan-live-value" data-live="{{ link.id }}-down">—</div>
-            <div class="wan-rate-caption">Download now · toward the appliance</div>
+            <div class="wan-rate-caption">Download, recent average · toward the appliance</div>
             <div class="wan-activity-line">
               <span class="activity-state no-data" data-live="{{ link.id }}-activity-state-card">NO DATA</span>
               <span data-live="{{ link.id }}-last-seen-card">waiting…</span>
             </div>
             <div class="metric-row" style="margin-top:8px">
-              <div class="metric-box"><div class="metric-label">Upload now</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
+              <div class="metric-box"><div class="metric-label">Upload, recent average</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
               <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
               <div class="metric-box"><div class="metric-label">Injected loss</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-loss-small">{{ link.effective.loss_pct }}</span>%</div></div>
             </div>
@@ -493,6 +493,7 @@ document.querySelectorAll('[data-wan-drawer] form').forEach(form => {
 });
 
 const lastTrafficSeen = window.__netemLastTrafficSeen ||= {};
+const windowRates = window.__netemWindowRates ||= {};
 NetEmUI.createLiveClient({
   interval:1500,
   maxPoints:120,
@@ -547,9 +548,11 @@ NetEmUI.createLiveClient({
       set("loss", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
       set("loss-small", NetEmUI.formatNumber(link.effective?.loss_pct || 0,2));
       set("quality", Number(link.quality ?? 100) + "%");
-      set("down", NetEmUI.formatRate(down));
-      set("up", NetEmUI.formatRate(up));
-      set("throughput", NetEmUI.formatRate(down) + " ↓ · " + NetEmUI.formatRate(up) + " ↑");
+      // Rates use the same recent average as the WAN meter, not the last poll.
+      const averaged = windowRates[link.id] || {};
+      set("down", NetEmUI.formatRate(averaged.down));
+      set("up", NetEmUI.formatRate(averaged.up));
+      set("throughput", NetEmUI.formatRate(averaged.down) + " ↓ · " + NetEmUI.formatRate(averaged.up) + " ↑");
       set("last-seen", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
       set("last-seen-card", lastTrafficSeen[link.id] ? "last " + NetEmUI.formatAge(lastTrafficSeen[link.id], telemetry.timestamp) : (hasRateSample ? "no traffic seen" : "waiting…"));
       set("drawer-latency", NetEmUI.formatNumber(link.effective?.delay_ms || 0,1));
@@ -602,6 +605,8 @@ NetEmUI.createLiveClient({
 
 function renderLinkDiagnosis(link) {
   const view = NetEmUI.linkBottleneck(link);
+  // The live card shows these same averages, so its numbers match the meter beside them.
+  windowRates[link.link_id] = {down: link.directions?.down?.rate_mbps ?? null, up: link.directions?.up?.rate_mbps ?? null};
   const set = (key, value) => document.querySelectorAll('[data-diag="' + link.link_id + '-' + key + '"]').forEach(el => el.textContent = value);
   for (const direction of ["down", "up"]) {
     set(direction + "-text", view[direction].text);

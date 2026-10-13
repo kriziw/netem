@@ -408,10 +408,12 @@ window.NetEmUI = (() => {
     const direction = (key, arrow) => {
       const item = directions[key] || {};
       const pct = item.util_pct == null ? null : Math.max(0, Math.min(100, Number(item.util_pct)));
+      // The rate and the share of the limit are the same recent average, so they are shown together.
+      const rate = item.rate_mbps == null ? '' : formatRate(item.rate_mbps)+' · ';
       return {
         pct,
         tone: pct == null ? 'unknown' : pct >= 90 ? 'bad' : pct >= 70 ? 'warn' : 'good',
-        text: arrow+' '+(pct == null ? '—' : Math.round(pct)+'%')+(item.limit_mbit ? ' of '+formatNumber(item.limit_mbit, 0)+' Mbit/s' : ' · unshaped'),
+        text: arrow+' '+rate+(pct == null ? '—' : Math.round(pct)+'%')+(item.limit_mbit ? ' of '+formatNumber(item.limit_mbit, 0)+' Mbit/s' : ' · unshaped'),
       };
     };
     const drops = item => item && item.queue_drops_ps != null ? formatNumber(item.queue_drops_ps, item.queue_drops_ps < 10 ? 1 : 0)+'/s' : '—';
