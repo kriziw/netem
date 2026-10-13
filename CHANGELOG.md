@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.21.0](https://github.com/kriziw/netem/compare/v0.20.0...v0.21.0) (2026-10-13)
+
+
+### Features
+
+* **ui:** compact control plane and organize settings navigation ([#70](https://github.com/kriziw/netem/issues/70)) ([6821278](https://github.com/kriziw/netem/commit/6821278ede7a07f03f3af39844829fa0aef505f7))
+
 ## [0.20.0](https://github.com/kriziw/netem/compare/v0.19.0...v0.20.0) (2026-10-12)
 
 
