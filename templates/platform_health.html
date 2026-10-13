@@ -34,7 +34,7 @@
   {% if calibration.error %}<p class="docs-warning">{{ calibration.error }}</p>{% else %}
   <p><strong>Capacity:</strong> {{ calibration.capacity_mbps if calibration.capacity_mbps is not none else 'none passed' }}{% if calibration.capacity_mbps is not none %} Mbit/s{% endif %} on {{ calibration.link_id }} · <strong>limited by:</strong> {{ calibration.limited_by }}</p>
   <table class="host-table"><thead><tr><th>Offered</th><th>Expected</th><th>Achieved</th><th>Dropped</th><th>Host</th><th>Result</th><th>Reasons</th></tr></thead><tbody>
-  {% for item in calibration.steps %}<tr><td>{{ item.target_mbps }} Mbit/s</td><td>{{ item.expected_mbps }} Mbit/s</td><td>{{ '—' if item.achieved_mbps is none else item.achieved_mbps ~ ' Mbit/s' }}</td><td>{{ '—' if item.drop_pct is none else item.drop_pct ~ '%' }}</td><td>{{ item.host_status }}</td><td><span class="status {{ 'good' if item.status == 'pass' else 'bad' }}">{{ item.status }}</span></td><td>{{ item.reasons|join('; ') }}</td></tr>{% endfor %}
+  {% for item in calibration.steps %}<tr><td>{{ item.target_mbps }} Mbit/s</td><td>{{ item.expected_mbps }} Mbit/s</td><td>{{ '—' if item.achieved_mbps is none else item.achieved_mbps ~ ' Mbit/s' }}</td><td>{{ '—' if item.drop_pct is none else item.drop_pct ~ '%' }}</td><td>{{ item.host_status }}</td><td><span class="status {{ 'good' if item.status == 'pass' else 'bad' }}">{{ item.status }}</span></td><td>{{ (item.reasons + (item.warnings or []))|join('; ') }}</td></tr>{% endfor %}
   </tbody></table>
   {% endif %}
 {% else %}<p class="field-help">No calibration has been run yet.</p>{% endif %}

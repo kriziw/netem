@@ -1,9 +1,10 @@
 """Bandwidth calibration: step paced load up a ladder and find the highest rate the infrastructure carries.
 
-Each step offers a target rate through the traffic path under test and is judged on three things: what came through
-the WAN, what the shaper dropped below its own limit, and whether the NetEm host stayed within its limits. The steps
-stop at the first failure, or once the configured WAN rate is reached, since higher steps cannot be told apart then.
-This module only judges: app.py drives the load and measures the WAN.
+Each step offers a target rate through the traffic path under test. A step fails when the WAN delivers too little of
+what was offered, or when the NetEm host is at its limit or its sampler runs late. Drops at the shaper are reported as
+warnings, not failures: TCP bulk transfers drop packets at a small buffer by design, and the WAN can still deliver its
+rate. The steps stop at the first failure, or once the configured WAN rate is reached, since higher steps cannot be
+told apart then. This module only judges: app.py drives the load and measures the WAN.
 """
 
 LADDER_MBPS = (50, 100, 200, 400, 600, 800, 1000)
@@ -11,14 +12,14 @@ SETTLE_S = 10.0          # let TCP reach its steady rate before measuring
 MEASURE_S = 30.0         # the window each step is judged on; long enough that a few transfers per user
                          # cannot tilt it, since the simulator staggers its users
 EFFICIENCY_PASS = 0.90   # achieved / expected, where expected is the target capped at the WAN rate
-DROP_LIMIT_PCT = 0.5     # drops, as a share of offered packets, that a step below the WAN rate may not exceed
+DROP_NOTE_PCT = 0.5      # shaper drops above this share of offered packets are reported as a warning
 REACHED_SHAPING = 0.95   # a step at or above this share of the WAN rate means the shaping is the limit
 
 
 def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, late_seconds, drops_ps=None):
     """The verdict for one step. Missing readings are not treated as passing: they fail the step they block."""
     expected = min(target_mbps, shaped_mbps) if shaped_mbps else target_mbps
-    reasons = []
+    reasons, warnings = [], []
     if achieved_mbps is None:
         reasons.append("no WAN measurement in the window")
         achieved = 0.0
@@ -29,10 +30,10 @@ def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, l
         reasons.append("NetEm host at its limit")
     if late_seconds:
         reasons.append(f"sampler late for {late_seconds:.0f} s")
-    if shaped_mbps and target_mbps <= shaped_mbps * REACHED_SHAPING and drop_pct is not None and drop_pct > DROP_LIMIT_PCT:
-        reasons.append(f"{drop_pct:.1f}% dropped below the WAN rate")
     if achieved_mbps is not None and efficiency < EFFICIENCY_PASS:
         reasons.append(f"achieved {achieved:.0f} of {expected:.0f} Mbit/s")
+    if drop_pct is not None and drop_pct > DROP_NOTE_PCT:
+        warnings.append(f"{drop_pct:.1f}% of packets dropped at the shaper")
     return {
         "target_mbps": target_mbps,
         "expected_mbps": round(expected, 1),
@@ -43,17 +44,19 @@ def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, l
         "host_status": host_status,
         "status": "fail" if reasons else "pass",
         "reasons": reasons,
+        "warnings": warnings,
     }
 
 
-def limited_by(step, shaped_mbps):
+def limited_by(step):
     """What stopped the ladder at this step, in the terms an operator acts on."""
     text = " ".join(step["reasons"])
     if "host" in text or "sampler" in text:
         return "NetEm host (CPU, scheduling or NIC)"
-    if "dropped below" in text:
-        return "rate limiter queue: drops below the WAN rate"
-    return "path or traffic generator: the WAN delivered less than offered"
+    cause = "path or traffic generator: the WAN delivered less than offered"
+    if step.get("drop_pct") is not None and step["drop_pct"] > DROP_NOTE_PCT:
+        cause += f"; the shaper also dropped {step['drop_pct']:.1f}% of packets"
+    return cause
 
 
 def summarise(steps, shaped_mbps):
@@ -62,7 +65,7 @@ def summarise(steps, shaped_mbps):
     capacity = max((step["achieved_mbps"] for step in passed), default=None)
     failed = next((step for step in steps if step["status"] == "fail"), None)
     if failed is not None:
-        cause = limited_by(failed, shaped_mbps)
+        cause = limited_by(failed)
     elif shaped_mbps and capacity is not None and capacity >= shaped_mbps * REACHED_SHAPING:
         cause = f"the configured WAN rate ({shaped_mbps:g} Mbit/s); raise the WAN shaping to test higher"
     else:
