@@ -120,3 +120,27 @@ test('failed loading is visible and modified clicks retain the Tests-page fallba
   launcher.dispatchEvent(click);
   assert.equal(dialog.open, false);
 });
+
+test('a start without a lab session offers a session or acknowledges the warning and runs the test', async () => {
+  const {w, dialog} = setup(); const requests = [];
+  const warning = '<section class="card" id="no-session-warning"><a class="btn" href="/sessions">Start a session</a><form method="post" action="/lab/scenario/start"><input type="hidden" name="integration_csrf" value="csrf-token"><input type="hidden" name="scenario_id" value="progressive_brownout"><input type="hidden" name="link_id" value="wan2"><input type="hidden" name="no_session_ack" value="1"><button type="submit">Acknowledge and run anyway</button></form></section>';
+  w.fetch = async (url, options = {}) => {
+    requests.push({url, options});
+    if (options.method !== 'POST') return {ok: true, text: async () => String(url).includes('/tests/scenario/') ? configuration : page(true)};
+    if (requests.filter(request => request.options.method === 'POST').length === 1) return {ok: false, status: 409, url, text: async () => warning};
+    return {ok: true, url: 'https://netem.test/', text: async () => page(true)};
+  };
+  w.document.querySelector('[data-scenario-modal]').click(); await settle();
+  dialog.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+  assert.equal(dialog.open, true);
+  assert.ok(dialog.querySelector('#no-session-warning a[href="/sessions"]'));
+  assert.equal(dialog.querySelector('select'), null);
+  assert.equal(w.document.getElementById('scenario-dialog-title').textContent, 'No session running');
+  dialog.querySelector('input[name="no_session_ack"]').form.dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+  const posts = requests.filter(request => request.options.method === 'POST');
+  assert.equal(posts.length, 2);
+  assert.equal(posts[1].options.body.get('no_session_ack'), '1');
+  assert.equal(posts[1].options.body.get('scenario_id'), 'progressive_brownout');
+  assert.equal(dialog.open, false);
+  assert.equal(w.document.querySelector('#running-test').textContent, 'Brownout running');
+});

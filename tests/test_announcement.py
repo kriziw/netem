@@ -121,6 +121,7 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual((link_id, scenario["description"], intro_s), ("wan1", "The primary fails.", netem.TEST_INTRO_S))
         netem.reset_scenario_state(None, None)
         with patch.object(netem, "get_scenarios", return_value=[SCENARIO]), \
+             patch.object(netem, "session_snapshot", return_value={"active": True}), \
              patch.object(netem.threading, "Thread") as thread:
             netem.app.test_client().post("/lab/scenario/start", data={"link_id": "wan1", "scenario_id": "demo"})
         self.assertEqual(thread.call_args.kwargs["args"][2], netem.TEST_INTRO_S)

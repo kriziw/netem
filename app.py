@@ -7136,6 +7136,12 @@ def lab_scenario_start():
         scenario = dict(scenario, steps=scale_scenario_steps(scenario["steps"], length_s))
     scenario = dict(scenario, auto_workload=True, controller_managed=True)
 
+    if not session_snapshot().get("active") and request.form.get("no_session_ack") != "1":
+        # Generic tests normally run inside a lab session. Without one, the operator starts a session or confirms the test.
+        fields = [(key, value) for key, values in request.form.lists() for value in values
+                  if key not in ("no_session_ack", "integration_csrf")]
+        return render_template("no_session_warning.html", page="tests", scenario=scenario, fields=fields,
+                               link_name=get_link(cfg, link_id).get("name") or link_id), 409
     with RUNTIME_LOCK:
         if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
             flash("A scenario is already running.", "error")

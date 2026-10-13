@@ -77,6 +77,16 @@
     try {
       const response = await fetch(action.href, {method: 'POST', body: data});
       const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const warning = doc.querySelector('#no-session-warning');
+      if (warning) {
+        // No lab session is running: the operator starts one, or acknowledges the warning and runs the test.
+        if (token === generation && dialog.open) {
+          content.replaceChildren(document.importNode(warning, true));
+          document.getElementById('scenario-dialog-title').textContent = 'No session running';
+          status('');
+        }
+        return;
+      }
       const errors = [...doc.querySelectorAll('.flash.error')].map(el => el.textContent.trim());
       if (!response.ok || errors.length) throw new Error(errors.join(' ') || 'The scenario could not be started. Check the configuration and retry.');
       const started = doc.querySelector('#running-test')?.dataset.scenarioId === data.get('scenario_id');
