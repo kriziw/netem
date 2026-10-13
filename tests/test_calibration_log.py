@@ -121,5 +121,22 @@ class ShaperDropTests(unittest.TestCase):
         after = [dict(before[0], bytes=3000001000, packets=20)]
         self.assertEqual(log.qdisc_deltas(before, after)[0]["sent_bytes"], 3000000000)
 
+class FindingsReportTests(unittest.TestCase):
+    def test_the_report_names_the_limit_findings_and_the_sparse_traffic(self):
+        step_result = {"target_mbps": 400, "status": "fail", "achieved_mbps": 120.0, "expected_mbps": 400.0,
+                       "host_status": "at_limit", "reasons": ["achieved 120 of 400 Mbit/s"], "warnings": [],
+                       "diagnostics": {"sparse": {"ot_loss_pct": 1.5, "ot_jitter_p95_ms": 9.0, "ot_p95_ms": 60.0,
+                                                  "ot_bursts": 120}}}
+        text = log.text_report({"link_id": "wan1", "mode": "unshaped", "capacity_mbps": 50.0, "limited_by": "x",
+                                "bottleneck_title": "Hypervisor CPU steal on the NetEm VM",
+                                "findings": [{"step": 400, "severity": "bad", "title": "CPU steal on the NetEm VM up to 6.0%",
+                                              "evidence": "withheld CPU", "action": "check the Proxmox host"}],
+                                "steps": [step_result]})
+        self.assertIn("Mode: unshaped", text)
+        self.assertIn("Limit at the stopping step: Hypervisor CPU steal on the NetEm VM", text)
+        self.assertIn("Finding [BAD] 400 Mbit/s: CPU steal on the NetEm VM up to 6.0%", text)
+        self.assertIn("check next: check the Proxmox host", text)
+        self.assertIn("Sparse UDP (ot_telemetry) over the step: loss 1.50%", text)
+
 if __name__ == "__main__":
     unittest.main()

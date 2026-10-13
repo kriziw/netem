@@ -109,6 +109,16 @@ def text_report(result):
         capacity = result.get("capacity_mbps")
         lines.append(f"Capacity: {_num(capacity, 1, ' Mbit/s') if capacity is not None else 'none passed'} · "
                      f"limited by: {result.get('limited_by')}")
+    lines.append(f"Mode: {result.get('mode', 'shaped')}")
+    if result.get("bottleneck_title"):
+        lines.append(f"Limit at the stopping step: {result['bottleneck_title']}")
+    if result.get("restore_error"):
+        lines.append(f"Restoring the shaping failed: {result['restore_error']}")
+    for item in result.get("findings") or []:
+        where = "all steps" if item.get("step") is None else f"{item['step']} Mbit/s"
+        lines.append(f"Finding [{item['severity'].upper()}] {where}: {item['title']}")
+        lines.append(f"    evidence: {item['evidence']}")
+        lines.append(f"    check next: {item['action']}")
     for verdict in result.get("steps") or []:
         diagnostics = verdict.get("diagnostics") or {}
         lines += ["", step_line(verdict)]
@@ -122,6 +132,13 @@ def text_report(result):
                                  f"{delta['overlimits']}, backlog at end {delta['backlog_bytes_end']} bytes")
         lines.append(_simulator_line("at start", diagnostics.get("simulator_before")))
         lines.append(_simulator_line("at end", diagnostics.get("simulator_after")))
+        sparse = diagnostics.get("sparse") or {}
+        if "skipped" in sparse or "error" in sparse:
+            lines.append(f"  Sparse UDP (ot_telemetry): {sparse.get('skipped') or sparse.get('error')}")
+        elif sparse:
+            lines.append(f"  Sparse UDP (ot_telemetry) over the step: loss {_num(sparse.get('ot_loss_pct'), 2, '%')}, "
+                         f"jitter p95 {_num(sparse.get('ot_jitter_p95_ms'))} ms, p95 {_num(sparse.get('ot_p95_ms'), 0)} ms, "
+                         f"bursts {sparse.get('ot_bursts')}")
         probe = diagnostics.get("probe") or {}
         if probe.get("skipped"):
             lines.append(f"  Probe: {probe['skipped']}")

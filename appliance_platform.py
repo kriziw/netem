@@ -389,7 +389,7 @@ def init_app(app, netem):
         known = {str(item.get("id") or item.get("bridge")) for item in netem.load_config().get("wan_links", [])}
         if link_id not in known:
             flash("Choose a configured WAN to calibrate.", "error")
-        elif not netem.start_bandwidth_calibration(link_id):
+        elif not netem.start_bandwidth_calibration(link_id, unshaped=request.form.get("unshaped") == "1"):
             flash("A bandwidth calibration is already running.", "error")
         else:
             flash("Bandwidth calibration started. It takes several minutes; reload this page for the result.", "success")
