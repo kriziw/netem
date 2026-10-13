@@ -137,6 +137,11 @@ def step_findings(step, shaped_mbps):
             f"{_fmt(sparse.get('ot_jitter_p95_ms'))} ms, p95 {_fmt(sparse.get('ot_p95_ms'))} ms.",
             "Sparse traffic is losing packets behind bulk traffic. See the shaper and host findings for this step."))
 
+    if sparse and "skipped" not in sparse and "error" not in sparse and loss is None:
+        findings.append(finding(
+            target, "measurement", "info", "No sparse users ran in this step",
+            "The traffic generator ran no OT-style sparse users, so loss and jitter under this load were not measured.",
+            "Check the simulator's sparse slots for this run."))
     probe = diagnostics.get("probe") or {}
     if probe.get("success") and probe.get("latency_ms") is not None and probe.get("configured_delay_ms") is not None:
         excess = probe["latency_ms"] - probe["configured_delay_ms"]
@@ -148,7 +153,7 @@ def step_findings(step, shaped_mbps):
                 "The extra delay is queueing. Compare with the shaper backlog in the per-second readings."))
 
     trace = (diagnostics.get("trace") or {}).get("summary") or {}
-    findings.extend(_simulator_findings(target, trace))
+    findings.extend(_simulator_findings(target, trace, shaped_mbps, achieved))
     seen = {item["category"] for item in findings}
     if efficiency is not None and efficiency < DELIVERED and not seen & EXPLAINED:
         findings.append(finding(
@@ -158,7 +163,15 @@ def step_findings(step, shaped_mbps):
     return findings
 
 
-def _simulator_findings(target, trace):
+def _transfer_action(shaped_mbps, achieved):
+    """What to check when downloads were slow to transfer: the shaper, when the WAN was at its configured rate."""
+    if shaped_mbps and achieved is not None and achieved >= shaped_mbps * WAN_RATE_REACHED:
+        return ("The WAN was at its configured rate, so the downloads shared it: the shaper set the transfer time, "
+                "not the receive side. Raise the shaping to test higher.")
+    return "The bytes arrived slowly once started: check the receive side's CPU and the path to the target."
+
+
+def _simulator_findings(target, trace, shaped_mbps=None, achieved=None):
     """Findings from the simulator's own figures: its event loop, status polls, CPU, the target, the paced downloads,
     the quiet seconds, and what it completed against the target. A shortfall is attributed by whether the paced users
     were busy, not by comparing bytes with the WAN: both count the same bytes."""
@@ -215,7 +228,7 @@ def _simulator_findings(target, trace):
                 target, "path", "warn", f"Downloads took {transfer:.0f} ms to transfer once started",
                 f"Mean first byte {wait:.0f} ms, then {transfer:.0f} ms of transfer, with the paced users busy "
                 f"{busy * 100:.0f}% of the window.",
-                "The bytes arrived slowly once started: check the receive side's CPU and the path to the target."))
+                _transfer_action(shaped_mbps, achieved)))
     sent = trace.get("sim_mbps_mean")
     if sent is not None and target and sent < DELIVERED * target:
         shortfall = f"The simulator completed {sent:.1f} of {target} Mbit/s"

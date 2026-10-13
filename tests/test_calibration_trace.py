@@ -49,6 +49,11 @@ class RateTests(unittest.TestCase):
         self.assertIsNone(ct.in_flight({"bytes": 1}))
 
 
+class InFlightTests(unittest.TestCase):
+    def test_the_simulators_own_gauge_is_used_when_it_reports_one(self):
+        self.assertEqual(ct.in_flight({"paced_in_flight": 3, "paced_started": 99, "paced_completed": 1}), 3)
+
+
 class ClockTests(unittest.TestCase):
     def test_simulator_samples_move_onto_this_hosts_clock(self):
         polls = [poll(1000.0, loop=[(1002.5, 4.0)], offset_clock=2.0)]
