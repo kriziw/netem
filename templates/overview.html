@@ -121,6 +121,7 @@
               <div class="dem-detail"><div class="dem-heading">{{ title }} <span data-dem-status>No data</span></div><strong class="dem-value" data-dem-value>—</strong><p data-dem-explanation>Waiting for measured transactions.</p></div>
             </div>
             {% endfor %}
+            <div class="dem-groups" data-dem-groups></div>
             <details class="dem-thresholds"><summary>How to read these indicators</summary>
               {% if site_plan %}
               <p>Active site targets: experience ≥{{ site_plan.targets.experience_min }}, request success ≥{{ site_plan.targets.success_min_pct }}%, interactive P95 ≤{{ site_plan.targets.interactive_p95_max_ms }} ms and steering ≤{{ site_plan.targets.steering_max_s }} s. Green meets the target; red misses it. Gray means the required measurements are unavailable.</p>

@@ -1057,6 +1057,14 @@ body.update-active{overflow:hidden}
 .command-experience .dem-heading { grid-column:1; }
 .command-experience .dem-value { grid-column:2; grid-row:1; margin:0; font-size:18px; }
 .command-experience .dem-detail p { grid-column:1/-1; margin:3px 0 0; }
+.dem-groups { display:grid; gap:6px; margin:10px 0 4px; }
+.dem-group { --dem-color:var(--muted); padding:7px 10px; border:1px solid var(--border); border-left:3px solid var(--dem-color); border-radius:var(--radius-sm); }
+.dem-group.good { --dem-color:var(--success); }
+.dem-group.warn { --dem-color:var(--warning); }
+.dem-group.bad { --dem-color:var(--danger); }
+.dem-group-head { display:flex; justify-content:space-between; gap:8px; font-size:12px; color:var(--text); }
+.dem-group-head strong { color:var(--dem-color); font-variant-numeric:tabular-nums; }
+.dem-group p { margin:3px 0 0; font-size:11px; line-height:1.45; color:var(--muted); }
 
 @media (max-width:1100px) {
   .settings-content .grid-2, .settings-content .grid-3, .settings-content .grid-4 { grid-template-columns:1fr; }
