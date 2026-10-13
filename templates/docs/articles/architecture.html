@@ -46,7 +46,7 @@ upstream / ISP router</div>
 <p>The management interface is intentionally excluded from WAN interface selection. This prevents a test that blackholes, rate-limits or reconfigures a WAN from cutting off the NetEm web UI itself. In a virtual lab, place the management NIC on a dedicated management bridge/VLAN and use separate virtual NICs for every WAN datapath.</p>
 
 <h2 id="netem-tc">Linux traffic-control model</h2>
-<p>NetEm uses Linux <code>tc</code> with the <code>netem</code> qdisc for delay, jitter, packet loss, correlation, duplication, corruption and reordering. Bandwidth limiting is applied with TBF. The Diagnostics tab shows the raw qdisc output so you can verify what the kernel accepted.</p>
+<p>NetEm uses Linux <code>tc</code> with the <code>netem</code> qdisc for delay, jitter, packet loss, correlation, duplication, corruption and reordering. Bandwidth limiting is applied with TBF, with a fair queue (fq_codel) behind it. The Diagnostics tab shows the raw qdisc output so you can verify what the kernel accepted.</p>
 <p>NetEm clears the current root qdisc before applying a new profile. This keeps each Apply operation deterministic rather than incrementally stacking old settings.</p>
 
 <h2 id="carrier">Carrier state vs data-plane failure</h2>
