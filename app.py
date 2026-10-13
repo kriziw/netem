@@ -3462,6 +3462,8 @@ SYMPTOM_CAUSES = {
 }
 # Added delay explains a slow first byte only when it is a meaningful share of the wait.
 DELAY_SHARE = 0.25
+# A WAN carrying at least this much (Mbit/s, either direction) right now is carrying users' traffic.
+CARRIER_MIN_MBPS = 0.1
 
 
 def recent_telemetry_samples(link_id: str, seconds=DIAGNOSIS_WINDOW_SECONDS):
@@ -3662,6 +3664,16 @@ def _egress_count(value):
     return int((value or {}).get("transfers") or (value or {}).get("requests") or 0)
 
 
+def single_carrier(signals):
+    """The one WAN carrying traffic right now, or None when none or several are."""
+    carriers = []
+    for item in signals:
+        rates = [((item.get("directions") or {}).get(direction) or {}).get("rate_mbps") or 0 for direction in ("down", "up")]
+        if sum(rates) >= CARRIER_MIN_MBPS:
+            carriers.append(item["link_id"])
+    return carriers[0] if len(carriers) == 1 else None
+
+
 def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
     """Attach each simulator symptom to the WANs that carried it and the path conditions there."""
     by_link = {item["link_id"]: item for item in signals}
@@ -3692,6 +3704,12 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
                 per_link[mapped["link_id"]] = per_link.get(mapped["link_id"], 0) + _egress_count(value)
             else:
                 unattributed += _egress_count(value)
+        if unattributed and not per_link:
+            # No reply address could be mapped to a WAN. If one WAN is the only one carrying traffic, it carried these users.
+            carrier = single_carrier(signals)
+            if carrier:
+                per_link[carrier] = unattributed
+                unattributed = 0
         wans = []
         for link_id, affected in sorted(per_link.items(), key=lambda item: -item[1]):
             causes = matching(link_id)
