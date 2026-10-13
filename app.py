@@ -5221,6 +5221,8 @@ def redirect_after(default_endpoint):
         "sessions",
     }
     endpoint = requested if requested in allowed else default_endpoint
+    if endpoint == "settings" and request.form.get("return_section") in {group["id"] for group in SETTINGS_GROUPS}:
+        return redirect(url_for(endpoint, section=request.form["return_section"]))
     return redirect(url_for(endpoint))
 
 
@@ -5244,6 +5246,43 @@ DOC_HELP_BY_ENDPOINT = {
 
 
 # ---------- Nav context ----------
+
+SETTINGS_GROUPS = [
+    {"id": "network", "label": "Traffic & network", "items": [
+        ("traffic_settings", "network", "Paths & network"),
+        ("traffic_settings", "experience", "Experience targets"),
+        ("traffic_settings", "maintenance", "Agent & target"),
+        ("setup", None, "Topology & interfaces"),
+    ]},
+    {"id": "profiles", "label": "Profiles & SLA", "items": [
+        ("presets", None, "Access profiles"),
+    ]},
+    {"id": "appearance", "label": "Appearance & appliance", "items": [
+        ("branding_settings", None, "Branding"),
+    ]},
+    {"id": "system", "label": "System & integrations", "items": [
+        ("updates", None, "Application updates"),
+        ("integrations", None, "API & integrations"),
+    ]},
+]
+
+
+@app.context_processor
+def inject_settings_nav():
+    endpoint = request.endpoint
+    section = (request.view_args or {}).get("section")
+    group_id = None
+    if endpoint == "settings":
+        group_id = request.args.get("section", "network")
+        if group_id not in {group["id"] for group in SETTINGS_GROUPS}:
+            group_id = "network"
+    else:
+        for group in SETTINGS_GROUPS:
+            for item_endpoint, item_section, _label in group["items"]:
+                if endpoint == item_endpoint and section == item_section:
+                    group_id = group["id"]
+    return {"settings_groups": SETTINGS_GROUPS, "settings_group": group_id}
+
 
 @app.context_processor
 def inject_nav():
@@ -6093,6 +6132,7 @@ def settings():
         mgmt_interface=cfg.get("mgmt_interface") or guess_mgmt_interface(),
         link_count=len(cfg.get("wan_links", [])),
         preset_count=len(get_presets(cfg)),
+        sla_profile=get_sla_profile(cfg),
         update_status=git_update_status(fetch=False),
         showroom_url=showroom_url(),
         clock_status=platform_clock_status(),
@@ -6109,14 +6149,14 @@ def appliance_save():
     vendor = request.form.get("vendor") or None
     if vendor is not None and vendor not in SDWAN_VENDORS:
         flash("Choose a listed SD-WAN vendor.", "error")
-        return redirect_after("settings")
+        return redirect(url_for("settings", section="appearance", _anchor="appliance"))
     cfg = load_config()
     cfg["appliance"] = {"vendor": vendor, "model": (request.form.get("model") or "").strip()[:60] or None}
     save_config(cfg)
     APPLIANCE_CACHE.update(checked=None)
     flash(f"Appliance under test: {SDWAN_VENDORS[vendor]['name']}." if vendor
           else "The appliance under test now follows the Traffic Simulator's selected appliance.", "success")
-    return redirect_after("settings")
+    return redirect(url_for("settings", section="appearance", _anchor="appliance"))
 
 
 @app.route("/settings/branding")
@@ -6234,7 +6274,7 @@ def time_sync_enable():
         flash(f"NetEm could not turn on time sync ({(err or out or 'timedatectl failed')[:160]}). "
               "Run sudo timedatectl set-ntp true on the NetEm VM.", "error")
     CLOCK_STATUS_CACHE.update(checked=None)
-    return redirect_after("settings")
+    return redirect(url_for("settings", section="system"))
 
 
 @app.route("/docs")

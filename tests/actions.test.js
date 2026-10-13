@@ -34,6 +34,17 @@ const next = {version: 'v2', pills: '<span class="top-pill scenario">Scenario ·
   banner: '<div class="global-alert">Active runtime impairment</div>',
   body: '<form method="post" action="/x"><input name="length_min" value="5"></form>'};
 
+test('expanded Command Center details survive a live refresh', async () => {
+  const body = '<details class="command-detail" id="topology"><summary>Topology</summary>Live paths</details>' +
+    '<details class="command-detail" id="history"><summary>History</summary>Live chart</details>';
+  const screen = open({version: 'v1', body}, {version: 'v2', body});
+  screen.doc.getElementById('topology').open = true;
+  await screen.win.NetEmActions.refresh();
+  assert.equal(screen.doc.getElementById('topology').open, true);
+  assert.equal(screen.doc.getElementById('history').open, false);
+  screen.win.close();
+});
+
 test('a page refreshes in place when the lab changes, top bar and banner included', async () => {
   const page = open({version: 'v1', body: '<form method="post" action="/x"><input name="length_min" value="5"></form>'}, next);
   await page.tick();

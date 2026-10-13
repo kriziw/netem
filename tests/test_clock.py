@@ -130,7 +130,7 @@ class TimeSyncTests(unittest.TestCase):
                   "tolerance_s": 2.0, "checked_at": 0}
         client = netem.app.test_client()
         with patch.object(netem, "platform_clock_status", return_value=status):
-            page = client.get("/settings").text
+            page = client.get("/settings?section=system").text
         for text in ("Time sync", "Check clocks", "+6207.4 s", "uses its Proxmox host", "1.7 h ahead", "Turn on time sync for NetEm"):
             self.assertIn(text, page)
         with patch.object(netem, "run_process", return_value=(1, "", "Access denied")), \

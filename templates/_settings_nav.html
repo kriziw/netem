@@ -1,0 +1,16 @@
+<nav class="settings-nav" aria-label="Settings">
+  <div class="settings-nav-title">Settings</div>
+  {% for group in settings_groups %}
+  <div class="settings-nav-group">
+    <a class="settings-nav-heading {{ 'active' if settings_group == group.id else '' }}"
+       href="{{ url_for('settings', section=group.id) }}"
+       {% if request.endpoint == 'settings' and settings_group == group.id %}aria-current="page"{% endif %}>{{ group.label }}</a>
+    {% for endpoint, section, label in group['items'] %}
+    {% set current = request.endpoint == endpoint and (request.view_args or {}).get('section') == section %}
+    <a class="settings-nav-link {{ 'active' if current else '' }}"
+       href="{{ url_for(endpoint, section=section) if section else url_for(endpoint) }}"
+       {% if current %}aria-current="page"{% endif %}>{{ label }}</a>
+    {% endfor %}
+  </div>
+  {% endfor %}
+</nav>

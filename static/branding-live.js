@@ -1,6 +1,6 @@
 // Update presentation without resetting test state, charts, or operator edits.
 (() => {
-  let revision;
+  let revision = document.documentElement.dataset.brandRevision;
   async function refresh() {
     try {
       const response = await fetch('/branding/status', {cache:'no-store'});
@@ -13,7 +13,7 @@
       for (const [name,value] of [['name',brand.name],['subtitle',brand.subtitle],['mark',brand.mark]])
         document.querySelectorAll('[data-brand-'+name+']').forEach(el => el.textContent = value);
       const logo = document.querySelector('[data-brand-logo]');
-      if (logo) { logo.hidden = !brand.logo; if (brand.logo) { logo.src=brand.logo+(brand.logo.includes('?')?'&':'?')+'brand='+revision; logo.alt=brand.name; } }
+      if (logo) { logo.hidden = !brand.logo; if (brand.logo) { logo.src=brand.logo; logo.alt=brand.name; } }
       document.querySelectorAll('[data-brand-mark]').forEach(el=>el.hidden=Boolean(brand.logo));
       let theme = document.querySelector('link[data-brand-theme]');
       if (brand.enabled) {

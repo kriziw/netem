@@ -1,12 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-brand-revision="{{ branding_revision }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>Showroom · {{ branding.name }}</title>
   <link rel="stylesheet" href="/assets/showroom.css">
   {% if branding_enabled %}
-  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% for font in branding.fonts %}<link rel="preload" as="font" href="{{ branding_asset_url(font.file) }}" crossorigin>{% endfor %}
+  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet', brand=branding_revision) }}">
   {% if branding.favicon %}<link data-brand-icon rel="icon" href="{{ branding_asset_url(branding.favicon) }}">{% endif %}
   {% endif %}
   <script src="/assets/showroom.js" defer></script>
