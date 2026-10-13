@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.27.0](https://github.com/kriziw/netem/compare/v0.26.1...v0.27.0) (2026-10-13)
+
+
+### Features
+
+* calibration keeps logs for troubleshooting and lets them be downloaded ([#96](https://github.com/kriziw/netem/issues/96)) ([142d284](https://github.com/kriziw/netem/commit/142d284987ae58b81f9bb967026df4cea7941e08))
+
+
+### Bug Fixes
+
+* calibration fails a step on delivered throughput, not on shaper drops ([#95](https://github.com/kriziw/netem/issues/95)) ([c616649](https://github.com/kriziw/netem/commit/c616649adda7d9d75fa804a66ea968ee8972956b))
+
 ## [0.26.1](https://github.com/kriziw/netem/compare/v0.26.0...v0.26.1) (2026-10-13)
 
 
