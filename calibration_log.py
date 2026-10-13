@@ -55,6 +55,10 @@ def step_line(verdict):
     shaper = (verdict.get("diagnostics") or {}).get("shaper") or {}
     if shaper.get("qdisc_mbps") is not None:
         parts.append(f"shaper counters carried {_num(shaper['qdisc_mbps'])} Mbit/s")
+    summary = ((verdict.get("diagnostics") or {}).get("trace") or {}).get("summary") or {}
+    if summary:
+        parts.append(f"simulator sent {_num(summary.get('sim_mbps_mean'))} Mbit/s · loop max "
+                     f"{_num(summary.get('loop_max_ms'), 0)} ms · quiet WAN seconds {summary.get('quiet_seconds') or 0}")
     if verdict.get("reasons"):
         parts.append("reasons: " + "; ".join(verdict["reasons"]))
     if verdict.get("warnings"):
@@ -97,6 +101,46 @@ def _simulator_line(label, state):
             f"availability {_num(state.get('availability_pct'))}%")
 
 
+def _trace_lines(trace):
+    """The simulator's readings for the window, and a per-second table beside the WAN."""
+    if not trace:
+        return ["  Simulator trace: not recorded (the simulator did not report it)"]
+    summary = trace.get("summary") or {}
+    lines = [
+        f"  Simulator trace: polls {summary.get('polls')} ({summary.get('poll_errors')} unanswered, slowest "
+        f"{_num(summary.get('poll_max_ms'), 0, ' ms')}) · sent {_num(summary.get('sim_mbps_mean'), 1, ' Mbit/s')} · "
+        f"requests/s {_num(summary.get('sim_requests_ps_mean'))} · in flight at most {_num(summary.get('in_flight_max'), 0)}",
+        f"  Event loop held up to {_num(summary.get('loop_max_ms'), 0, ' ms')} "
+        f"({summary.get('loop_stall_seconds')} seconds over 100 ms) · status up to {_num(summary.get('status_ms_max'), 0, ' ms')} · "
+        f"DEM up to {_num(summary.get('dem_ms_max'), 0, ' ms')} · database writes up to {_num(summary.get('write_ms_max'), 0, ' ms')}",
+        f"  Target health up to {_num(summary.get('target_max_ms'), 0, ' ms')} "
+        f"({summary.get('target_no_answer_seconds')} seconds with no answer) · restarts {summary.get('restarts')}",
+        f"  Quiet WAN seconds {summary.get('quiet_seconds')}: loop held {summary.get('quiet_loop_seconds')}, target slow "
+        f"{summary.get('quiet_target_seconds')}, requests waiting on the WAN {summary.get('quiet_waiting_seconds')}, "
+        f"generator idle {summary.get('quiet_idle_seconds')}",
+        "  Simulator per second:",
+        "    t(s)  WAN down Mbit/s  sim sent Mbit/s  sim req/s  in flight  loop max ms  poll ms  target ms  quiet",
+    ]
+    for row in trace.get("seconds") or []:
+        poll = "no answer" if row.get("poll_error") else _num(row.get("poll_ms"), 0)
+        lines.append(
+            f"  {_num(row.get('offset_s'), 0):>6}  {_num(row.get('wan_down_mbps')):>15}  "
+            f"{_num(row.get('sim_mbps')):>15}  {_num(row.get('sim_requests_ps')):>9}  "
+            f"{_num(row.get('in_flight'), 0):>9}  {_num(row.get('loop_max_ms'), 0):>11}  {poll:>7}  "
+            f"{_num(row.get('target_ms'), 0):>9}  {'yes' if row.get('quiet') else ''}")
+    return lines
+
+
+def _timings_line(timings):
+    if not timings:
+        return "  Timings: not recorded"
+    return ("  Timings (ms): status before " + _num(timings.get("status_before_ms"), 0)
+            + " · status after " + _num(timings.get("status_after_ms"), 0)
+            + " · DEM window " + _num(timings.get("dem_window_ms"), 0)
+            + " · stop workload " + _num(timings.get("stop_workload_ms"), 0)
+            + " · measure WAN " + _num(timings.get("measure_wan_ms"), 0))
+
+
 def text_report(result):
     """A plain-text report: the capacity, then for each step its verdict, the qdisc counters, the simulator state,
     a per-second table of the WAN and host, and the tc output at the end of the window."""
@@ -132,6 +176,8 @@ def text_report(result):
                                  f"{delta['overlimits']}, backlog at end {delta['backlog_bytes_end']} bytes")
         lines.append(_simulator_line("at start", diagnostics.get("simulator_before")))
         lines.append(_simulator_line("at end", diagnostics.get("simulator_after")))
+        lines += _trace_lines(diagnostics.get("trace"))
+        lines.append(_timings_line(diagnostics.get("timings")))
         sparse = diagnostics.get("sparse") or {}
         if "skipped" in sparse or "error" in sparse:
             lines.append(f"  Sparse UDP (ot_telemetry): {sparse.get('skipped') or sparse.get('error')}")

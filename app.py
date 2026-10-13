@@ -32,6 +32,7 @@ from urllib import request as urllib_request
 import calibration
 import bottlenecks
 import calibration_log
+import calibration_trace
 import host_health
 import platform_test
 import site_catalog
@@ -3151,6 +3152,18 @@ def last_bandwidth_calibration():
         return None
 
 
+def _timed(function, *args):
+    """Calls function and returns its result with how long it took in milliseconds, for the calibration log."""
+    started = time.perf_counter()
+    value = function(*args)
+    return value, round((time.perf_counter() - started) * 1000.0, 1)
+
+
+def calibration_health():
+    """The simulator's health endpoint: event-loop lateness, counters and target latency, polled once a second."""
+    return traffic_generator_request("/api/v1/health", timeout=calibration_trace.POLL_TIMEOUT_S)
+
+
 def run_bandwidth_calibration(link_id, unshaped=False):
     """Step paced load up the ladder through the selected traffic path. Each step is judged on what the WAN carried,
     what the shaper dropped, and the host's state. The workload is stopped after every step, even on failure."""
@@ -3163,6 +3176,7 @@ def run_bandwidth_calibration(link_id, unshaped=False):
     restore_error = None
     lift_started = False
     sparse_ok = True
+    poller = None
     CALIBRATION_STATE.update(running=True, link_id=link_id, target_mbps=None, started_at=time.time())
     try:
         busy = platform_test_busy()
@@ -3194,18 +3208,20 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 payload.pop("sparse_share")
                 status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0)
             run_id = (status.get("run") or {}).get("run_id")
+            poller = calibration_trace.SimulatorPoller(fetch=calibration_health).start()
             time.sleep(calibration.SETTLE_S)
             devices = calibration_device(link_id)
             qdisc_before = qdisc_readings(devices)
-            sim_before = simulator_state()
+            sim_before, sim_before_ms = _timed(simulator_state)
             start = time.time()
             time.sleep(calibration.MEASURE_S)
             end = time.time()
             qdisc_after = qdisc_readings(devices)
-            sim_after = simulator_state()
-            stop_test_owned_workload(run_id)
+            polls, poller = poller.stop(), None
+            sim_after, sim_after_ms = _timed(simulator_state)
+            _, stop_ms = _timed(stop_test_owned_workload, run_id)
             run_id = None
-            measured = measure_wan(link_id, start, end)
+            measured, measure_ms = _timed(measure_wan, link_id, start, end)
             host = host_headroom(window_s=int(calibration.MEASURE_S), now=end)
             qdisc_delta = {direction: calibration_log.qdisc_deltas(
                                 (qdisc_before.get(direction) or {}).get("parsed"),
@@ -3215,8 +3231,11 @@ def run_bandwidth_calibration(link_id, unshaped=False):
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
                                              shaper["drops_ps"])
-            sparse_window = (simulator_dem_window(int(calibration.MEASURE_S)) if sparse_used
-                             else {"skipped": "The simulator does not support sparse traffic; update it."})
+            if sparse_used:
+                sparse_window, dem_ms = _timed(simulator_dem_window, int(calibration.MEASURE_S))
+            else:
+                sparse_window, dem_ms = {"skipped": "The simulator does not support sparse traffic; update it."}, None
+            wan_rows = wan_timeline(link_id, start, end)
             verdict["diagnostics"] = {
                 "sparse": sparse_window,
                 "window": {"start": start, "end": end},
@@ -3226,7 +3245,10 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 "tc_end": {direction: reading["raw"] for direction, reading in qdisc_after.items()},
                 "simulator_before": sim_before,
                 "simulator_after": sim_after,
-                "wan_timeline": wan_timeline(link_id, start, end),
+                "trace": calibration_trace.build(polls, wan_rows, start, end),
+                "timings": {"status_before_ms": sim_before_ms, "status_after_ms": sim_after_ms,
+                            "stop_workload_ms": stop_ms, "measure_wan_ms": measure_ms, "dem_window_ms": dem_ms},
+                "wan_timeline": wan_rows,
                 "host_timeline": host_window(start, end),
                 "probe": calibration_probe(link_id),
             }
@@ -3245,6 +3267,8 @@ def run_bandwidth_calibration(link_id, unshaped=False):
         result = {"link_id": link_id, "generated_at": time.time(), "error": "Calibration failed: " + str(exc)[:200],
                   "steps": steps}
     finally:
+        if poller is not None:
+            poller.stop()
         if run_id:
             try:
                 stop_test_owned_workload(run_id)

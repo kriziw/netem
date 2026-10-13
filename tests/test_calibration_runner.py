@@ -189,7 +189,8 @@ class UnshapedAndSparseTests(unittest.TestCase):
             self.addCleanup(mock.stop)
 
     def request(self, path, method="GET", payload=None, timeout=3.0):
-        self.payloads.append(dict(payload or {}))
+        if path.startswith("/api/v1/workloads"):
+            self.payloads.append(dict(payload or {}))
         return {"run": {"run_id": f"run-{len(self.payloads)}"}}
 
     def test_each_paced_step_asks_for_a_share_of_sparse_users_and_keeps_its_udp_window(self):
@@ -235,6 +236,15 @@ class UnshapedAndSparseTests(unittest.TestCase):
         self.assertIn("cannot run during a lab session", result["error"])
         netem.apply_netem.assert_not_called()
         netem.apply_selected_profile.assert_not_called()
+
+    def test_each_step_keeps_the_simulator_trace_and_its_timings(self):
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        result = netem.run_bandwidth_calibration("wan1")
+        diagnostics = result["steps"][0]["diagnostics"]
+        self.assertIn("summary", diagnostics["trace"])
+        self.assertIn("seconds", diagnostics["trace"])
+        self.assertIn("status_before_ms", diagnostics["timings"])
+        self.assertIn("measure_wan_ms", diagnostics["timings"])
 
     def test_a_failed_restore_is_reported_in_the_result(self):
         self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]

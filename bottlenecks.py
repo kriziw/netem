@@ -5,6 +5,8 @@ buffer, the load generator, and the traffic users feel (latency and loss for spa
 evidence and the next check to make. This module only judges what was measured; app.py gathers the readings.
 """
 
+import calibration_trace
+
 STEAL_WARN, STEAL_BAD = 2.0, 5.0          # hypervisor CPU steal, percent of the window
 CPU_BUSY_WARN, CPU_BUSY_BAD = 80.0, 90.0  # NetEm host CPU busy, percent
 PSI_WARN, PSI_BAD = 5.0, 20.0             # pressure stall (share of the last 10 s)
@@ -13,10 +15,21 @@ SHAPER_OVERFLOW_PCT = 2.0                 # drops at the shaper, percent of offe
 DELIVERED = 0.90                          # the WAN delivered this share of what was expected
 LATENCY_WARN_MS, LATENCY_BAD_MS = 5.0, 15.0
 WAN_RATE_REACHED = 0.95
+LOOP_STALL_BAD_MS = 500.0                # the simulator's event loop held this long is bad
+QUIET_MIN_SECONDS = 3                    # quiet WAN seconds at or above this count are reported
 
 SEVERITY_RANK = {"info": 0, "warn": 1, "bad": 2}
 # The cause reported for a failing step is the most severe finding of the first of these categories present.
-CAUSE_ORDER = ("hypervisor", "netem_host", "measurement", "shaper", "latency", "generator")
+CAUSE_ORDER = ("hypervisor", "netem_host", "measurement", "simulator", "target", "shaper", "path", "latency", "generator")
+# A step whose findings already name one of these is not also blamed on the generator by default.
+EXPLAINED = {"hypervisor", "netem_host", "measurement", "simulator", "target", "path", "generator"}
+# What a quiet WAN second is blamed on, by the cause the trace found for it.
+QUIET_CAUSES = (
+    ("loop", "simulator", "with the simulator event loop held", "Fix the loop stall in the simulator findings."),
+    ("target", "target", "with the target answering slowly or not at all", "Check the target VM load and its event loop."),
+    ("waiting", "path", "with requests still waiting on the WAN", "The WAN was slow to deliver what was requested: check the shaper and path findings."),
+    ("idle", "generator", "with no requests in flight", "The generator stopped asking for traffic without its loop being held: check its pacing."),
+)
 CAUSE_TITLES = {
     "hypervisor": "Hypervisor CPU steal on the NetEm VM",
     "netem_host": "NetEm host (CPU, pressure or NIC)",
@@ -24,6 +37,9 @@ CAUSE_TITLES = {
     "shaper": "Shaper buffer overflow",
     "latency": "Latency added under load",
     "generator": "Load generator or path",
+    "simulator": "Traffic Simulator stalled (its event loop was held up)",
+    "target": "Controlled target slow or not answering",
+    "path": "Path or shaper: the WAN carried less than was sent",
 }
 
 
@@ -120,13 +136,68 @@ def step_findings(step, shaped_mbps):
                 f"{probe['latency_ms']:.1f} ms round trip against {probe['configured_delay_ms']:g} ms configured.",
                 "The extra delay is queueing. Compare with the shaper backlog in the per-second readings."))
 
-    host_causes = {item["category"] for item in findings}
-    if efficiency is not None and efficiency < DELIVERED and not host_causes & {"hypervisor", "netem_host", "measurement"}:
+    trace = (diagnostics.get("trace") or {}).get("summary") or {}
+    findings.extend(_simulator_findings(target, achieved, trace))
+    seen = {item["category"] for item in findings}
+    if efficiency is not None and efficiency < DELIVERED and not seen & EXPLAINED:
         findings.append(finding(
-            target, "generator", "warn", f"The WAN delivered {efficiency * 100:.0f}% of the expected rate",
-            "No host limit was seen in this step, so the load generator or the path is limiting.",
+            target, "generator", "warn", f"The WAN carried {efficiency * 100:.0f}% of the target rate",
+            "No host, simulator or path limit was seen in this step, so the load generator or the path is limiting.",
             "Check the Traffic Simulator VM's CPU and its path to the target."))
     return findings
+
+
+def _simulator_findings(target, achieved, trace):
+    """Findings from the simulator's own readings: its event loop, its status polls, the target's health, the quiet
+    seconds, and what the generator sent against what the WAN carried."""
+    found = []
+    loop = trace.get("loop_max_ms")
+    if loop is not None and loop >= calibration_trace.LOOP_STALL_MS:
+        found.append(finding(
+            target, "simulator", "bad" if loop >= LOOP_STALL_BAD_MS else "warn",
+            f"Traffic Simulator event loop held up to {loop:.0f} ms",
+            f"{trace.get('loop_stall_seconds') or 0} seconds with a stall over {calibration_trace.LOOP_STALL_MS:.0f} ms. "
+            f"Status took up to {_fmt(trace.get('status_ms_max'))} ms, the DEM sampler up to {_fmt(trace.get('dem_ms_max'))} ms "
+            f"and database writes up to {_fmt(trace.get('write_ms_max'))} ms.",
+            "Every workload user waits while the loop is held. Move the largest of those timings off the loop."))
+    if trace.get("poll_errors"):
+        found.append(finding(
+            target, "simulator", "bad", f"{trace['poll_errors']} status polls got no answer within 2 s",
+            "A poll unanswered after 2 s means the simulator's loop was held for at least that long.",
+            "Read the event-loop finding for this step: the simulator was not answering NetEm."))
+    slow = trace.get("target_max_ms")
+    unanswered = trace.get("target_no_answer_seconds") or 0
+    if unanswered or (slow is not None and slow >= calibration_trace.TARGET_SLOW_MS):
+        found.append(finding(
+            target, "target", "bad" if unanswered else "warn",
+            f"Controlled target answered its health check slowly (up to {_fmt(slow)} ms)",
+            f"{unanswered} seconds with no answer. The target serves the downloads, so a slow target slows them.",
+            "Check the target VM's load and its event loop; the simulator's probe uses the same route."))
+    quiet = trace.get("quiet_seconds") or 0
+    if quiet >= QUIET_MIN_SECONDS:
+        offsets = ", ".join(f"{offset:g} s" for offset in trace.get("quiet_offsets") or [])
+        for key, category, phrase, action in QUIET_CAUSES:
+            count = trace.get(f"quiet_{key}_seconds") or 0
+            if count:
+                found.append(finding(target, category, "warn", f"{count} of {quiet} quiet seconds {phrase}",
+                                     f"Quiet WAN seconds at {offsets} into the window.", action))
+    sent = trace.get("sim_mbps_mean")
+    if sent is not None and target and sent < DELIVERED * target:
+        title = f"The simulator sent {sent:.1f} of {target} Mbit/s it was asked for"
+        if achieved is not None and achieved >= DELIVERED * sent:
+            found.append(finding(target, "generator", "warn", title,
+                                 f"The WAN carried {achieved:.1f} Mbit/s, the same as was sent: the generator was the limit.",
+                                 "Check the simulator's loop and pacing findings for this step, then offer more load."))
+        else:
+            found.append(finding(target, "path", "warn", title,
+                                 f"The WAN carried {_fmt(achieved)} Mbit/s, less than was sent.",
+                                 "Check the shaper and path findings: traffic was lost between the simulator and the WAN."))
+    elif sent is not None and achieved is not None and achieved < DELIVERED * sent:
+        found.append(finding(target, "path", "warn",
+                             f"The WAN carried {achieved:.1f} of the {sent:.1f} Mbit/s the simulator sent",
+                             "Traffic left the simulator and did not all arrive at the WAN.",
+                             "Check the shaper finding for drops and the quiet seconds for where the WAN fell behind."))
+    return found
 
 
 def analyse(result):
