@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.29.0](https://github.com/kriziw/netem/compare/v0.28.0...v0.29.0) (2026-10-13)
+
+
+### Features
+
+* showcase breaks each phase down by application group ([35874d9](https://github.com/kriziw/netem/commit/35874d9a531b1550a7006fdd80af2f01f1ecd63b))
+
+
+### Bug Fixes
+
+* score showcase phases from their own window ([35874d9](https://github.com/kriziw/netem/commit/35874d9a531b1550a7006fdd80af2f01f1ecd63b))
+
 ## [0.28.0](https://github.com/kriziw/netem/compare/v0.27.0...v0.28.0) (2026-10-13)
 
 
