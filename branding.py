@@ -15,7 +15,7 @@ import threading
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from flask import Response, abort, jsonify, send_from_directory, url_for
+from flask import Response, abort, jsonify, request, send_from_directory, url_for
 
 DEFAULT_PALETTE = {
     "bg": "#08101c",
@@ -137,8 +137,10 @@ def image_url(value):
     return value
 
 
-def asset_url(filename):
-    return image_url(filename) if filename.startswith('https://') else url_for('branding_asset', filename=filename)
+def asset_url(filename, revision=None):
+    if filename.startswith('https://'):
+        return image_url(filename)
+    return url_for('branding_asset', filename=filename, **({'brand': revision} if revision else {}))
 
 
 def _asset(root, filename, suffixes):
@@ -208,7 +210,7 @@ def load_pack(directory):
     return root, brand
 
 
-def stylesheet(brand):
+def stylesheet(brand, revision=None):
     declarations = []
     for key, value in brand["tokens"].items():
         declarations.append(f"--{key}:{value}")
@@ -223,11 +225,11 @@ def stylesheet(brand):
     declarations.append(f'--font-family:"{brand["font_family"]}",Arial,sans-serif')
     rules = [":root{" + ";".join(declarations) + "}"]
     for font in brand["fonts"]:
-        source = asset_url(font["file"])
+        source = asset_url(font["file"], revision)
         family = brand.get("heading_font_family", brand["font_family"]) if font.get("family") == "heading" else brand["font_family"]
         rules.append(
             f'@font-face{{font-family:"{family}";src:url("{source}");'
-            f'font-weight:{font["weight"]};font-style:normal;font-display:swap}}'
+            f'font-weight:{font["weight"]};font-style:normal;font-display:optional}}'
         )
     rules.append(f'h1,h2,h3{{font-family:"{brand.get("heading_font_family", brand["font_family"])}",Arial,sans-serif}}')
     rules.append(".btn-primary,.btn-primary:hover{color:#fff;background:var(--accent-strong)}")
@@ -524,28 +526,41 @@ def init_app(app, source=None):
     app.extensions["branding_store"] = store
     app.extensions["branding"] = store.current(app.logger)[1]
 
+    def presentation_revision():
+        return hashlib.sha256(repr(store._cache[0]).encode()).hexdigest()[:20]
+
+    def cache_presentation(response):
+        if request.args.get('brand') == presentation_revision():
+            response.headers['Cache-Control'] = 'private, max-age=31536000, immutable'
+        return response
+
     @app.context_processor
     def branding_context():
         root, brand = store.current(app.logger)
-        return {"branding": brand, "branding_enabled": root is not None, "branding_asset_url": asset_url}
+        revision = presentation_revision()
+        return {"branding": brand, "branding_enabled": root is not None,
+                "branding_asset_url": lambda filename: asset_url(filename, revision),
+                "branding_revision": revision}
 
     @app.get("/branding/theme.css")
     def branding_stylesheet():
         root, brand = store.current(app.logger)
         if root is None:
             abort(404)
-        response = Response(stylesheet(brand), mimetype="text/css")
+        response = Response(stylesheet(brand, presentation_revision()), mimetype="text/css")
         response.headers["Cache-Control"] = "no-cache"
         response.headers["X-Content-Type-Options"] = "nosniff"
-        return response
+        return cache_presentation(response)
 
     @app.get('/branding/status')
     def branding_status():
         root, brand = store.current(app.logger)
-        revision = hashlib.sha256(repr(store._cache[0]).encode()).hexdigest()[:20]
-        return jsonify(enabled=root is not None, revision=revision, name=brand['name'], subtitle=brand['subtitle'],
-                       mark=brand['mark'], logo=asset_url(brand['logo']) if brand.get('logo') else None,
-                       favicon=asset_url(brand['favicon']) if brand.get('favicon') else None)
+        revision = presentation_revision()
+        response = jsonify(enabled=root is not None, revision=revision, name=brand['name'], subtitle=brand['subtitle'],
+                           mark=brand['mark'], logo=asset_url(brand['logo'], revision) if brand.get('logo') else None,
+                           favicon=asset_url(brand['favicon'], revision) if brand.get('favicon') else None)
+        response.headers['Cache-Control'] = 'no-store'
+        return response
 
     @app.get("/branding/assets/<path:filename>")
     def branding_asset(filename):
@@ -556,6 +571,6 @@ def init_app(app, source=None):
             _asset(root, filename, ASSET_SUFFIXES)
         except ValueError:
             abort(404)
-        return asset_headers(send_from_directory(root / "assets", filename))
+        return cache_presentation(asset_headers(send_from_directory(root / "assets", filename)))
 
     return store

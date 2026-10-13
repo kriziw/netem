@@ -56,6 +56,11 @@ window.NetEmActions = (() => {
     const scripts = next.getElementById('page-scripts');
     if (!page || !scripts) throw new Error('Unexpected response. Check the service before retrying.');
     const openDrawers = [...document.querySelectorAll('.drawer.open')].map(el => el.id);
+    const expandedDetails = [...document.querySelectorAll('main.page details.command-detail[open]')].map(el => el.id);
+    expandedDetails.forEach(id => {
+      const detail = page.querySelector('#' + CSS.escape(id));
+      if (detail?.matches('details.command-detail')) detail.open = true;
+    });
     const scroll = window.scrollY;
     const chartEmpty = document.getElementById('throughput-empty');
     if (chartEmpty && page.querySelector('#throughput-empty'))

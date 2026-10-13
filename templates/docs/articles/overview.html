@@ -1,5 +1,6 @@
 <h2 id="purpose">Purpose of the Command Center</h2>
 <p>The Command Center is the primary operating screen. It is designed so most lab work can happen without navigating to a configuration page: watch traffic, inspect WAN health, degrade a path, inject a failure, constrain MTU, change line rate, launch a guided test or open deeper analytics.</p>
+<p>Quick actions and lab status come first, followed by WAN pulse and employee experience. Topology, throughput history and recent activity are expandable below the live panels. Expanded panels stay open when the page refreshes after a lab change.</p>
 
 <h2 id="topology">Live path topology</h2>
 <p>Each WAN row is clickable. It shows the selected access profile, nominal bandwidth, injected latency/loss/quality, expected SLA state and measured directional throughput.</p>
@@ -21,8 +22,8 @@
 <p>The quality control previews expected latency, loss and downstream capacity before Apply. Use <strong>Advanced WAN settings</strong> only when you need custom packet behavior or raw qdisc diagnostics.</p>
 
 <h2 id="wan-pulse">WAN pulse cards</h2>
-<p>WAN pulse cards combine the current measured downstream rate with a rolling sparkline, upstream rate, latency and loss. The small delta under throughput shows how the rate changed since the previous live sample; it is a short-term activity cue rather than a long-term trend calculation.</p>
-<p>Below the chart, bars show how full each direction is against its configured limit, followed by rate-limiter queue drops, injected loss drops and the success rate of simulated users whose traffic used that WAN.</p>
+<p>WAN pulse cards combine current measured downstream and upstream rates with injected latency and loss. Expand <strong>Download throughput by WAN</strong> below for rolling history and comparison between paths.</p>
+<p>Bars show how full each direction is against its configured limit, followed by rate-limiter queue drops, injected loss drops and the success rate of simulated users whose traffic used that WAN.</p>
 
 <h2 id="diagnosis">Why experience is degraded &amp; SD-WAN steering</h2>
 <p>These cards connect what simulated users feel to the WAN that carried their traffic and the condition on that WAN that explains it, and judge whether the appliance moves traffic off impaired WANs. See <a href="{{ url_for('documentation_page', slug='diagnosis') }}">Diagnosing experience &amp; steering</a>.</p>

@@ -14,8 +14,7 @@
 {% block content %}
 <div class="page-head"><div><div class="eyebrow">Settings</div><h1>{{ {'network':'Traffic paths & network', 'experience':'Application experience targets', 'maintenance':'Traffic agent & target maintenance'}[section] }}</h1><p class="page-description">Tests and site programs manage traffic automatically. Configure their paths, quality targets and executing services here.</p></div><div class="page-actions"><a class="btn" href="{{ url_for('settings') }}">All settings</a><a class="btn" href="{{ url_for('tests') }}">Run a test</a></div></div>
 <div data-native-traffic></div>
-<nav class="traffic-settings-tabs" aria-label="Traffic settings">
-{% for id,label in [('network','Paths & network'),('experience','Experience targets'),('maintenance','Agent & target')] %}<a class="btn {{ 'btn-primary' if section == id else '' }}" {% if section == id %}aria-current="page"{% endif %} href="{{ url_for('traffic_settings',section=id) }}">{{ label }}</a>{% endfor %}</nav>
+
 {% if error %}<div class="flash error" role="alert">{{ error }} {% if connection_error %}<a href="{{ url_for('integrations') }}#traffic-simulator">Review agent connection</a>{% endif %}</div>{% endif %}
 {% if executor %}
 {% if busy %}<div class="flash warning">Configuration is locked while a test, workload or administration task is running. Stop the test with <strong>Stop & restore</strong> before changing its setup.</div>{% endif %}

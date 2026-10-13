@@ -59,7 +59,7 @@ class ReleaseChannelTests(unittest.TestCase):
         client = netem.app.test_client()
         with patch.object(netem, "git_update_status", return_value=waiting):
             page = client.get("/updates").text
-            settings = client.get("/settings").text
+            settings = client.get("/settings?section=system").text
             with patch.object(netem, "run_process") as run:
                 refused = client.post("/updates", data={"action": "update"}).text
         self.assertIn('<span class="status good">Up to date</span>', page)

@@ -69,6 +69,32 @@ class BrandingTests(unittest.TestCase):
             app = self.create_app(data)
             self.assertEqual(app.test_client().get("/branding/theme.css").status_code, 404)
 
+    def test_revisioned_theme_and_fonts_are_cached_and_preloaded(self):
+        (self.root / "assets" / "regular.woff2").write_bytes(b"font")
+        app = self.create_app({"name": "Example", "font_family": "Example Sans",
+                               "fonts": [{"file": "regular.woff2", "weight": 400}]})
+        client = app.test_client()
+        status = client.get('/branding/status')
+        revision = status.json['revision']
+        self.assertEqual(status.headers['Cache-Control'], 'no-store')
+        theme = client.get('/branding/theme.css?brand=' + revision)
+        self.assertIn('max-age=31536000, immutable', theme.headers['Cache-Control'])
+        self.assertIn('/branding/assets/regular.woff2?brand=' + revision, theme.text)
+        self.assertIn('font-display:optional', theme.text)
+        with client.get('/branding/assets/regular.woff2?brand=' + revision) as font:
+            self.assertIn('max-age=31536000, immutable', font.headers['Cache-Control'])
+        with app.test_request_context():
+            html = render_template('base.html', nav_groups=[], page='overview', app_version='test',
+                                   global_runtime={'session': {}, 'scenario': {}})
+        self.assertIn('data-brand-revision="' + revision + '"', html)
+        self.assertIn('rel="preload" as="font"', html)
+        self.assertIn('regular.woff2?brand=' + revision, html)
+        (self.root / 'branding.json').write_text(json.dumps({'name': 'Changed brand'}), encoding='utf-8')
+        next_revision = client.get('/branding/status').json['revision']
+        self.assertNotEqual(next_revision, revision)
+        self.assertEqual(client.get('/branding/theme.css?brand=' + revision).headers['Cache-Control'], 'no-cache')
+        self.assertIn('immutable', client.get('/branding/theme.css?brand=' + next_revision).headers['Cache-Control'])
+
     def test_shared_shell_and_print_report_use_escaped_brand(self):
         (self.root / "assets" / "logo.svg").write_text("<svg/>")
         app = self.create_app({"name": "<Example>", "subtitle": "Validation", "logo": "logo.svg"})

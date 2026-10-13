@@ -281,6 +281,8 @@ jobs:
           node --check static/update-screen.js
           node --check static/simulator-dialog.js
           node --test tests/actions.test.js
+          node --test tests/branding-live.test.js
+          node --check static/branding-live.js
           node --check static/actions.js
           node --check static/inventory.js
           node --test tests/inventory.test.js

@@ -231,17 +231,7 @@
       <div><div class="card-title">Generic SLA evaluator</div><div class="card-sub">Expected pass/fail based on injected conditions, independent of vendor telemetry</div></div>
     </div>
     <div class="card-pad">
-      <form method="post" action="{{ url_for('lab_sla') }}">
-        <input type="hidden" name="return_to" value="analytics">
-        <label>Profile name</label>
-        <input type="text" name="name" value="{{ sla_profile.name }}">
-        <div class="form-grid-3">
-          <div><label>Max latency · ms</label><input type="number" min="0" step="0.1" name="latency_ms" value="{{ sla_profile.latency_ms }}"></div>
-          <div><label>Max jitter · ms</label><input type="number" min="0" step="0.1" name="jitter_ms" value="{{ sla_profile.jitter_ms }}"></div>
-          <div><label>Max loss · %</label><input type="number" min="0" max="100" step="0.1" name="loss_pct" value="{{ sla_profile.loss_pct }}"></div>
-        </div>
-        <div class="actions"><button class="btn btn-primary" type="submit">Save SLA profile</button></div>
-      </form>
+      {% include "_sla_profile.html" %}
     </div>
   </section>
 

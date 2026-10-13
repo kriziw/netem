@@ -6,12 +6,13 @@
 <div class="page-head">
   <div>
     <div class="eyebrow">Configuration</div>
-    <h1>Settings</h1>
-    <p class="page-description">System-level configuration is separated from day-to-day lab operations so the primary workspace stays focused on testing and live visibility.</p>
+    <h1>{{ (settings_groups|selectattr("id", "equalto", settings_group)|first).label }}</h1>
+    <p class="page-description">Configure traffic, profiles, appearance and system services using the Settings menu.</p>
   </div>
 </div>
 
-<div class="grid grid-3">
+<div class="grid grid-2 settings-cards">
+  {% if settings_group == "network" %}
   {% for section,title,description in [('network','Traffic paths & network','Agent interfaces, verified test paths and saved unverified connections'),('experience','Application experience targets','Business-critical apps, deadlines, UDP quality and throughput limits'),('maintenance','Traffic agent & target','Service updates, management connections and agent recovery')] %}
   <a class="card" href="{{ url_for('traffic_settings',section=section) }}"><div class="card-head"><div><div class="card-title">{{ title }}</div><div class="card-sub">{{ description }}</div></div></div><div class="card-pad">Configure automatic test execution</div></a>
   {% endfor %}
@@ -25,6 +26,8 @@
     </div>
   </a>
 
+  {% endif %}
+  {% if settings_group == "profiles" %}
   <a class="card" href="{{ url_for('presets') }}">
     <div class="card-head"><div><div class="card-title">Access profiles</div><div class="card-sub">DIA, broadband, DSL, mobile and satellite baselines</div></div><span class="status info">{{ preset_count }} profiles</span></div>
     <div class="card-pad">
@@ -35,6 +38,8 @@
     </div>
   </a>
 
+  {% endif %}
+  {% if settings_group == "system" %}
   <a class="card" href="{{ url_for('updates') }}">
     <div class="card-head"><div><div class="card-title">Application &amp; updates</div><div class="card-sub">Release channel, versioning and Git update status</div></div><span class="status {{ 'good' if update_status.ok and not update_status.update_available else 'warn' }}">v{{ app_version }}</span></div>
     <div class="card-pad">
@@ -45,16 +50,18 @@
     </div>
   </a>
 
-  <a class="card" href="{{ url_for('analytics') }}">
-    <div class="card-head"><div><div class="card-title">SLA profiles</div><div class="card-sub">Generic vendor-neutral expected-SLA thresholds</div></div></div>
+  {% endif %}
+  {% if settings_group == "profiles" %}
+  <section class="card" id="sla-profile">
+    <div class="card-head"><div><div class="card-title">SLA profiles</div><div class="card-sub">Expected thresholds for injected latency, jitter and loss</div></div></div>
     <div class="card-pad">
-      <div class="kv">
-        <div class="k">Metrics</div><div class="v">latency · jitter · packet loss</div>
-        <div class="k">Purpose</div><div class="v">expected vs appliance-observed comparison</div>
-      </div>
+      {% with sla_return_to='settings' %}{% include "_sla_profile.html" %}{% endwith %}
+      <p class="field-help"><a href="{{ url_for('analytics') }}">Compare expected SLA with measured performance in Analytics</a>.</p>
     </div>
-  </a>
+  </section>
 
+  {% endif %}
+  {% if settings_group == "system" %}
   <a class="card" href="{{ url_for('integrations') }}">
     <div class="card-head"><div><div class="card-title">API &amp; integrations</div><div class="card-sub">Prometheus, REST and future vendor adapters</div></div></div>
     <div class="card-pad">
@@ -65,6 +72,8 @@
     </div>
   </a>
 
+  {% endif %}
+  {% if settings_group == "appearance" %}
   <a class="card" href="{{ url_for('branding_settings') }}">
     <div class="card-head"><div><div class="card-title">Branding</div><div class="card-sub">The MSP brand on every page, reports and the showroom</div></div><span class="status {{ 'good' if active_brand else 'info' }}">{{ (brand_packs|selectattr('id', 'equalto', active_brand)|map(attribute='name')|first) or 'Default look' }}</span></div>
     <div class="card-pad">
@@ -107,6 +116,8 @@
     </div>
   </section>
 
+  {% endif %}
+  {% if settings_group == "system" %}
   <section class="card">
     <div class="card-head"><div><div class="card-title">Time sync</div><div class="card-sub">NetEm, the Traffic Simulator and the target must agree on the time</div></div><span class="status {{ 'good' if clock_status.ok else 'warn' }}">{{ 'In sync' if clock_status.ok else 'Check clocks' }}</span></div>
     <div class="card-pad">
@@ -135,8 +146,10 @@
       </div>
     </div>
   </section>
+  {% endif %}
 </div>
 
+{% if settings_group == "system" %}
 <div class="section-title">System information</div>
 <section class="card">
   <div class="card-pad">
@@ -149,4 +162,5 @@
     </div>
   </div>
 </section>
+{% endif %}
 {% endblock %}

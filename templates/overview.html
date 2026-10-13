@@ -9,7 +9,7 @@
     <div class="eyebrow">Live lab operations</div>
     <h1>Command Center</h1>
     {% if site_plan %}<a class="status info" href="{{ url_for('tests') }}#site-scenario">{{ site_plan.label }}</a>{% endif %}
-    <p class="page-description">See the current paths, change a WAN in one click and watch the result without leaving the operational view. Traffic rates are measured; delay, jitter, loss, quality and model SLA describe NetEm’s requested impairments. Use active probes in Analytics for measured response times.</p>
+    <p class="page-description">Control WANs and compare measured traffic with employee experience. Expand topology and history below for more detail.</p>
   </div>
   <div class="page-actions">
     {% if not session_state.active %}
@@ -22,62 +22,36 @@
 
 {% with return_to='overview' %}{% include "_running_test.html" %}{% endwith %}
 
+<nav class="command-shortcuts" aria-label="Quick actions">
+
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
+          <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
+
+</nav>
 <div class="command-center-grid">
-  <div class="command-main">
-    <section class="card">
+    <section class="card command-lab-state">
       <div class="card-head">
-        <div>
-          <div class="card-title">Live path topology</div>
-          <div class="card-sub">Click a WAN to change it. Flow animation reflects measured traffic, not decorative state.</div>
-        </div>
-        <span class="status good" id="overview-live-status">Streaming</span>
+        <div><div class="card-title">Lab state {{ metric_help("lab-state", "Lab state", "Model SLA checks the configured impairment against lab thresholds. It does not prove that an application is healthy. DEM uses measured simulator transactions.") }}</div><div class="card-sub">Current operational context</div></div>
       </div>
-      <div class="live-topology">
-        <div class="live-topology-stage">
-          <div class="live-node">
-            {% if appliance and appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.png') }}" alt="{{ appliance.vendor_name }}">
-            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>{% endif %}
-            <div><strong>{{ (appliance.vendor_name if appliance) or 'SD-WAN / Firewall' }}</strong><div class="card-sub">{% if appliance and (appliance.model or appliance.product) %}{{ appliance.model or appliance.product }} · {% endif %}appliance under test</div></div>
-          </div>
-
-          <div class="live-paths">
-            {% for link in links %}
-            {% set state_class = 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else '') %}
-            <button class="live-path {{ state_class }}" type="button" data-open-wan="{{ link.id }}" data-live-path="{{ link.id }}">
-              <div>
-                <div class="live-path-name">{{ link.label }}</div>
-                <div class="live-path-sub" data-live="{{ link.id }}-profile">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
-              </div>
-              <div class="live-path-metrics">
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms injected delay</span></div>
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong><span>% injected loss</span></div>
-                <div class="live-path-metric"><strong data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</strong><span>model quality</span></div>
-              </div>
-              <div class="live-path-right">
-                <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
-                  {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("Model SLA fail" if not link.sla.pass else "Model SLA pass") }}
-                </span>
-                <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
-                <span class="path-full" data-diag="{{ link.id }}-badge" hidden></span>
-                <div class="live-activity-line">
-                  <span class="activity-state no-data" data-live="{{ link.id }}-activity-state">NO DATA</span>
-                  <span data-live="{{ link.id }}-last-seen">waiting…</span>
-                </div>
-              </div>
-              <span class="flow-track"></span>
-            </button>
-            {% endfor %}
-          </div>
-
-          <div class="live-node">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18a4 4 0 0 1 .8-7.9A6 6 0 0 1 18.3 9a4.5 4.5 0 0 1-.8 9z"/></svg>
-            <div><strong>Upstream</strong><div class="card-sub">ISP / Internet</div></div>
-          </div>
+      <div class="card-pad">
+        <div class="grid grid-4">
+          <div class="metric-box"><div class="metric-label">Model SLA passes</div><div class="metric-value" id="overview-health">{{ healthy_links }}/{{ links|length }}</div></div>
+          <div class="metric-box"><div class="metric-label">Faults</div><div class="metric-value" id="overview-faults">{{ global_runtime.active_fault_count }}</div></div>
+          <div class="metric-box"><div class="metric-label">Scenario</div><div class="metric-value" style="font-size:11px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div></div>
+          <div class="metric-box"><div class="metric-label">Capture</div><div class="metric-value" style="font-size:11px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div></div>
         </div>
+        {% if session_state.active %}
+        <div class="docs-tip" style="margin:10px 0 0">
+          <strong>Session active:</strong> {{ session_state.name }}<br>
+          Events created now are associated with this lab session.
+        </div>
+        {% endif %}
       </div>
     </section>
 
-    <section class="card">
+    <section class="card command-pulse" id="wan-pulse">
       <div class="card-head">
         <div>
           <div class="card-title">WAN pulse {{ metric_help("wan-pulse", "WAN pulse", "Rates show measured traffic crossing each WAN. Download travels toward the appliance; upload travels toward the upstream router. Gray gaps mean unavailable measurements, not zero traffic. Bars show how full each direction is against its configured speed limit. Queue drops are packets the rate limiter discarded because its queue was full; injected loss is NetEm's configured random loss.") }}</div>
@@ -101,13 +75,6 @@
               <span class="activity-state no-data" data-live="{{ link.id }}-activity-state-card">NO DATA</span>
               <span data-live="{{ link.id }}-last-seen-card">waiting…</span>
             </div>
-            <div class="chart-axis-title">Download (Mbit/s)</div>
-            <div class="chart-frame wan-chart-frame">
-              <div class="chart-y-axis" id="{{ link.id }}-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
-              <div class="chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="{{ link.label }} download throughput history"><path class="chart-line primary" data-spark="{{ link.id }}-down"></path></svg></div>
-              <div class="chart-x-axis" id="{{ link.id }}-throughput-x"><span>−3m</span><span>Now</span></div>
-            </div>
-            <div class="chart-time-title">Time before now</div>
             <div class="metric-row" style="margin-top:8px">
               <div class="metric-box"><div class="metric-label">Upload now</div><div class="metric-value" style="font-size:12px" data-live="{{ link.id }}-up">—</div></div>
               <div class="metric-box"><div class="metric-label">Injected delay</div><div class="metric-value" style="font-size:12px"><span data-live="{{ link.id }}-latency-small">{{ link.effective.delay_ms }}</span> ms</div></div>
@@ -125,59 +92,7 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="card-head">
-        <div>
-          <div class="card-title">Download throughput by WAN {{ metric_help("throughput", "Download throughput by WAN", "Each colored line represents one WAN. The vertical scale is Mbit/s, and the horizontal scale is time before now. Hover for sample values. The scale stays steady until a higher peak requires expansion.") }}</div>
-          <div class="card-sub">Each line shows one WAN. Hover over the graph for the sample time and measured rates.</div>
-        </div>
-      </div>
-      <div class="card-pad">
-        <div class="chart-axis-title">Download (Mbit/s)</div>
-        <div class="chart-frame">
-          <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
-          <div class="chart">
-            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
-              {% for link in links %}
-              <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
-              {% endfor %}
-            </svg>
-            <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
-          </div>
-          <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
-        </div>
-        <div class="chart-time-title">Time before now</div>
-        <div class="chart-legend">
-          {% for link in links %}
-          <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }} · <strong data-live="{{ link.id }}-down">—</strong></span>
-          {% endfor %}
-        </div>
-      </div>
-    </section>
-  </div>
-
-  <aside class="command-side">
-    <section class="card">
-      <div class="card-head">
-        <div><div class="card-title">Lab state {{ metric_help("lab-state", "Lab state", "Model SLA checks the configured impairment against lab thresholds. It does not prove that an application is healthy. DEM uses measured simulator transactions.") }}</div><div class="card-sub">Current operational context</div></div>
-      </div>
-      <div class="card-pad">
-        <div class="grid grid-2">
-          <div class="metric-box"><div class="metric-label">Model SLA passes</div><div class="metric-value" id="overview-health">{{ healthy_links }}/{{ links|length }}</div></div>
-          <div class="metric-box"><div class="metric-label">Faults</div><div class="metric-value" id="overview-faults">{{ global_runtime.active_fault_count }}</div></div>
-          <div class="metric-box"><div class="metric-label">Scenario</div><div class="metric-value" style="font-size:11px" id="overview-scenario">{{ scenario_state.scenario_name if scenario_state.active else "Idle" }}</div></div>
-          <div class="metric-box"><div class="metric-label">Capture</div><div class="metric-value" style="font-size:11px" id="overview-capture">{{ "Active" if capture_state.active else "Idle" }}</div></div>
-        </div>
-        {% if session_state.active %}
-        <div class="docs-tip" style="margin:10px 0 0">
-          <strong>Session active:</strong> {{ session_state.name }}<br>
-          Events created now are associated with this lab session.
-        </div>
-        {% endif %}
-      </div>
-    </section>
-
-    <section class="card" id="traffic-generator-overview">
+    <section class="card command-experience" id="traffic-generator-overview">
       <div class="card-head">
         <div>
           <div class="card-title">Corporate traffic</div>
@@ -259,23 +174,94 @@
       </div>
     </section>
 
-    <section class="card">
-      <div class="card-head"><div><div class="card-title">Quick actions</div><div class="card-sub">Common workflows without page hunting</div></div></div>
-      <div class="card-pad">
-        <div class="quick-actions">
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
+    <details class="card command-detail" id="command-topology">
+      <summary class="card-head">
+        <div>
+          <div class="card-title">Live path topology</div>
+          <div class="card-sub">Click a WAN to change it. Flow animation reflects measured traffic, not decorative state.</div>
+        </div>
+        <span class="status good" id="overview-live-status">Streaming</span>
+      </summary>
+      <div class="live-topology">
+        <div class="live-topology-stage">
+          <div class="live-node">
+            {% if appliance and appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.png') }}" alt="{{ appliance.vendor_name }}">
+            {% else %}<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="4" y="5" width="16" height="14" rx="2"/><path d="M8 9h8M8 13h3"/></svg>{% endif %}
+            <div><strong>{{ (appliance.vendor_name if appliance) or 'SD-WAN / Firewall' }}</strong><div class="card-sub">{% if appliance and (appliance.model or appliance.product) %}{{ appliance.model or appliance.product }} · {% endif %}appliance under test</div></div>
+          </div>
+
+          <div class="live-paths">
+            {% for link in links %}
+            {% set state_class = 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else '') %}
+            <button class="live-path {{ state_class }}" type="button" data-open-wan="{{ link.id }}" data-live-path="{{ link.id }}">
+              <div>
+                <div class="live-path-name">{{ link.label }}</div>
+                <div class="live-path-sub" data-live="{{ link.id }}-profile">{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</div>
+              </div>
+              <div class="live-path-metrics">
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-latency">{{ link.effective.delay_ms }}</strong><span>ms injected delay</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-loss">{{ link.effective.loss_pct }}</strong><span>% injected loss</span></div>
+                <div class="live-path-metric"><strong data-live="{{ link.id }}-quality">{{ link.runtime_quality }}%</strong><span>model quality</span></div>
+              </div>
+              <div class="live-path-right">
+                <span class="status {{ 'bad' if (link.fault != 'normal' or not link.sla.pass) else ('warn' if link.runtime_quality < 75 else 'good') }}" data-live="{{ link.id }}-status">
+                  {{ link.fault|replace('_',' ')|title if link.fault != 'normal' else ("Model SLA fail" if not link.sla.pass else "Model SLA pass") }}
+                </span>
+                <div class="live-throughput" data-live="{{ link.id }}-throughput">collecting traffic…</div>
+                <span class="path-full" data-diag="{{ link.id }}-badge" hidden></span>
+                <div class="live-activity-line">
+                  <span class="activity-state no-data" data-live="{{ link.id }}-activity-state">NO DATA</span>
+                  <span data-live="{{ link.id }}-last-seen">waiting…</span>
+                </div>
+              </div>
+              <span class="flow-track"></span>
+            </button>
+            {% endfor %}
+          </div>
+
+          <div class="live-node">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 18a4 4 0 0 1 .8-7.9A6 6 0 0 1 18.3 9a4.5 4.5 0 0 1-.8 9z"/></svg>
+            <div><strong>Upstream</strong><div class="card-sub">ISP / Internet</div></div>
+          </div>
         </div>
       </div>
-    </section>
+    </details>
 
-    <section class="card">
-      <div class="card-head">
+    <details class="card command-detail" id="command-history">
+      <summary class="card-head">
+        <div>
+          <div class="card-title">Download throughput by WAN {{ metric_help("throughput", "Download throughput by WAN", "Each colored line represents one WAN. The vertical scale is Mbit/s, and the horizontal scale is time before now. Hover for sample values. The scale stays steady until a higher peak requires expansion.") }}</div>
+          <div class="card-sub">Each line shows one WAN. Hover over the graph for the sample time and measured rates.</div>
+        </div>
+      </summary>
+      <div class="card-pad">
+        <div class="chart-axis-title">Download (Mbit/s)</div>
+        <div class="chart-frame">
+          <div class="chart-y-axis" id="overview-throughput-y"><span>—</span><span>—</span><span>—</span><span>—</span><span>0</span></div>
+          <div class="chart">
+            <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+              {% for link in links %}
+              <path class="chart-line {{ 'primary' if loop.index0 == 0 else 'secondary' }}" data-chart="{{ link.id }}-down"></path>
+              {% endfor %}
+            </svg>
+            <div class="chart-empty" id="throughput-empty">Collecting live samples…</div>
+          </div>
+          <div class="chart-x-axis" id="overview-throughput-x"><span>Start</span><span>Now</span></div>
+        </div>
+        <div class="chart-time-title">Time before now</div>
+        <div class="chart-legend">
+          {% for link in links %}
+          <span class="legend-item"><span class="legend-dot {{ 'blue' if loop.index0 else '' }}"></span>{{ link.label }} · <strong data-live="{{ link.id }}-down">—</strong></span>
+          {% endfor %}
+        </div>
+      </div>
+    </details>
+
+    <details class="card command-detail" id="command-activity">
+      <summary class="card-head">
         <div><div class="card-title">Recent activity</div><div class="card-sub">What changed and when</div></div>
         <button class="btn btn-sm" type="button" onclick="document.getElementById('activity-toggle').click()">Open rail</button>
-      </div>
+      </summary>
       <div class="card-pad">
         <div class="timeline">
           {% if events %}
@@ -291,8 +277,7 @@
           {% endif %}
         </div>
       </div>
-    </section>
-  </aside>
+    </details>
 </div>
 
 {% for link in links %}
@@ -594,12 +579,6 @@ NetEmUI.createLiveClient({
         path.classList.toggle("warn", link.fault === "normal" && link.sla?.pass && Number(link.quality) < 75);
       }
 
-      const spark = document.querySelector('[data-spark="' + link.id + '-down"]');
-      if (spark && h) NetEmUI.renderSeries([spark],[h.down],{
-        axis:document.getElementById(link.id+"-throughput-y"),timeAxis:document.getElementById(link.id+"-throughput-x"),
-        timestamps:h.timestamps,unit:"",slots:120,animate:true,stableScale:true,
-        hoverLabels:[link.label || link.name || link.id],sampleUnit:"Mbit/s"
-      });
 
     });
 

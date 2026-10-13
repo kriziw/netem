@@ -1,12 +1,13 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-brand-revision="{{ branding_revision }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <title>{% block title %}{{ branding.name }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   {% if branding_enabled %}
-  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% for font in branding.fonts %}<link rel="preload" as="font" href="{{ branding_asset_url(font.file) }}" crossorigin>{% endfor %}
+  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet', brand=branding_revision) }}">
   {% if branding.favicon %}<link data-brand-icon rel="icon" href="{{ branding_asset_url(branding.favicon) }}">{% endif %}
   {% endif %}
   {% block head %}{% endblock %}
@@ -28,7 +29,7 @@
       <div class="nav-group">
         <div class="nav-group-title">{{ group.label }}</div>
         {% for item in group['items'] %}
-          <a class="nav-link {% if page == item.id %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
+          <a class="nav-link {% if page == item.id or (item.id == 'settings' and settings_group) %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="nav-icon">
               {% if item.icon == 'overview' %}
                 <svg viewBox="0 0 24 24"><path d="M4 13h6V4H4zM14 20h6v-7h-6zM14 4h6v5h-6zM4 20h6v-3H4z"/></svg>
@@ -109,6 +110,11 @@
     </div>
 
     <main class="page" data-ui-version="{{ ui_version }}">
+      {% if settings_group %}
+      <div class="settings-layout">
+        {% include "_settings_nav.html" %}
+        <div class="settings-content">
+      {% endif %}
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="flash-stack">
@@ -119,6 +125,7 @@
         {% endif %}
       {% endwith %}
       {% block content %}{% endblock %}
+      {% if settings_group %}</div></div>{% endif %}
     </main>
   </section>
 </div>
