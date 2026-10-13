@@ -1,0 +1,18 @@
+<section class="card" id="no-session-warning" role="alertdialog" aria-labelledby="no-session-title" aria-describedby="no-session-text">
+  <div class="card-head">
+    <div><div class="card-title" id="no-session-title">No lab session is running</div></div>
+    <span class="status warn">No session</span>
+  </div>
+  <div class="card-pad">
+    <p id="no-session-text">&ldquo;{{ scenario.name }}&rdquo; would run on {{ link_name }} without a session. Without one, the client, the appliance and the WAN roles are not recorded, and the showcase stays on its waiting screen.</p>
+    <div class="actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
+      <a class="btn btn-primary" href="{{ url_for('sessions') }}">Start a session</a>
+      <form method="post" action="{{ url_for('lab_scenario_start') }}">
+        {% for name, value in fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <input type="hidden" name="no_session_ack" value="1">
+        <button class="btn" type="submit">Acknowledge and run anyway</button>
+      </form>
+    </div>
+  </div>
+</section>

@@ -87,7 +87,8 @@ class ControllerExecutionTests(unittest.TestCase):
         self.assertIn('WAN restoration failed', netem.SCENARIO_STATE['error'])
 
     def test_start_buttons_share_the_controller_managed_runner(self):
-        with patch.object(netem, 'get_scenarios', return_value=[self.scenario]), patch.object(netem.threading, 'Thread') as thread:
+        with patch.object(netem, 'get_scenarios', return_value=[self.scenario]), patch.object(netem, 'session_snapshot', return_value={'active': True}), \
+             patch.object(netem.threading, 'Thread') as thread:
             netem.SCENARIO_STATE['active'] = False
             netem.app.test_client().post('/lab/scenario/start', data={'link_id': 'wan1', 'scenario_id': 'manual'})
         scenario = thread.call_args.kwargs['args'][1]
