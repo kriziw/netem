@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.22.0](https://github.com/kriziw/netem/compare/v0.21.0...v0.22.0) (2026-10-13)
+
+
+### Features
+
+* **ui:** open scenario popups and navigate without page reloads ([#72](https://github.com/kriziw/netem/issues/72)) ([fbe2cdb](https://github.com/kriziw/netem/commit/fbe2cdb3e7ab3a4961c91d65e6cba0667aa4081f))
+
 ## [0.21.0](https://github.com/kriziw/netem/compare/v0.20.0...v0.21.0) (2026-10-13)
 
 
