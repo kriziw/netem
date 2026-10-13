@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.23.1](https://github.com/kriziw/netem/compare/v0.23.0...v0.23.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* keep the shaper's queue from adding latency on a moderately loaded link ([#78](https://github.com/kriziw/netem/issues/78)) ([4f1cd2a](https://github.com/kriziw/netem/commit/4f1cd2a865f20f9138e9ec897cc647fe7e745231))
+
 ## [0.23.0](https://github.com/kriziw/netem/compare/v0.22.0...v0.23.0) (2026-10-13)
 
 
