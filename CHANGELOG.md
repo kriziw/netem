@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.31.0](https://github.com/kriziw/netem/compare/v0.30.2...v0.31.0) (2026-10-13)
+
+
+### Features
+
+* show each traffic group's sub-score and what limits it under the experience score ([#111](https://github.com/kriziw/netem/issues/111)) ([97ded92](https://github.com/kriziw/netem/commit/97ded9240d5154950e9cba67b26419cd6c1e955c))
+
+
+### Bug Fixes
+
+* an information-level finding is not shown as a user impact ([#110](https://github.com/kriziw/netem/issues/110)) ([5e36dc9](https://github.com/kriziw/netem/commit/5e36dc96bc29d63d391c2fd664460d49784b0876))
+
 ## [0.30.2](https://github.com/kriziw/netem/compare/v0.30.1...v0.30.2) (2026-10-13)
 
 
