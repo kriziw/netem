@@ -49,12 +49,13 @@ class CalibrationRunTests(unittest.TestCase):
     def test_the_first_failure_stops_the_ladder_and_names_the_limit(self):
         self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
                              {"achieved_mbps": 98.0, "drop_pct": 0.0, "drops_ps": 0.0},
-                             {"achieved_mbps": 196.0, "drop_pct": 3.0, "drops_ps": 25.0}]
+                             {"achieved_mbps": 150.0, "drop_pct": 3.0, "drops_ps": 25.0}]
         result = netem.run_bandwidth_calibration("wan1")
         self.assertEqual(self.started, [50, 100, 200])
         self.assertEqual(len(self.stopped), 3)
         self.assertEqual(result["capacity_mbps"], 98.0)
-        self.assertEqual(result["limited_by"], "rate limiter queue: drops below the WAN rate")
+        self.assertEqual(result["limited_by"], "path or traffic generator: the WAN delivered less than offered; "
+                                                "the shaper also dropped 3.0% of packets")
 
     def test_a_busy_lab_is_not_loaded_and_the_refusal_is_saved(self):
         with patch.object(netem, "platform_test_busy", return_value="a scenario is running"):
