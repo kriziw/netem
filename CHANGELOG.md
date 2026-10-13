@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.1](https://github.com/kriziw/netem/compare/v0.30.0...v0.30.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* attribute a calibration shortfall by whether the paced users were busy ([#106](https://github.com/kriziw/netem/issues/106)) ([d2a4780](https://github.com/kriziw/netem/commit/d2a4780821fed0f491ca64cdeda8147214a3c6fd))
+
 ## [0.30.0](https://github.com/kriziw/netem/compare/v0.29.0...v0.30.0) (2026-10-13)
 
 
