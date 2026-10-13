@@ -5378,7 +5378,7 @@ SETTINGS_GROUPS = [
         ("branding_settings", None, "Branding"),
     ]},
     {"id": "system", "label": "System & integrations", "items": [
-        ("updates", None, "Application updates"),
+        ("updates", None, "Updates"),
         ("integrations", None, "API & integrations"),
     ]},
 ]
@@ -7568,6 +7568,16 @@ def security_beacon():
     return ("", 204)
 
 
+def simulator_update_state():
+    """The Traffic Simulator's agent and controlled-target releases for the Updates page, or why they are unknown."""
+    if not (traffic_generator_config(load_config()).get("host") and traffic_generator_api_key()):
+        return {}, "The Traffic Simulator is not configured. Connect it under Integrations first."
+    try:
+        return traffic_generator_request("/api/v1/controller/settings", timeout=6.0), None
+    except (RuntimeError, ValueError, KeyError) as exc:
+        return {}, str(exc)
+
+
 @app.route("/updates", methods=["GET", "POST"])
 def updates():
     restarting = False
@@ -7615,12 +7625,15 @@ def updates():
     else:
         status = git_update_status(fetch=False)
 
+    simulator, simulator_error = simulator_update_state()
     return render_template(
         "updates.html",
         page="settings",
         update_status=status,
         restarting=restarting,
         process_instance=PROCESS_INSTANCE,
+        simulator=simulator,
+        simulator_error=simulator_error,
     )
 
 

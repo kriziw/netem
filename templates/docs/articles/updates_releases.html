@@ -1,4 +1,13 @@
 
+<h2 id="one-place">One place for every update</h2>
+<p><a href="{{ url_for('updates') }}">Settings → Updates</a> installs and checks the three components of a lab from one page:</p>
+<ul>
+<li><strong>NetEm</strong>, the operator interface, tests and showroom, from the stable release on <code>origin/main</code>. NetEm restarts itself after an install.</li>
+<li><strong>Traffic Simulator</strong>, the simulated users, installed from its own release. The simulator restarts after an install. Tests and workloads block installs while they run.</li>
+<li><strong>Controlled target</strong>, the target on the ISP router, updated over its management connection. Connect or change that connection under <a href="{{ url_for('traffic_settings', section='maintenance') }}">Settings → Agent &amp; target</a>.</li>
+</ul>
+<p>Each card shows what is installed and the latest release. Keep the NetEm and simulator versions matching when you can; the Updates page warns when the simulator and target differ.</p>
+
 <h2 id="stable-channel">Stable update channel</h2>
 <p>The in-app updater always compares the installed checkout with <code>origin/main</code>. It does this regardless of the local branch name. This prevents older installations from becoming stranded when an old feature branch is merged and deleted.</p>
 
