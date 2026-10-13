@@ -29,6 +29,7 @@ from urllib.parse import urlsplit
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+import calibration
 import host_health
 import platform_test
 import site_catalog
@@ -2938,6 +2939,116 @@ def platform_self_test_file(kind):
         return (PLATFORM_TEST_DIR / file_name).read_text(encoding="utf-8"), media, name
     except OSError:
         return None
+
+
+CALIBRATION_LOCK = threading.Lock()
+CALIBRATION_STATE = {"running": False, "link_id": None, "target_mbps": None, "started_at": None}
+CALIBRATION_FILE = RUNTIME_DIR / "bandwidth-calibration.json"
+
+
+def wan_shaped_download(link_id):
+    effective = (RUNTIME_EFFECTIVE.get(link_id) or {}).get("effective") or {}
+    return float(effective["download_mbit"]) if effective.get("download_mbit") else None
+
+
+def measure_wan(link_id, start, end):
+    """Mean download rate, drop share and queue drops on one WAN between two times, from its telemetry."""
+    try:
+        with telemetry_connect() as conn:
+            row = conn.execute(
+                """
+                SELECT AVG(down_mbps) AS mbps, AVG(down_drop_pct) AS drop_pct,
+                       AVG(down_queue_drops_ps) AS drops_ps, COUNT(*) AS samples
+                FROM telemetry_samples
+                WHERE link_id = ? AND rate_valid = 1 AND timestamp >= ? AND timestamp <= ?
+                """,
+                (link_id, start, end),
+            ).fetchone()
+    except sqlite3.Error:
+        return {}
+    if not row or not row["samples"]:
+        return {}
+    return {"achieved_mbps": row["mbps"], "drop_pct": row["drop_pct"], "drops_ps": row["drops_ps"],
+            "samples": row["samples"]}
+
+
+def save_calibration(result):
+    CALIBRATION_FILE.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+    return result
+
+
+def last_bandwidth_calibration():
+    try:
+        return json.loads(CALIBRATION_FILE.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+
+
+def run_bandwidth_calibration(link_id):
+    """Step paced load up the ladder through the selected traffic path. Each step is judged on what the WAN carried,
+    what the shaper dropped, and the host's state. The workload is stopped after every step, even on failure."""
+    if not CALIBRATION_LOCK.acquire(blocking=False):
+        return None
+    run_id = None
+    steps = []
+    CALIBRATION_STATE.update(running=True, link_id=link_id, target_mbps=None, started_at=time.time())
+    try:
+        busy = platform_test_busy()
+        if busy:
+            raise RuntimeError(f"Calibration needs an idle lab: {busy}.")
+        ensure_traffic_path("bandwidth calibration")
+        shaped = wan_shaped_download(link_id)
+        for target in calibration.LADDER_MBPS:
+            users = max(10, min(500, int(target / 5)))
+            CALIBRATION_STATE["target_mbps"] = target
+            status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload={
+                "profile": "office", "pattern": "steady", "users": users, "spawn_rate": users,
+                "paced_mbps": target, "controller_lease_seconds": 120}, timeout=5.0)
+            run_id = (status.get("run") or {}).get("run_id")
+            time.sleep(calibration.SETTLE_S)
+            start = time.time()
+            time.sleep(calibration.MEASURE_S)
+            end = time.time()
+            stop_test_owned_workload(run_id)
+            run_id = None
+            measured = measure_wan(link_id, start, end)
+            host = host_headroom(window_s=int(calibration.MEASURE_S), now=end)
+            verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), measured.get("drop_pct"),
+                                             host.get("status", "unknown"), host.get("late_seconds", 0),
+                                             measured.get("drops_ps"))
+            steps.append(verdict)
+            if verdict["status"] == "fail" or (shaped and target >= shaped * calibration.REACHED_SHAPING):
+                break
+        result = calibration.summarise(steps, shaped)
+        result.update(link_id=link_id, generated_at=time.time(), settle_s=calibration.SETTLE_S,
+                      measure_s=calibration.MEASURE_S)
+    except RuntimeError as exc:
+        result = {"link_id": link_id, "generated_at": time.time(), "error": str(exc), "steps": steps}
+    except Exception as exc:
+        log_event("calibration", "Bandwidth calibration failed", error=str(exc)[:240])
+        result = {"link_id": link_id, "generated_at": time.time(), "error": "Calibration failed: " + str(exc)[:200],
+                  "steps": steps}
+    finally:
+        if run_id:
+            try:
+                stop_test_owned_workload(run_id)
+            except RuntimeError:
+                pass
+        CALIBRATION_STATE.update(running=False, target_mbps=None)
+        CALIBRATION_LOCK.release()
+    save_calibration(result)
+    if "error" not in result:
+        log_event("calibration", f"Bandwidth calibration of {link_id}: capacity {result['capacity_mbps']} Mbit/s, "
+                  f"limited by {result['limited_by']}")
+    return result
+
+
+def start_bandwidth_calibration(link_id):
+    """Start a calibration in the background, since a full ladder takes several minutes. False if one is running."""
+    if CALIBRATION_STATE.get("running"):
+        return False
+    threading.Thread(target=run_bandwidth_calibration, args=(link_id,), name="netem-calibration", daemon=True).start()
+    return True
 
 
 def prune_telemetry_history():

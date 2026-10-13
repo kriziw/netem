@@ -312,7 +312,7 @@ def init_app(app, netem):
     platform = Platform(netem)
     app.extensions["appliance_platform"] = platform
     mutating = {"inventory_save", "inventory_archive", "inventory_check", "inventory_select", "inventory_import",
-                "inventory_acknowledge", "platform_check", "platform_self_test", "traffic_path_save", "traffic_path_select", "traffic_path_remove"}
+                "inventory_acknowledge", "platform_check", "platform_self_test", "platform_calibrate", "traffic_path_save", "traffic_path_select", "traffic_path_remove"}
 
     @app.before_request
     def protect_inventory():
@@ -361,7 +361,8 @@ def init_app(app, netem):
     def platform_health():
         return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot(),
                                path_links=netem.load_config().get("wan_links", []), host=netem.host_headroom(),
-                               self_test=netem.last_platform_self_test(), group_titles=netem.platform_test.GROUP_TITLES)
+                               self_test=netem.last_platform_self_test(), group_titles=netem.platform_test.GROUP_TITLES,
+                               calibration=netem.last_bandwidth_calibration(), calibration_state=netem.CALIBRATION_STATE)
 
     @app.post("/platform-health/self-test", endpoint="platform_self_test")
     def platform_self_test():
@@ -381,6 +382,18 @@ def init_app(app, netem):
             abort(404)
         body, media, name = saved
         return Response(body, mimetype=media, headers={"Content-Disposition": f"attachment; filename={name}"})
+
+    @app.post("/platform-health/calibrate", endpoint="platform_calibrate")
+    def platform_calibrate():
+        link_id = request.form.get("link_id") or ""
+        known = {str(item.get("id") or item.get("bridge")) for item in netem.load_config().get("wan_links", [])}
+        if link_id not in known:
+            flash("Choose a configured WAN to calibrate.", "error")
+        elif not netem.start_bandwidth_calibration(link_id):
+            flash("A bandwidth calibration is already running.", "error")
+        else:
+            flash("Bandwidth calibration started. It takes several minutes; reload this page for the result.", "success")
+        return redirect(url_for("platform_health"))
 
     @app.get("/api/v1/appliances", endpoint="api_inventory")
     def api_inventory():
