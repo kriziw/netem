@@ -57,6 +57,9 @@ def install(app, netem):
         if not supplied or not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
             abort(400, 'Invalid form token. Reload the page and retry.')
         raw = {key: value for key, value in request.form.items() if key != 'integration_csrf'}
+        # Forms on the Updates page come back there; the simulator never sees this field.
+        return_to = raw.pop('return_to', '')
+        destination = url_for('updates') if return_to == 'updates' else url_for('traffic_settings', section=section)
         try:
             with netem.APPLIANCE_PLATFORM.operations:
                 if netem.scenario_snapshot().get('active'):
@@ -77,8 +80,11 @@ def install(app, netem):
                 netem.TRAFFIC_PATH_CACHE.update(checked=None, payload=None)
                 netem.log_event('traffic-configuration', reply.get('message') or 'Traffic configuration accepted', command=command)
                 flash(reply.get('message') or 'Task queued. Follow progress below.', 'warning' if raw.get('action') == 'save_interface' else 'success')
-            return redirect(url_for('traffic_settings', section=section))
+            return redirect(destination)
         except (RuntimeError, ValueError, KeyError) as exc:
+            if return_to == 'updates':
+                flash(str(exc), 'error')
+                return redirect(destination)
             # Retain entered values so validation never discards operator work.
             stale = False
             try:

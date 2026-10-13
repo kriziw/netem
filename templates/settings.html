@@ -13,7 +13,7 @@
 
 <div class="grid grid-2 settings-cards">
   {% if settings_group == "network" %}
-  {% for section,title,description in [('network','Traffic paths & network','Agent interfaces, verified test paths and saved unverified connections'),('experience','Application experience targets','Business-critical apps, deadlines, UDP quality and throughput limits'),('maintenance','Traffic agent & target','Service updates, management connections and agent recovery')] %}
+  {% for section,title,description in [('network','Traffic paths & network','Agent interfaces, verified test paths and saved unverified connections'),('experience','Application experience targets','Business-critical apps, deadlines, UDP quality and throughput limits'),('maintenance','Traffic agent & target','Management connections, configuration and agent recovery')] %}
   <a class="card" href="{{ url_for('traffic_settings',section=section) }}"><div class="card-head"><div><div class="card-title">{{ title }}</div><div class="card-sub">{{ description }}</div></div></div><div class="card-pad">Configure automatic test execution</div></a>
   {% endfor %}
   <a class="card" href="{{ url_for('setup') }}">
@@ -41,7 +41,7 @@
   {% endif %}
   {% if settings_group == "system" %}
   <a class="card" href="{{ url_for('updates') }}">
-    <div class="card-head"><div><div class="card-title">Application &amp; updates</div><div class="card-sub">Release channel, versioning and Git update status</div></div><span class="status {{ 'good' if update_status.ok and not update_status.update_available else 'warn' }}">v{{ app_version }}</span></div>
+    <div class="card-head"><div><div class="card-title">Updates</div><div class="card-sub">NetEm, the Traffic Simulator and the controlled target, in one place</div></div><span class="status {{ 'good' if update_status.ok and not update_status.update_available else 'warn' }}">v{{ app_version }}</span></div>
     <div class="card-pad">
       <div class="kv">
         <div class="k">Channel</div><div class="v mono">origin/main</div>
