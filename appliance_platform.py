@@ -6,7 +6,7 @@ import time
 import ipaddress
 import uuid
 
-from flask import abort, flash, g, jsonify, redirect, render_template, request, url_for
+from flask import Response, abort, flash, g, jsonify, redirect, render_template, request, url_for
 
 from appliance_inventory import INTERVAL, STALE_AFTER, Store, observe, readiness, validate
 
@@ -312,7 +312,7 @@ def init_app(app, netem):
     platform = Platform(netem)
     app.extensions["appliance_platform"] = platform
     mutating = {"inventory_save", "inventory_archive", "inventory_check", "inventory_select", "inventory_import",
-                "inventory_acknowledge", "platform_check", "traffic_path_save", "traffic_path_select", "traffic_path_remove"}
+                "inventory_acknowledge", "platform_check", "platform_self_test", "traffic_path_save", "traffic_path_select", "traffic_path_remove"}
 
     @app.before_request
     def protect_inventory():
@@ -360,7 +360,27 @@ def init_app(app, netem):
     @app.get("/platform-health", endpoint="platform_health")
     def platform_health():
         return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot(),
-                               path_links=netem.load_config().get("wan_links", []), host=netem.host_headroom())
+                               path_links=netem.load_config().get("wan_links", []), host=netem.host_headroom(),
+                               self_test=netem.last_platform_self_test(), group_titles=netem.platform_test.GROUP_TITLES)
+
+    @app.post("/platform-health/self-test", endpoint="platform_self_test")
+    def platform_self_test():
+        report = netem.run_platform_self_test()
+        if report is None:
+            flash("A platform self-test is already running.", "error")
+        else:
+            counts = report["counts"]
+            flash(f"Platform self-test {report['status']}: {counts['fail']} failed, {counts['warn']} warnings.",
+                  "error" if report["status"] == "fail" else "success")
+        return redirect(url_for("platform_health"))
+
+    @app.get("/platform-health/self-test/<kind>", endpoint="platform_self_test_download")
+    def platform_self_test_download(kind):
+        saved = netem.platform_self_test_file(kind)
+        if saved is None:
+            abort(404)
+        body, media, name = saved
+        return Response(body, mimetype=media, headers={"Content-Disposition": f"attachment; filename={name}"})
 
     @app.get("/api/v1/appliances", endpoint="api_inventory")
     def api_inventory():

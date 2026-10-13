@@ -220,3 +220,19 @@ def summarize(rows, interval_s, window_s):
         "intervals": intervals[-10:],
         "current": latest,
     }
+
+
+def read_carrier(sys_net, name):
+    """Whether the link has carrier (a cable and a peer), or None when it cannot be read."""
+    try:
+        return (sys_net / name / "carrier").read_text().strip() == "1"
+    except OSError:
+        return None
+
+
+def read_sysctl(proc, name):
+    """A kernel setting such as net/ipv4/ip_forward, as text, or None."""
+    try:
+        return (proc / "sys" / name).read_text().strip()
+    except OSError:
+        return None
