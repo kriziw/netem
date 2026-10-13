@@ -360,7 +360,7 @@ def init_app(app, netem):
     @app.get("/platform-health", endpoint="platform_health")
     def platform_health():
         return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot(),
-                               path_links=netem.load_config().get("wan_links", []))
+                               path_links=netem.load_config().get("wan_links", []), host=netem.host_headroom())
 
     @app.get("/api/v1/appliances", endpoint="api_inventory")
     def api_inventory():

@@ -28,6 +28,7 @@ from urllib.parse import urlsplit
 from urllib import error as urllib_error
 from urllib import request as urllib_request
 
+import host_health
 import site_catalog
 from showroom import create_showroom_app
 import branding
@@ -2602,6 +2603,26 @@ def init_telemetry_db():
                 ON probe_samples(link_id, timestamp);
             CREATE INDEX IF NOT EXISTS idx_probe_session
                 ON probe_samples(session_id, timestamp);
+
+            CREATE TABLE IF NOT EXISTS host_samples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp REAL NOT NULL,
+                status TEXT NOT NULL,
+                reasons TEXT NOT NULL,
+                sampler_lag_ms REAL,
+                collect_ms REAL,
+                cpu_busy_pct REAL,
+                cpu_steal_pct REAL,
+                cpu_iowait_pct REAL,
+                mem_available_pct REAL,
+                psi_cpu REAL,
+                psi_memory REAL,
+                psi_io REAL,
+                nic_drops_ps REAL,
+                disk_free_pct REAL
+            );
+            CREATE INDEX IF NOT EXISTS idx_host_time
+                ON host_samples(timestamp);
             """
         )
 
@@ -2696,11 +2717,65 @@ def collect_telemetry_sample():
     return rows
 
 
+HOST_STATE = {}
+HOST_STATUS = {"status": None}
+
+
+def record_host_sample(lag_ms: float, collect_ms: float):
+    """Store one reading of the NetEm host beside the telemetry it may disturb. Never raises: measurements matter more."""
+    try:
+        cfg = load_config()
+        interfaces = [name for link in cfg.get("wan_links", []) for name in (link.get("inner"), link.get("outer")) if name]
+        reading, next_state = host_health.sample_host(HOST_STATE, interfaces, time.monotonic(), disk_path=RUNTIME_DIR)
+        HOST_STATE.clear()
+        HOST_STATE.update(next_state)
+        reading.update(sampler_lag_ms=round(lag_ms, 1), collect_ms=round(collect_ms, 1))
+        verdict = host_health.assess(reading)
+        with telemetry_connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO host_samples (timestamp, status, reasons, sampler_lag_ms, collect_ms, cpu_busy_pct,
+                    cpu_steal_pct, cpu_iowait_pct, mem_available_pct, psi_cpu, psi_memory, psi_io, nic_drops_ps,
+                    disk_free_pct)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (time.time(), verdict["status"], json.dumps(verdict["reasons"]), reading["sampler_lag_ms"],
+                 reading["collect_ms"], reading.get("cpu_busy_pct"), reading.get("cpu_steal_pct"),
+                 reading.get("cpu_iowait_pct"), reading.get("mem_available_pct"), reading.get("psi_cpu"),
+                 reading.get("psi_memory"), reading.get("psi_io"), reading.get("nic_drops_ps"),
+                 reading.get("disk_free_pct")),
+            )
+        if verdict["status"] != HOST_STATUS["status"]:
+            HOST_STATUS["status"] = verdict["status"]
+            labels = [item["label"] for item in verdict["reasons"]]
+            message = f"NetEm host {verdict['status'].replace('_', ' ')}" + (f": {', '.join(labels)}" if labels else "")
+            log_event("host-health", message, status=verdict["status"], reasons=labels)
+    except Exception as exc:
+        log_event("host-health", "Host reading failed", error=str(exc)[:240])
+
+
+def host_headroom(window_s: int = 1800, now=None):
+    """The NetEm host over the last window, for the Platform Health page."""
+    now = time.time() if now is None else now
+    try:
+        with telemetry_connect() as conn:
+            rows = [dict(row) for row in conn.execute(
+                "SELECT * FROM host_samples WHERE timestamp >= ? AND timestamp <= ? ORDER BY timestamp",
+                (now - window_s, now + 1),
+            ).fetchall()]
+    except sqlite3.Error:
+        rows = []
+    for row in rows:
+        row["reasons"] = json.loads(row["reasons"] or "[]")
+    return host_health.summarize(rows, TELEMETRY_SAMPLE_SECONDS, window_s)
+
+
 def prune_telemetry_history():
     cutoff = time.time() - TELEMETRY_RETENTION_HOURS * 3600
     with telemetry_connect() as conn:
         conn.execute("DELETE FROM telemetry_samples WHERE timestamp < ?", (cutoff,))
         conn.execute("DELETE FROM probe_samples WHERE timestamp < ?", (cutoff,))
+        conn.execute("DELETE FROM host_samples WHERE timestamp < ?", (cutoff,))
 
 
 # A wall clock that moves back further than this (an NTP correction of a clock that ran ahead)
@@ -2734,8 +2809,13 @@ def telemetry_worker():
     next_prune = time.monotonic() + 300
     next_bridge_check = time.monotonic() + BRIDGE_CHECK_SECONDS
     wall, clock = time.time(), time.monotonic()
+    last_started = None
     while not BACKGROUND_STOP.is_set():
         started = time.monotonic()
+        # How late this pass started compared with when it was due. A late sampler means the host is not keeping up,
+        # so the rates computed from its samples are less exact.
+        lag_ms = 0.0 if last_started is None else max(0.0, (started - last_started - TELEMETRY_SAMPLE_SECONDS) * 1000)
+        last_started = started
         if started >= next_bridge_check:
             next_bridge_check = started + BRIDGE_CHECK_SECONDS
             try:
@@ -2751,6 +2831,7 @@ def telemetry_worker():
             elif step >= CLOCK_STEP_SECONDS * 12:
                 note_clock_step(step, 0)
             collect_telemetry_sample()
+            record_host_sample(lag_ms, (time.monotonic() - started) * 1000)
             if time.monotonic() >= next_prune:
                 prune_telemetry_history()
                 next_prune = time.monotonic() + 300
