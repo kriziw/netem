@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.32.0](https://github.com/kriziw/netem/compare/v0.31.0...v0.32.0) (2026-10-13)
+
+
+### Features
+
+* show each traffic group's sub-score under the showcase's experience tiles ([#113](https://github.com/kriziw/netem/issues/113)) ([01f7b97](https://github.com/kriziw/netem/commit/01f7b97ece4d31ed5d8c112aac38dafe7921d08d))
+
 ## [0.31.0](https://github.com/kriziw/netem/compare/v0.30.2...v0.31.0) (2026-10-13)
 
 
