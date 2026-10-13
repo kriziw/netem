@@ -30,6 +30,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import calibration
+import calibration_log
 import host_health
 import platform_test
 import site_catalog
@@ -2972,8 +2973,129 @@ def measure_wan(link_id, start, end):
             "samples": row["samples"]}
 
 
+def calibration_device(link_id):
+    """The interfaces on each side of one WAN: the inner side carries the download, the outer side the upload."""
+    link = next((item for item in load_config().get("wan_links", [])
+                 if (item.get("id") or item.get("bridge")) == link_id), {})
+    return {"down": link.get("inner"), "up": link.get("outer")}
+
+
+def qdisc_readings(devices):
+    """tc -s counters for each side of the WAN: the raw text and the counters parsed per qdisc."""
+    readings = {}
+    for direction, device in devices.items():
+        if not device:
+            continue
+        rc, out, err = run_cmd(f"{TC} -s qdisc show dev {device}")
+        if rc != 0:
+            readings[direction] = {"device": device, "raw": f"tc failed: {err or out}", "parsed": []}
+            continue
+        parsed = [{key: item.get(key) for key in ("kind", "handle", "root", "packets", "drops", "overlimits",
+                                                  "backlog_bytes")}
+                  for item in parse_qdisc_stats(out)]
+        readings[direction] = {"device": device, "raw": out, "parsed": parsed}
+    return readings
+
+
+def simulator_state():
+    """What the Traffic Simulator reports at this moment: what it is running and what it has recorded."""
+    try:
+        status = traffic_generator_request("/api/v1/status", timeout=3.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)[:200]}
+    dem = status.get("dem") or {}
+    return {"status": status.get("status"), "users": status.get("users"),
+            "run_id": (status.get("run") or {}).get("run_id"),
+            "dropped_transactions": status.get("dropped_transactions"),
+            "persistence_error": status.get("persistence_error"),
+            "requests_per_second": dem.get("requests_per_second"),
+            "availability_pct": dem.get("availability_pct"), "p95_ms": dem.get("p95_ms")}
+
+
+def wan_timeline(link_id, start, end):
+    """The per-second telemetry of one WAN across a window."""
+    try:
+        with telemetry_connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, down_mbps, up_mbps, down_queue_drops_ps, down_injected_drops_ps, down_drop_pct,
+                       down_backlog_bytes, up_queue_drops_ps, up_backlog_bytes, rate_valid
+                FROM telemetry_samples
+                WHERE link_id = ? AND timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp
+                """,
+                (link_id, start, end),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
+
+
+def host_window(start, end):
+    """The NetEm host's per-second readings across a window."""
+    try:
+        with telemetry_connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT timestamp, status, cpu_busy_pct, cpu_steal_pct, psi_cpu, psi_io, mem_available_pct,
+                       sampler_lag_ms, collect_ms, nic_drops_ps
+                FROM host_samples
+                WHERE timestamp >= ? AND timestamp <= ?
+                ORDER BY timestamp
+                """,
+                (start, end),
+            ).fetchall()
+    except sqlite3.Error:
+        return []
+    return [dict(row) for row in rows]
+
+
+def calibration_probe(link_id):
+    """One ICMP probe through the WAN at the end of a step, when the WAN has a probe configured."""
+    cfg = load_config()
+    candidate = next((item for item in get_probes(cfg)
+                      if item.get("link_id") == link_id and item.get("kind") == "icmp"), None)
+    if candidate is None:
+        return {"skipped": "No ICMP probe is configured for this WAN."}
+    outcome = execute_probe(candidate, cfg)
+    return {"success": bool(outcome.get("success")), "target": outcome.get("target"),
+            "latency_ms": outcome.get("latency_ms"), "detail": outcome.get("detail")}
+
+
+def events_between(start, end, limit=2000):
+    """NetEm's event log entries recorded between two times."""
+    try:
+        lines = EVENT_LOG_PATH.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return []
+    events = []
+    for line in lines[-20000:]:
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if start <= event.get("timestamp", 0) <= end:
+            events.append(event)
+    return events[:limit]
+
+
+def calibration_file(kind):
+    """The saved calibration as (body, media type, download name), or None when there is none."""
+    if kind == "text":
+        path, media, name = CALIBRATION_FILE.with_suffix(".txt"), "text/plain; charset=utf-8", "netem-bandwidth-calibration.txt"
+    elif kind == "json":
+        path, media, name = CALIBRATION_FILE, "application/json", "netem-bandwidth-calibration.json"
+    else:
+        return None
+    try:
+        return path.read_text(encoding="utf-8"), media, name
+    except OSError:
+        return None
+
+
 def save_calibration(result):
     CALIBRATION_FILE.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
+    CALIBRATION_FILE.with_suffix(".txt").write_text(calibration_log.text_report(result), encoding="utf-8")
     return result
 
 
@@ -2991,6 +3113,7 @@ def run_bandwidth_calibration(link_id):
         return None
     run_id = None
     steps = []
+    session_start = time.time()
     CALIBRATION_STATE.update(running=True, link_id=link_id, target_mbps=None, started_at=time.time())
     try:
         busy = platform_test_busy()
@@ -3006,9 +3129,14 @@ def run_bandwidth_calibration(link_id):
                 "paced_mbps": target, "controller_lease_seconds": 120}, timeout=5.0)
             run_id = (status.get("run") or {}).get("run_id")
             time.sleep(calibration.SETTLE_S)
+            devices = calibration_device(link_id)
+            qdisc_before = qdisc_readings(devices)
+            sim_before = simulator_state()
             start = time.time()
             time.sleep(calibration.MEASURE_S)
             end = time.time()
+            qdisc_after = qdisc_readings(devices)
+            sim_after = simulator_state()
             stop_test_owned_workload(run_id)
             run_id = None
             measured = measure_wan(link_id, start, end)
@@ -3016,6 +3144,21 @@ def run_bandwidth_calibration(link_id):
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), measured.get("drop_pct"),
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
                                              measured.get("drops_ps"))
+            verdict["diagnostics"] = {
+                "window": {"start": start, "end": end},
+                "qdisc_delta": {direction: calibration_log.qdisc_deltas(
+                                    (qdisc_before.get(direction) or {}).get("parsed"),
+                                    (qdisc_after.get(direction) or {}).get("parsed"))
+                                for direction in devices if devices.get(direction)},
+                "tc_start": {direction: reading["raw"] for direction, reading in qdisc_before.items()},
+                "tc_end": {direction: reading["raw"] for direction, reading in qdisc_after.items()},
+                "simulator_before": sim_before,
+                "simulator_after": sim_after,
+                "wan_timeline": wan_timeline(link_id, start, end),
+                "host_timeline": host_window(start, end),
+                "probe": calibration_probe(link_id),
+            }
+            log_event("calibration", calibration_log.step_line(verdict), target_mbps=target, status=verdict["status"])
             steps.append(verdict)
             if verdict["status"] == "fail" or (shaped and target >= shaped * calibration.REACHED_SHAPING):
                 break
@@ -3036,6 +3179,7 @@ def run_bandwidth_calibration(link_id):
                 pass
         CALIBRATION_STATE.update(running=False, target_mbps=None)
         CALIBRATION_LOCK.release()
+    result["events"] = events_between(session_start, time.time())
     save_calibration(result)
     if "error" not in result:
         log_event("calibration", f"Bandwidth calibration of {link_id}: capacity {result['capacity_mbps']} Mbit/s, "

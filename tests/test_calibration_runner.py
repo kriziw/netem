@@ -1,4 +1,5 @@
-"""The calibration drives paced steps up the ladder, stops after each one, and stops at the first failure."""
+"""The calibration drives paced steps up the ladder, stops after each one, stops at the first failure, and keeps logs."""
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -22,6 +23,13 @@ class CalibrationRunTests(unittest.TestCase):
             patch.object(netem, "stop_test_owned_workload", side_effect=lambda run_id: self.stopped.append(run_id)),
             patch.object(netem, "measure_wan", side_effect=lambda link, start, end: self.measurements.pop(0)),
             patch.object(netem, "host_headroom", return_value={"status": "ok", "late_seconds": 0}),
+            patch.object(netem, "calibration_device", return_value={"down": None, "up": None}),
+            patch.object(netem, "qdisc_readings", return_value={}),
+            patch.object(netem, "simulator_state", return_value={"status": "running", "users": 10}),
+            patch.object(netem, "wan_timeline", return_value=[]),
+            patch.object(netem, "host_window", return_value=[]),
+            patch.object(netem, "calibration_probe", return_value={"skipped": "No ICMP probe is configured for this WAN."}),
+            patch.object(netem, "events_between", return_value=[]),
             patch.object(netem.time, "sleep"),
             patch.object(netem, "log_event"),
         ]
@@ -57,6 +65,35 @@ class CalibrationRunTests(unittest.TestCase):
         self.assertEqual(result["limited_by"], "path or traffic generator: the WAN delivered less than offered; "
                                                 "the shaper also dropped 3.0% of packets")
 
+    def test_each_step_keeps_its_diagnostics_and_logs_one_line(self):
+        self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
+                             {"achieved_mbps": 150.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        with patch.object(netem, "log_event") as logged:
+            result = netem.run_bandwidth_calibration("wan1")
+        self.assertEqual(len(result["steps"]), 2)
+        for verdict in result["steps"]:
+            self.assertIn("window", verdict["diagnostics"])
+            self.assertIn("simulator_before", verdict["diagnostics"])
+            self.assertIn("probe", verdict["diagnostics"])
+        step_lines = [call.args[1] for call in logged.call_args_list
+                      if call.args[0] == "calibration" and " Mbit/s " in call.args[1]]
+        self.assertEqual(len(step_lines), 2)
+        self.assertIn("50 Mbit/s PASS", step_lines[0])
+
+    def test_the_text_and_json_logs_are_saved_for_download(self):
+        self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
+                             {"achieved_mbps": 150.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        with patch.object(netem, "events_between",
+                          return_value=[{"timestamp": 1.0, "kind": "calibration", "message": "50 Mbit/s PASS"}]):
+            netem.run_bandwidth_calibration("wan1")
+        body, media, name = netem.calibration_file("text")
+        self.assertEqual(name, "netem-bandwidth-calibration.txt")
+        self.assertIn("NetEm bandwidth calibration", body)
+        self.assertIn("[calibration] 50 Mbit/s PASS", body)
+        saved = json.loads(netem.calibration_file("json")[0])
+        self.assertEqual(saved["link_id"], "wan1")
+        self.assertIsNone(netem.calibration_file("pdf"))
+
     def test_a_busy_lab_is_not_loaded_and_the_refusal_is_saved(self):
         with patch.object(netem, "platform_test_busy", return_value="a scenario is running"):
             result = netem.run_bandwidth_calibration("wan1")
@@ -71,6 +108,35 @@ class CalibrationRunTests(unittest.TestCase):
         finally:
             netem.CALIBRATION_LOCK.release()
 
+
+class SessionEventTests(unittest.TestCase):
+    def test_only_the_events_inside_the_window_are_kept(self):
+        lines = [json.dumps({"timestamp": 5, "kind": "a", "message": "before"}),
+                 json.dumps({"timestamp": 15, "kind": "b", "message": "inside"}),
+                 json.dumps({"timestamp": 25, "kind": "c", "message": "after"})]
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            path = Path(tmp) / "events.jsonl"
+            path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+            with patch.object(netem, "EVENT_LOG_PATH", path):
+                events = netem.events_between(10, 20)
+        self.assertEqual([event["message"] for event in events], ["inside"])
+
+
+class CalibrationDownloadRouteTests(unittest.TestCase):
+    def test_a_saved_log_downloads_and_a_missing_one_is_not_found(self):
+        with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp:
+            base = Path(tmp) / "bandwidth-calibration.json"
+            with patch.object(netem, "CALIBRATION_FILE", base):
+                client = netem.app.test_client()
+                self.assertEqual(client.get("/platform-health/calibration/text").status_code, 404)
+                base.write_text(json.dumps({"link_id": "wan1"}), encoding="utf-8")
+                base.with_suffix(".txt").write_text("NetEm bandwidth calibration" + chr(10), encoding="utf-8")
+                response = client.get("/platform-health/calibration/text")
+                self.assertEqual(response.status_code, 200)
+                self.assertIn("attachment", response.headers["Content-Disposition"])
+                self.assertIn("NetEm bandwidth calibration", response.get_data(as_text=True))
+                self.assertEqual(client.get("/platform-health/calibration/json").status_code, 200)
+                self.assertEqual(client.get("/platform-health/calibration/pdf").status_code, 404)
 
 if __name__ == "__main__":
     unittest.main()
