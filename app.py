@@ -97,7 +97,7 @@ def protect_integration_forms():
     if request.method == "POST" and request.endpoint in (
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
-        "branding_activate", "branding_save", "branding_delete", "appliance_save",
+        "branding_activate", "branding_save", "branding_delete", "branding_import", "appliance_save",
         "site_save", "site_apply_wan", "site_run", "site_stop",
     ):
         supplied = request.form.get("integration_csrf", "")
@@ -557,6 +557,10 @@ def legacy_traffic_path():
             "path": {key: selected.get(key) for key in ("interface", "gateway", "target", "source")},
             "message": (f"Traffic to {selected.get('target')} goes through the appliance at {selected.get('gateway')} on "
                         f"{selected.get('interface')}." if ready else health.get("message") or "The selected appliance route is not active.")}
+
+
+from branding_sync import BrandingSync
+BRANDING_SYNC = BrandingSync(BRAND_STORE, traffic_generator_request, BACKGROUND_STOP)
 
 
 def traffic_path_summary(path):
@@ -3824,6 +3828,7 @@ def start_background_workers():
     init_telemetry_db()
     BACKGROUND_STOP.clear()
     APPLIANCE_PLATFORM.start()
+    BRANDING_SYNC.start()
     ensure_time_sync()
     if TELEMETRY_THREAD is None or not TELEMETRY_THREAD.is_alive():
         TELEMETRY_THREAD = threading.Thread(
@@ -6123,7 +6128,7 @@ def branding_settings():
     return render_template("branding.html", page="settings", packs=packs, active=BRAND_STORE.active_id(),
                            editing=editing, manifest=BRAND_STORE.manifest(editing) if editing else {},
                            palette=branding.DEFAULT_PALETTE, brands_dir=str(BRANDS_DIR), store_error=BRAND_STORE.error,
-                           local_pack=branding.LOCAL_PACK)
+                           local_pack=branding.LOCAL_PACK, branding_sync=BRANDING_SYNC.state)
 
 
 @app.route("/settings/branding/preview/<pack_id>/<path:filename>")
@@ -6146,6 +6151,9 @@ def branding_activate():
     pack_id = request.form.get("pack") or None
     try:
         BRAND_STORE.set_active(pack_id)
+        sync = BRANDING_SYNC.sync()
+        if not sync["synced"]:
+            flash(sync["message"], "warning")
         flash("Default look restored." if pack_id is None else "Brand switched. Open screens follow on their next refresh.", "success")
     except ValueError as exc:
         flash(str(exc), "error")
@@ -6163,6 +6171,9 @@ def branding_save():
         pack_id = BRAND_STORE.save(request.form.get("pack") or None, request.form.to_dict(), uploads)
         if request.form.get("activate"):
             BRAND_STORE.set_active(pack_id)
+            sync = BRANDING_SYNC.sync()
+            if not sync["synced"]:
+                flash(sync["message"], "warning")
         flash("Brand saved." + (" It is now active." if request.form.get("activate") else ""), "success")
         return redirect(url_for("branding_settings", pack=pack_id))
     except (ValueError, OSError) as exc:
@@ -6170,10 +6181,43 @@ def branding_save():
         return redirect(url_for("branding_settings", pack=request.form.get("pack") or None))
 
 
+@app.post('/settings/branding/import')
+def branding_import():
+    upload = request.files.get('config')
+    try:
+        if not upload or not upload.filename.lower().endswith('.json'):
+            raise ValueError('Choose a branding JSON configuration file.')
+        data = upload.read(12 * 1024 * 1024 + 1)
+        if len(data) > 12 * 1024 * 1024:
+            raise ValueError('The branding config must be at most 12 MB.')
+        pack_id = BRAND_STORE.import_config(json.loads(data.decode('utf-8-sig')))
+        if request.form.get('activate'):
+            BRAND_STORE.set_active(pack_id)
+            sync = BRANDING_SYNC.sync()
+            if not sync['synced']:
+                flash(sync['message'], 'warning')
+        flash('Brand configuration imported. It applies to NetEm and Showroom; simulator synchronization is automatic when active.', 'success')
+        return redirect(url_for('branding_settings', pack=pack_id))
+    except (ValueError, OSError, TypeError) as exc:
+        flash('Brand not imported: ' + str(exc), 'error')
+        return redirect(url_for('branding_settings'))
+
+
+@app.get('/settings/branding/export/<pack_id>')
+def branding_export(pack_id):
+    if pack_id not in BRAND_STORE.packs():
+        abort(404)
+    response = Response(json.dumps(BRAND_STORE.export_config(pack_id), indent=2), mimetype='application/json')
+    response.headers['Content-Disposition'] = 'attachment; filename="' + branding.slugify(pack_id) + '.branding.json"'
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 @app.route("/settings/branding/delete", methods=["POST"])
 def branding_delete():
     try:
         BRAND_STORE.delete(request.form.get("pack"))
+        BRANDING_SYNC.sync()
         flash("Brand deleted.", "success")
     except (ValueError, OSError) as exc:
         flash(str(exc), "error")

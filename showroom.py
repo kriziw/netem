@@ -25,7 +25,7 @@ def create_showroom_app(snapshot, branding_source=None):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
             "default-src 'self'; script-src 'self'; style-src 'self'; "
-            "connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
+            "img-src 'self' https:; font-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
         )
         return response
 
@@ -41,6 +41,10 @@ def create_showroom_app(snapshot, branding_source=None):
     @viewer.get("/assets/showroom.css")
     def stylesheet():
         return send_from_directory(root / "static", "showroom.css")
+
+    @viewer.get('/assets/branding-live.js')
+    def branding_live_script():
+        return send_from_directory(root / 'static', 'branding-live.js')
 
     @viewer.get("/assets/showroom.js")
     def javascript():

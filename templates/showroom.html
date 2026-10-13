@@ -6,16 +6,16 @@
   <title>Showroom · {{ branding.name }}</title>
   <link rel="stylesheet" href="/assets/showroom.css">
   {% if branding_enabled %}
-  <link rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
-  {% if branding.favicon %}<link rel="icon" href="{{ url_for('branding_asset', filename=branding.favicon) }}">{% endif %}
+  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% if branding.favicon %}<link data-brand-icon rel="icon" href="{{ branding_asset_url(branding.favicon) }}">{% endif %}
   {% endif %}
   <script src="/assets/showroom.js" defer></script>
 </head>
 <body>
   <header>
     <div>
-      {% if branding.logo %}<img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">{% endif %}
-      <div class="eyebrow">{{ branding.name }} · Showroom</div><h1>Network resilience, live</h1>
+      <img data-brand-logo class="brand-logo" {% if branding.logo %}src="{{ branding_asset_url(branding.logo) }}"{% else %}hidden{% endif %} alt="{{ branding.name }}">
+      <div class="eyebrow"><span data-brand-name>{{ branding.name }}</span> · Showroom</div><h1>Network resilience, live</h1>
     </div>
     <div class="partner" id="partner" hidden><span class="eyebrow">SD-WAN under test</span><img id="partner-logo" alt="" hidden><strong id="partner-name"></strong></div>
     <div class="connection"><span id="connection" role="status">Connecting…</span><time id="updated">Waiting for live data</time></div>
@@ -97,5 +97,6 @@
       <p class="carries" data-field="carries"></p>
     </article>
   </template>
+<script src="/assets/branding-live.js"></script>
 </body>
 </html>

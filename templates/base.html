@@ -6,8 +6,8 @@
   <title>{% block title %}{{ branding.name }}{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   {% if branding_enabled %}
-  <link rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
-  {% if branding.favicon %}<link rel="icon" href="{{ url_for('branding_asset', filename=branding.favicon) }}">{% endif %}
+  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet') }}">
+  {% if branding.favicon %}<link data-brand-icon rel="icon" href="{{ branding_asset_url(branding.favicon) }}">{% endif %}
   {% endif %}
   {% block head %}{% endblock %}
 </head>
@@ -16,14 +16,11 @@
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
     <div class="brand">
-      {% if branding.logo %}
-      <img class="brand-logo" src="{{ url_for('branding_asset', filename=branding.logo) }}" alt="{{ branding.name }}">
-      {% else %}
-      <div class="brand-mark">{{ branding.mark }}</div>
-      {% endif %}
+      <img data-brand-logo class="brand-logo" {% if branding.logo %}src="{{ branding_asset_url(branding.logo) }}"{% else %}hidden{% endif %} alt="{{ branding.name }}">
+      <div data-brand-mark class="brand-mark" {% if branding.logo %}hidden{% endif %}>{{ branding.mark }}</div>
       <div>
-        <div class="brand-name">{{ branding.name }}</div>
-        <div class="brand-sub">{{ branding.subtitle }}</div>
+        <div data-brand-name class="brand-name">{{ branding.name }}</div>
+        <div data-brand-subtitle class="brand-sub">{{ branding.subtitle }}</div>
       </div>
     </div>
 
@@ -76,7 +73,7 @@
     <header class="topbar">
       <div style="display:flex;align-items:center;gap:10px">
         <button class="btn btn-sm mobile-menu" type="button" id="mobile-menu">Menu</button>
-        <div class="breadcrumb"><span>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
+        <div class="breadcrumb"><span data-brand-name>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
         <span id="inventory-alerts">{% if inventory_summary.critical %}<a class="top-pill alert" href="{{ url_for('inventory') }}">{{ inventory_summary.critical }} appliance alert{{ '' if inventory_summary.critical == 1 else 's' }}</a>{% elif inventory_summary.warnings %}<a class="top-pill" href="{{ url_for('inventory') }}">{{ inventory_summary.warnings }} appliance warning{{ '' if inventory_summary.warnings == 1 else 's' }}</a>{% endif %}</span>
@@ -283,5 +280,6 @@
 <script src="{{ url_for('static', filename='inventory.js') }}"></script>
 <template id="page-scripts">{% block scripts %}{% endblock %}</template>
 <script>NetEmActions.mount();</script>
+<script src="{{ url_for('static', filename='branding-live.js') }}"></script>
 </body>
 </html>
