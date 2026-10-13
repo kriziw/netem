@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.2](https://github.com/kriziw/netem/compare/v0.30.1...v0.30.2) (2026-10-13)
+
+
+### Bug Fixes
+
+* read the simulator's in-flight gauge, and say what slow transfers at the configured rate mean ([#108](https://github.com/kriziw/netem/issues/108)) ([26e5c66](https://github.com/kriziw/netem/commit/26e5c66777b57d23572c537828d400029901858f))
+
 ## [0.30.1](https://github.com/kriziw/netem/compare/v0.30.0...v0.30.1) (2026-10-13)
 
 
