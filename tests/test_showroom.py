@@ -144,7 +144,8 @@ class ListenerTests(unittest.TestCase):
     def test_surface_is_only_presentation_routes(self):
         allowed = {"/", "/api/snapshot", "/assets/showroom.css", "/assets/showroom.js", "/assets/branding-live.js", "/assets/time-format.js"}
         # Brand and vendor assets are the only other routes; without a brand they return 404.
-        assets = {"/branding/theme.css", "/branding/assets/<path:filename>", "/branding/status", "/assets/vendors/<vendor>.png"}
+        assets = {"/branding/theme.css", "/branding/assets/<path:filename>", "/branding/status", "/assets/vendors/<vendor>.png",
+                  "/assets/showcase-video"}
         self.assertEqual({rule.rule for rule in self.viewer.url_map.iter_rules()}, allowed | assets)
         self.assertEqual(self.client.get("/branding/theme.css").status_code, 404)
         self.assertEqual(self.client.get("/assets/vendors/fortinet.png").status_code, 200)

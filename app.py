@@ -21,6 +21,7 @@ import sys
 import subprocess
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -98,7 +99,7 @@ def protect_integration_forms():
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
         "branding_activate", "branding_save", "branding_delete", "branding_import", "appliance_save",
-        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save",
+        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save", "showcase_video_save",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -2230,8 +2231,11 @@ def session_appliance_snapshot():
 
 
 def session_wan_roles(cfg, primary=None, backup=None):
-    """The WANs a session's primary and backup site-test roles use. Defaults to the first two configured WANs."""
+    """The WANs a session's primary and backup site-test roles use. Two configured WANs are chosen by default. A lab
+    with fewer, and no explicit choice, has no roles: the session still starts, and its site tests say why they cannot."""
     ids = [link.get("id") for link in cfg.get("wan_links", [])]
+    if len(ids) < 2:
+        return None
     primary = primary or (ids[0] if ids else "")
     backup = backup or (ids[1] if len(ids) > 1 else "")
     if not get_link(cfg, primary):
@@ -5420,6 +5424,126 @@ def clock_label(timestamp, fmt):
     return time.strftime("%H:%M", moment)
 
 
+# ---------- Showcase video ----------
+#
+# An operator's video for the showcase's waiting screen: a YouTube or Vimeo link, embedded, or an uploaded MP4 or
+# WebM file kept in runtime/ and served by the showcase. The showcase embeds only those two hosts.
+
+SHOWCASE_VIDEO_DIR = RUNTIME_DIR / "showcase"
+SHOWCASE_VIDEO_TYPES = {".mp4", ".webm"}
+SHOWCASE_IMAGE_TYPES = {".gif"}  # an animated GIF loops by itself, with no player
+SHOWCASE_MEDIA_TYPES = SHOWCASE_VIDEO_TYPES | SHOWCASE_IMAGE_TYPES
+SHOWCASE_VIDEO_MAX_BYTES = 16 * 1024 * 1024
+SHOWCASE_EMBED = re.compile(
+    r"https://(www\.youtube-nocookie\.com/embed/[A-Za-z0-9_-]{6,20}|player\.vimeo\.com/video/[0-9]{6,})")
+
+
+def parse_video_link(raw):
+    """A YouTube or Vimeo link as its embeddable address. Any other host is refused."""
+    text = (raw or "").strip()
+    if not text or len(text) > 300:
+        raise ValueError("Enter a YouTube or Vimeo link.")
+    parsed = urllib.parse.urlsplit(text if "://" in text else "https://" + text)
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [part for part in parsed.path.split("/") if part]
+    video_id = None
+    if host in ("youtube.com", "m.youtube.com", "youtube-nocookie.com"):
+        query = urllib.parse.parse_qs(parsed.query)
+        if parts[:1] == ["watch"] and query.get("v"):
+            video_id = query["v"][0]
+        elif len(parts) >= 2 and parts[0] in ("embed", "shorts", "live"):
+            video_id = parts[1]
+    elif host == "youtu.be" and parts:
+        video_id = parts[0]
+    if host in ("youtube.com", "m.youtube.com", "youtube-nocookie.com", "youtu.be"):
+        if video_id and re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
+            return {"provider": "youtube", "id": video_id, "src": f"https://www.youtube-nocookie.com/embed/{video_id}"}
+    elif host in ("vimeo.com", "player.vimeo.com"):
+        numbers = [part for part in parts if part.isdigit()]
+        if numbers and len(numbers[-1]) >= 6:
+            return {"provider": "vimeo", "id": numbers[-1], "src": f"https://player.vimeo.com/video/{numbers[-1]}"}
+    raise ValueError("Use a YouTube or Vimeo link, or upload an MP4 or WebM file.")
+
+
+def check_video_upload(filename, data):
+    """The suffix of an uploaded animation, once its name, size and contents show an MP4, WebM or animated GIF."""
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in SHOWCASE_MEDIA_TYPES:
+        raise ValueError("Upload an MP4 or WebM video or an animated GIF, or paste a YouTube or Vimeo link.")
+    if len(data) > SHOWCASE_VIDEO_MAX_BYTES:
+        raise ValueError("The file is larger than 16 MB. Use a YouTube or Vimeo link for longer videos.")
+    is_mp4 = suffix == ".mp4" and data[4:8] == b"ftyp"
+    is_webm = suffix == ".webm" and data[:4] == b"\x1aE\xdf\xa3"
+    is_gif = suffix == ".gif" and data[:6] in (b"GIF87a", b"GIF89a")
+    if not (is_mp4 or is_webm or is_gif):
+        raise ValueError("The file is not an MP4, WebM or animated GIF.")
+    return suffix
+
+
+def remove_showcase_video_files():
+    for suffix in SHOWCASE_MEDIA_TYPES:
+        (SHOWCASE_VIDEO_DIR / f"video{suffix}").unlink(missing_ok=True)
+
+
+def showcase_video_file():
+    """The uploaded showcase video's path, when one is stored."""
+    video = load_config().get("showcase_video")
+    if not isinstance(video, dict) or video.get("kind") != "file":
+        return None
+    path = SHOWCASE_VIDEO_DIR / str(video.get("name") or "")
+    return path if path.suffix in SHOWCASE_MEDIA_TYPES and path.is_file() else None
+
+
+def showcase_video_public(cfg=None):
+    """The showcase video as the showcase may publish it: an embed address, or the route that serves the file."""
+    video = (cfg if cfg is not None else load_config()).get("showcase_video")
+    if not isinstance(video, dict):
+        return None
+    if video.get("kind") == "embed" and SHOWCASE_EMBED.fullmatch(str(video.get("src") or "")):
+        return {"kind": "embed", "provider": video.get("provider"), "src": video["src"]}
+    path = showcase_video_file() if video.get("kind") == "file" else None
+    if path:
+        return {"kind": "file", "src": "/assets/showcase-video", "media": "image" if path.suffix in SHOWCASE_IMAGE_TYPES else "video"}
+    return None
+
+
+@app.route("/settings/showcase-video", methods=["POST"])
+def showcase_video_save():
+    cfg = load_config()
+    back = url_for("settings", section="appearance")
+    if request.form.get("remove") == "1":
+        remove_showcase_video_files()
+        cfg.pop("showcase_video", None)
+        save_config(cfg)
+        log_event("settings", "Showcase video removed")
+        flash("The showcase video is removed. The waiting screen shows its animation again.", "success")
+        return redirect(back)
+    upload = request.files.get("video_file")
+    try:
+        if upload and upload.filename:
+            data = upload.read()
+            suffix = check_video_upload(upload.filename, data)
+            remove_showcase_video_files()
+            SHOWCASE_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+            (SHOWCASE_VIDEO_DIR / f"video{suffix}").write_bytes(data)
+            cfg["showcase_video"] = {"kind": "file", "name": f"video{suffix}", "title": Path(upload.filename).name[:120]}
+            message = "Showcase animation or video uploaded."
+        else:
+            link = parse_video_link(request.form.get("video_link"))
+            remove_showcase_video_files()
+            cfg["showcase_video"] = {"kind": "embed", **link}
+            message = "Showcase video linked."
+    except (ValueError, OSError) as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+    save_config(cfg)
+    log_event("settings", message)
+    flash(message, "success")
+    return redirect(back)
+
+
 @app.route("/settings/time-format", methods=["POST"])
 def time_format_save():
     value = request.form.get("time_format", "")
@@ -6287,6 +6411,7 @@ def settings():
         active_brand=BRAND_STORE.active_id(),
         appliance=appliance_under_test(),
         appliance_setting=cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {},
+        showcase_video=cfg.get("showcase_video"),
         vendors=SDWAN_VENDORS,
     )
 
@@ -6918,6 +7043,9 @@ def site_run():
     session = session_snapshot()
     if not session.get("active") or not session.get("site"):
         flash("Start a lab session before running site tests. The session fixes the client, the appliance and the WAN roles.", "error")
+        return redirect_after("tests")
+    if not session.get("wan"):
+        flash("This session has no primary and backup WAN, so its site tests cannot run. Start the session with two WANs.", "error")
         return redirect_after("tests")
     cfg = load_config()
     plan = active_site_plan({"site_profile": {key: session["site"][key] for key in SITE_FIELDS}}, simulator_catalog(max_age=0))
@@ -8029,6 +8157,7 @@ def showroom_idle_snapshot():
     outcome = showroom_outcome({}, None)
     return {
         "timestamp": time.time(), "links": [], "story": showroom_story({}, [], outcome), "time_format": time_format(),
+        "showcase_video": showcase_video_public(),
         "appliance": {}, "scenario": {"active": False}, "last_test": None,
         "session": {"active": False, "name": None, "site": None, "wan": None},
         "site": None, "plan": {"active": False, "label": None, "result": None, "tests": []},
@@ -8102,6 +8231,7 @@ def showroom_session_snapshot():
     story = showroom_story(diagnosis, links, outcome)
     return {
         "timestamp": now, "links": links, "story": story, "time_format": time_format(cfg),
+        "showcase_video": showcase_video_public(cfg),
         "appliance": {key: value for key, value in (lab_session.get("appliance") or {}).items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
@@ -8454,7 +8584,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
 
 
 APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
-showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE)
+showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE, showcase_video_file)
 
 
 def showroom_listener():

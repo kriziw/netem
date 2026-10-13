@@ -25,7 +25,8 @@
   <main>
     <section class="stage" id="stage" aria-live="polite" hidden>
       <div class="waiting" id="waiting" hidden>
-        <div class="waiting-media" aria-hidden="true">
+        <div class="waiting-media" id="waiting-media" aria-hidden="true"></div>
+        <template id="waiting-default">
           {% if branding.waiting_video %}
           <video src="{{ branding_asset_url(branding.waiting_video) }}" autoplay muted loop playsinline></video>
           {% else %}
@@ -47,7 +48,7 @@
             <circle class="wait-packet" r="5"><animateMotion dur="3.2s" begin="1.6s" repeatCount="indefinite" path="M300 110 L350 150 L450 150 L520 110"/></circle>
           </svg>
           {% endif %}
-        </div>
+        </template>
         <span class="eyebrow">Live SD-WAN demonstration</span>
         <h2>Waiting for the session to start</h2>
         <p class="waiting-note">The client, the appliance and the tests appear here once the operator starts the session.</p>

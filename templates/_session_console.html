@@ -28,7 +28,7 @@
       {% if not session_tests %}
         <p class="field-help">This session's site has no tests. Check the site on the <a href="{{ url_for('tests') }}#site-scenario">Tests page</a>.</p>
       {% endif %}
-      {% set test_busy = scenario_state.active or site_state.active or not traffic_generator.connected %}
+      {% set test_busy = scenario_state.active or site_state.active or not traffic_generator.connected or not session_wan %}
       {% for test in session_tests %}
         <div class="site-test-row">
           <div>
@@ -46,7 +46,7 @@
           </form>
         </div>
       {% endfor %}
-      <p class="field-help">{% if not traffic_generator.connected %}Connect the Traffic Simulator to start a test. {% elif test_busy %}A test is running. Stop it before you start another. {% endif %}Each test announces itself on the showcase for five seconds before it changes a WAN. Stop &amp; restore ends a running test and puts its WAN back.</p>
+      <p class="field-help">{% if not session_wan %}This session has no primary and backup WAN, so its site tests cannot run. {% elif not traffic_generator.connected %}Connect the Traffic Simulator to start a test. {% elif test_busy %}A test is running. Stop it before you start another. {% endif %}Each test announces itself on the showcase for five seconds before it changes a WAN. Stop &amp; restore ends a running test and puts its WAN back.</p>
       {% if site_state.active %}
         <form method="post" action="{{ url_for('site_stop') }}">
           <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">

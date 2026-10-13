@@ -321,3 +321,17 @@ test('the report and the showroom clock follow the chosen time format', () => {
   assert.match(ui.reportView(summary).meta, /finished 2:05 PM$/);
   context.window.NetEmTime.setFormat('24h');
 });
+
+test('the showcase video loops whether it is an embed or an uploaded file', () => {
+  const youtube = ui.waitingMedia({kind: 'embed', src: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'});
+  assert.equal(youtube.tag, 'iframe');
+  assert.match(youtube.src, /loop=1/);
+  assert.match(youtube.src, /playlist=dQw4w9WgXcQ/);
+  const vimeo = ui.waitingMedia({kind: 'embed', src: 'https://player.vimeo.com/video/76979871'});
+  assert.match(vimeo.src, /loop=1/);
+  assert.match(vimeo.src, /muted=1/);
+  assert.equal(ui.waitingMedia({kind: 'file', src: '/assets/showcase-video'}).tag, 'video');
+  assert.equal(ui.waitingMedia({kind: 'file', src: '/assets/showcase-video', media: 'image'}).tag, 'img');
+  assert.equal(ui.waitingMedia({kind: 'embed', src: 'https://evil.example/embed/abc'}), null);
+  assert.equal(ui.waitingMedia(null), null);
+});

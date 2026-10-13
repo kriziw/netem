@@ -269,9 +269,29 @@
     };
   }
 
+  // The operator's showcase video takes the waiting screen's place: a YouTube or Vimeo embed, or the uploaded file.
+  // Only the hosts the server allows are embedded, and the same check is repeated here.
+  const VIDEO_EMBED = /^https:\/\/(www\.youtube-nocookie\.com\/embed\/[A-Za-z0-9_-]{6,20}|player\.vimeo\.com\/video\/[0-9]{6,})$/;
+  // Embeds loop and start muted, as the uploaded file does. YouTube repeats one video only when it is also the
+  // playlist it plays; Vimeo has its own loop flag.
+  function embedAddress(src) {
+    if (src.includes('youtube-nocookie')) {
+      const id = src.split('/').pop();
+      return `${src}?autoplay=1&mute=1&loop=1&playlist=${id}`;
+    }
+    return `${src}?autoplay=1&muted=1&loop=1`;
+  }
+  function waitingMedia(video) {
+    if (!video) return null;
+    if (video.kind === 'embed' && VIDEO_EMBED.test(video.src || '')) return {tag: 'iframe', src: embedAddress(video.src)};
+    if (video.kind === 'file' && video.src === '/assets/showcase-video') {
+      return {tag: video.media === 'image' ? 'img' : 'video', src: video.src};
+    }
+    return null;
+  }
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
     phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView,
-    showPlanSummary, planSummaryView};
+    showPlanSummary, planSummaryView, waitingMedia, embedAddress};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -427,6 +447,33 @@
     }
   }
 
+  function renderWaitingMedia(video) {
+    const box = document.getElementById('waiting-media');
+    if (!box) return;
+    const wanted = JSON.stringify(video || null);
+    if (box.dataset.source === wanted) return;
+    box.dataset.source = wanted;
+    const media = waitingMedia(video);
+    if (!media) {
+      const fallback = document.getElementById('waiting-default');
+      box.replaceChildren(fallback ? fallback.content.cloneNode(true) : document.createTextNode(''));
+      return;
+    }
+    const node = document.createElement(media.tag);
+    node.src = media.src;
+    if (media.tag === 'iframe') {
+      node.title = 'Showcase video';
+      node.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+      node.allowFullscreen = true;
+      node.referrerPolicy = 'strict-origin-when-cross-origin';
+    } else if (media.tag === 'video') {
+      node.controls = true; node.autoplay = true; node.muted = true; node.loop = true; node.playsInline = true;
+    } else {
+      node.alt = 'Showcase animation';
+    }
+    box.replaceChildren(node);
+  }
+
   function renderStage() {
     const mode = stageMode(latest);
     document.body.dataset.mode = mode;
@@ -454,6 +501,7 @@
       document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
     }
     if (mode === 'waiting') {
+      renderWaitingMedia(latest.showcase_video);
       const view = waitingView(latest.site);
       const site = document.getElementById('waiting-site');
       if (site) site.hidden = !view.site;

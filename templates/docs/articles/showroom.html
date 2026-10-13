@@ -19,7 +19,7 @@
 <p>The header shows the MSP brand chosen in <a href="{{ url_for('branding_settings') }}">Settings → Branding</a> and, next to it, the SD-WAN vendor and model under test, so clients see at once who runs the lab and which appliance they are watching.</p>
 
 <h2 id="waiting">Waiting screen</h2>
-<p>Until a lab session starts, the showroom shows only the MSP brand and a calm waiting screen that says "Waiting for the session to start". Nothing about the client, the appliance, the WAN lines or the tests is published, so nothing is shown from an earlier session or the saved site. A brand can supply its own animation for this screen: a short MP4 or WebM named by <code>waiting_video</code> in its private <code>branding.json</code>. Without one, a generic network animation is shown.</p>
+<p>Until a lab session starts, the showroom shows only the MSP brand and a calm waiting screen that says "Waiting for the session to start". Nothing about the client, the appliance, the WAN lines or the tests is published, so nothing is shown from an earlier session or the saved site. A brand can supply its own animation for this screen: a short MP4 or WebM named by <code>waiting_video</code> in its private <code>branding.json</code>. Without one, a generic network animation is shown. The operator can instead link a YouTube or Vimeo video, or upload an MP4 or WebM file (up to 16 MB), under Settings → Appearance &amp; appliance → Showcase video; that video takes precedence.</p>
 <p>The session records the client, the appliance under test and the primary and backup WANs when it starts. The header and the client band then show those details. The session ends when the operator completes it, or six hours after it started.</p>
 
 <h2 id="coming-up">Coming up</h2>

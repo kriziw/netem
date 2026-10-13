@@ -101,6 +101,29 @@
     </div>
   </section>
 
+  <section class="card" id="showcase-video">
+    <div class="card-head"><div><div class="card-title">Showcase video</div><div class="card-sub">Plays on the showcase's waiting screen, before a session starts</div></div>
+      <span class="status {{ 'good' if showcase_video else 'info' }}">{% if showcase_video and showcase_video.kind == 'file' %}Uploaded file{% elif showcase_video %}{{ showcase_video.provider|capitalize }} link{% else %}Animation{% endif %}</span></div>
+    <div class="card-pad">
+      <form method="post" action="{{ url_for('showcase_video_save') }}" enctype="multipart/form-data">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <div class="form-grid">
+          <div><label for="showcase-video-link">YouTube or Vimeo link</label><input id="showcase-video-link" name="video_link" type="text" placeholder="https://www.youtube.com/watch?v=…"></div>
+          <div><label for="showcase-video-file">…or upload a video or animation: MP4, WebM or animated GIF, up to 16 MB</label><input id="showcase-video-file" name="video_file" type="file" accept="video/mp4,video/webm,image/gif"></div>
+        </div>
+        <div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="submit">Save showcase video</button></div>
+      </form>
+      {% if showcase_video %}
+      <form method="post" action="{{ url_for('showcase_video_save') }}" style="margin-top:8px">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <input type="hidden" name="remove" value="1">
+        <button class="btn btn-danger" type="submit">Remove video</button>
+      </form>
+      {% endif %}
+      <p class="field-help">The showcase embeds only YouTube and Vimeo. A file is served by the showcase itself. A brand's own waiting animation is used when no video is set.</p>
+    </div>
+  </section>
+
   <section class="card" id="appliance">
     <div class="card-head"><div><div class="card-title">Appliance under test</div><div class="card-sub">The SD-WAN vendor clients see next to the MSP brand</div></div>
       {% if appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.png') }}" alt="{{ appliance.vendor_name }}">{% else %}<span class="status info">Not set</span>{% endif %}</div>

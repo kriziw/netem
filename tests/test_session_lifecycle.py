@@ -90,13 +90,20 @@ class StartTests(SessionCase):
         self.start(name="Another client")
         self.assertEqual(self.session["id"], first)
 
-    def test_start_without_a_site_or_two_wans_is_refused(self):
+    def test_start_without_a_site_is_refused(self):
         self.cfg.pop("site_profile")
         self.client.post("/sessions/start", data={"name": "PoC", "integration_csrf": "token"})
         self.assertFalse(self.session["active"])
+
+    def test_a_lab_with_one_wan_starts_a_session_without_site_test_roles(self):
+        # The session still records the client and the appliance; its site tests say why they cannot run.
         self.cfg["wan_links"] = self.cfg["wan_links"][:1]
         self.start()
-        self.assertFalse(self.session["active"])
+        self.assertTrue(self.session["active"])
+        self.assertIsNone(self.session["wan"])
+        self.client.post("/site/run", data={"integration_csrf": "token", "test_id": "baseline",
+                                            "primary_link": "wan1", "backup_link": "wan2"})
+        self.assertFalse(netem.SITE_PLAN_STATE.get("active"))
 
 
 class EndingTests(SessionCase):
