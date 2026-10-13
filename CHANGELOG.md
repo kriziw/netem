@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.23.0](https://github.com/kriziw/netem/compare/v0.22.0...v0.23.0) (2026-10-13)
+
+
+### Features
+
+* one Updates page for NetEm, the Traffic Simulator and the controlled target ([#75](https://github.com/kriziw/netem/issues/75)) ([55475a9](https://github.com/kriziw/netem/commit/55475a9ed9ff660ab977e5484b31fc9b1d3a56ed))
+* selectable 12-hour or 24-hour clock, 24-hour by default ([#74](https://github.com/kriziw/netem/issues/74)) ([c55945e](https://github.com/kriziw/netem/commit/c55945e555d04106d925b6e8d56074c2923f224c))
+* sessions capture their details, end after six hours, and gate the showcase ([#76](https://github.com/kriziw/netem/issues/76)) ([fd57b39](https://github.com/kriziw/netem/commit/fd57b394ebf85a2dd81d423ad00e8db5c45f5f2a))
+
 ## [0.22.0](https://github.com/kriziw/netem/compare/v0.21.0...v0.22.0) (2026-10-13)
 
 
