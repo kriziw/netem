@@ -82,6 +82,9 @@ def check_telemetry(facts):
     title = "Telemetry freshness"
     if age is None:
         return [result("telemetry.freshness", "telemetry", title, FAIL, "No telemetry sample exists for at least one WAN.")]
+    if age < -interval:
+        return [result("telemetry.freshness", "telemetry", title, WARN,
+                       f"The newest sample is dated {-age:.0f} s in the future; check the clock.", round(age, 1), interval)]
     if age > 3 * interval:
         return [result("telemetry.freshness", "telemetry", title, FAIL,
                        f"The newest sample is {age:.0f} s old; the sampler has stopped or is blocked.", round(age, 1), interval)]
@@ -123,14 +126,9 @@ def check_simulator(facts):
 def check_software(facts):
     results = []
     forwarding = facts.get("forwarding")
-    title = "IP forwarding"
-    if forwarding == "1":
-        results.append(result("software.forwarding", "software", title, PASS, "IP forwarding is enabled.", "1", "1"))
-    elif forwarding is None:
-        results.append(result("software.forwarding", "software", title, SKIP, "Cannot be read on this host."))
-    else:
-        results.append(result("software.forwarding", "software", title, FAIL,
-                              "IP forwarding is off; traffic cannot pass the WAN bridges.", forwarding, "1"))
+    detail = ("Not judged: the WAN bridges forward at layer 2, so IP forwarding is not needed. "
+              f"The kernel setting is {forwarding}.") if forwarding is not None else "Cannot be read on this host."
+    results.append(result("software.forwarding", "software", "IP forwarding", SKIP, detail, forwarding))
     problems = facts.get("bridge_problems")
     title = "WAN bridges"
     if problems is None:

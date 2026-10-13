@@ -2825,7 +2825,6 @@ def gather_platform_facts():
     """Everything the self-test judges, read from this host now. Nothing here changes the lab."""
     cfg = load_config()
     links = cfg.get("wan_links", [])
-    now = time.time()
     busy = platform_test_busy()
     host = host_headroom(window_s=1800)
     pairs = {}
@@ -2836,6 +2835,8 @@ def gather_platform_facts():
     first = {name: host_health.nic_total(host_health.SYS_NET, [name]) for name in names}
     time.sleep(NIC_WINDOW_SECONDS)
     second = {name: host_health.nic_total(host_health.SYS_NET, [name]) for name in names}
+    # Read the clock after the window: sample timestamps are taken during it, so ages must be too.
+    now = time.time()
     probes = get_probes(cfg)
     facts_links, evidence = [], []
     for link in links:

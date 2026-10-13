@@ -47,7 +47,7 @@ class HealthyLabTests(unittest.TestCase):
         facts = healthy_facts()
         facts["simulator"] = {"connected": False}
         self.assertEqual(pt.run_self_test(facts)["status"], pt.WARN)
-        facts["forwarding"] = "0"
+        facts["bridge_problems"] = [{"link_id": "wan2", "summary": "wan2: port missing"}]
         self.assertEqual(pt.run_self_test(facts)["status"], pt.FAIL)
 
 
@@ -76,6 +76,13 @@ class InterfaceAndHostTests(unittest.TestCase):
         self.assertEqual(by_id(pt.run_self_test(facts)["checks"])["sampling.lateness"]["status"], pt.WARN)
         facts["host"]["late_seconds"] = 30
         self.assertEqual(by_id(pt.run_self_test(facts)["checks"])["sampling.lateness"]["status"], pt.FAIL)
+
+    def test_a_sample_dated_in_the_future_warns_about_the_clock(self):
+        facts = healthy_facts()
+        facts["telemetry"]["age_s"] = -6.0
+        check = by_id(pt.run_self_test(facts)["checks"])["telemetry.freshness"]
+        self.assertEqual(check["status"], pt.WARN)
+        self.assertIn("in the future", check["detail"])
 
     def test_stale_or_missing_telemetry_fails(self):
         facts = healthy_facts()

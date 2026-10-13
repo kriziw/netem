@@ -49,12 +49,13 @@ class ShapingAndPathTests(unittest.TestCase):
 
 
 class SoftwareTests(unittest.TestCase):
-    def test_bridge_problems_and_forwarding_fail_with_their_reason(self):
+    def test_bridge_problems_fail_while_forwarding_off_is_not_judged(self):
         facts = healthy_facts()
         facts["forwarding"] = "0"
         facts["bridge_problems"] = [{"link_id": "wan2", "summary": "wan2: outer port missing from br-wan2"}]
         checks = by_id(pt.run_self_test(facts)["checks"])
-        self.assertEqual(checks["software.forwarding"]["status"], pt.FAIL)
+        self.assertEqual(checks["software.forwarding"]["status"], pt.SKIP)
+        self.assertIn("layer 2", checks["software.forwarding"]["detail"])
         self.assertEqual(checks["software.bridges"]["status"], pt.FAIL)
         self.assertIn("outer port missing", checks["software.bridges"]["detail"])
 
