@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.24.0](https://github.com/kriziw/netem/compare/v0.23.1...v0.24.0) (2026-10-13)
+
+
+### Features
+
+* warn before a test starts without a lab session ([#80](https://github.com/kriziw/netem/issues/80)) ([af543da](https://github.com/kriziw/netem/commit/af543dad41d82d6b2d3e7a6fa5707f3dfcede487))
+
 ## [0.23.1](https://github.com/kriziw/netem/compare/v0.23.0...v0.23.1) (2026-10-13)
 
 
