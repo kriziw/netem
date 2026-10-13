@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.30.0](https://github.com/kriziw/netem/compare/v0.29.0...v0.30.0) (2026-10-13)
+
+
+### Features
+
+* calibration logs show what the simulator and target were doing each second ([#104](https://github.com/kriziw/netem/issues/104)) ([b6d2666](https://github.com/kriziw/netem/commit/b6d2666dd564d2ff4674055b73bd95b71a718af6))
+
 ## [0.29.0](https://github.com/kriziw/netem/compare/v0.28.0...v0.29.0) (2026-10-13)
 
 
