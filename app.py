@@ -116,7 +116,7 @@ GIT = "/usr/bin/git"
 PING = shutil.which("ping") or "/usr/bin/ping"
 UPDATE_BRANCH = "main"
 
-TELEMETRY_SAMPLE_SECONDS = 2.0
+TELEMETRY_SAMPLE_SECONDS = 1.0
 TELEMETRY_RETENTION_HOURS = 168
 MAX_PROBES = 20
 
@@ -2823,7 +2823,7 @@ def latest_telemetry_sample(link_id: str):
 # that carried it and to the path condition that explains it.
 
 DIAGNOSIS_WINDOW_SECONDS = 12
-DIAGNOSIS_INTERVAL_SECONDS = 3.0
+DIAGNOSIS_INTERVAL_SECONDS = 1.0
 DIAGNOSIS_CLEAR_SECONDS = 30
 SATURATION_PCT = 90.0
 EGRESS_LEARN_INTERVAL_SECONDS = 60
