@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.28.0](https://github.com/kriziw/netem/compare/v0.27.0...v0.28.0) (2026-10-13)
+
+
+### Features
+
+* calibration finds the bottleneck: sparse traffic, unshaped forwarding ceiling, and findings ([#101](https://github.com/kriziw/netem/issues/101)) ([caac0aa](https://github.com/kriziw/netem/commit/caac0aa483ec49cd210912e7117e80b5b0fd3aa9))
+
+
+### Bug Fixes
+
+* count shaper drops once and take the calibration's drop figure from the window counters ([#99](https://github.com/kriziw/netem/issues/99)) ([14c76aa](https://github.com/kriziw/netem/commit/14c76aa64a63aa64bb74c8e58d7b4b6f8828aa89))
+
 ## [0.27.0](https://github.com/kriziw/netem/compare/v0.26.1...v0.27.0) (2026-10-13)
 
 
