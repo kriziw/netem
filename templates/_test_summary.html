@@ -33,6 +33,21 @@
       </tbody>
     </table>
     </div>
+    {% if summary.application_groups %}
+    {% set names = summary.phases|map(attribute='name')|list %}
+    <div class="table-wrap" style="margin-top:14px">
+    <table>
+      <thead><tr><th>Application group · application</th>{% for name in names %}<th>{{ name }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for group in summary.application_groups %}
+        <tr><td><strong>{{ group.label }}</strong></td>{% for name in names %}<td>{{ group.cells[name] }}</td>{% endfor %}</tr>
+        {% for app in group.apps %}<tr><td style="padding-left:18px">{{ app.label }}</td>{% for name in names %}<td>{{ app.cells[name] }}</td>{% endfor %}</tr>{% endfor %}
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div class="field-help" style="margin-top:6px">Each cell: experience · request success · P95 (transactions in the phase's own window). Group rows pool the applications with enough transactions to score: lowest score, pooled success and the slowest P95. Applications with fewer than {{ summary.min_phase_requests or 20 }} transactions in a phase are not scored.</div>
+    {% endif %}
     <div class="field-help" style="margin-top:10px"><strong>SD-WAN remediation:</strong>
       {% for item in summary.remediation %}{{ item.traffic_class }} moved off {{ item.wan }} in {{ item.seconds }} s{% if item.within_target is sameas true %} (within {{ summary.steering_target_s }} s){% elif item.within_target is sameas false %} (slower than {{ summary.steering_target_s }} s){% endif %}{% if not loop.last %} · {% endif %}{% else %}no traffic was moved between WANs during this test.{% endfor %}
     </div>

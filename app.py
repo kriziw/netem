@@ -737,7 +737,7 @@ def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
         selection = APPLIANCE_PLATFORM.store.state("selection")
         if selection.get("mode") in ("direct_netem", "direct_baseline"):
             label = "Direct NetEm path" if selection["mode"] == "direct_netem" else "Clean router baseline"
-            return dict(appliance_view(None, name=selection.get("name"), source=selection["mode"]), vendor_name=label, product=label)
+            return dict(appliance_view(None, name=selection.get("name"), source=selection["mode"]), vendor_name=label, product=None)
         selected = APPLIANCE_PLATFORM.selected()
         if selected:
             return appliance_view(selected["vendor"], selected.get("model"), selected["name"], "inventory")
@@ -5194,13 +5194,43 @@ def recorder_start(scenario: dict, link_id: str, phases: list):
         TEST_RECORDER.clear()
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
                              started_at=time.time(), phases=[phase["name"] for phase in phases],
-                             phase_marks=[], samples=[], assertions=[], reactions=[])
+                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[])
 
 
 def recorder_note(kind: str, item: dict):
     with TEST_RECORDER_LOCK:
         if TEST_RECORDER.get("active"):
             TEST_RECORDER[kind].append(item)
+
+
+# A phase with fewer transactions than this is not scored: one failure would decide its score.
+MIN_PHASE_REQUESTS = 20
+
+
+def phase_window_dem(seconds):
+    """The Traffic Simulator's DEM over exactly the seconds one phase ran: what that phase's own transactions scored."""
+    window = int(min(3600, max(10, seconds)))
+    try:
+        dem = traffic_generator_request(f"/api/v1/dem/summary?window={window}", timeout=5.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)[:200]}
+    applications = {key: {"class": item.get("class"), "requests": item.get("requests") or 0,
+                          "success": item.get("availability_pct"), "p95_ms": item.get("p95_ms"),
+                          "experience": item.get("experience_score")}
+                    for key, item in (dem.get("applications") or {}).items()}
+    return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
+            "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
+            "p95_ms": dem.get("p95_ms"), "applications": applications}
+
+
+def recorder_close_phase():
+    """Score the phase that is ending from the simulator's window of its own duration, before the next one starts."""
+    with TEST_RECORDER_LOCK:
+        marks = list(TEST_RECORDER.get("phase_marks") or []) if TEST_RECORDER.get("active") else []
+    if not marks:
+        return
+    last = marks[-1]
+    recorder_note("phase_ends", {"name": last["name"], "dem": phase_window_dem(time.time() - last["at"])})
 
 
 def record_test_sample(payload: dict):
@@ -5237,6 +5267,67 @@ def _average(values):
     return round(sum(values) / len(values), 1) if values else None
 
 
+APPLICATION_LABELS = {
+    "web_saas": "Web / SaaS", "collaboration": "Collaboration", "voice": "Voice", "video": "Video meeting",
+    "file_sync": "Cloud file sync", "developer": "Developer / packages", "updates": "Software updates",
+    "backup": "Backup", "dns": "DNS", "ot_telemetry": "OT telemetry", "mes": "MES", "erp": "ERP",
+    "plm_cad": "PLM / CAD", "pos": "Point of sale", "wms_scan": "Warehouse scanning", "emr": "Medical records",
+    "pacs_imaging": "Medical imaging", "core_banking": "Core banking", "cctv_backhaul": "CCTV backhaul",
+    "guest_internet": "Guest internet",
+}
+
+
+def _phase_application(key, item):
+    """One application's figures in one phase; too few of its own transactions means no score for it."""
+    requests = item.get("requests") or 0
+    scored = requests >= MIN_PHASE_REQUESTS
+    return {"key": key, "class": item.get("class"), "requests": requests,
+            "experience": item.get("experience") if scored else None,
+            "success": item.get("success") if scored else None,
+            "p95_ms": item.get("p95_ms") if scored else None}
+
+
+def _figures_text(experience, success, p95_ms, requests):
+    """One cell of the application table: score, request success and P95, with the transactions behind them."""
+    if experience is None and success is None:
+        return f"{requests} tx, too few to score" if requests else "—"
+    parts = [f"{experience:.0f}" if experience is not None else "—",
+             f"{success:.1f}%" if success is not None else "—",
+             f"{p95_ms:.0f} ms" if p95_ms is not None else "—"]
+    return " · ".join(parts) + f" ({requests} tx)"
+
+
+def application_matrix(phases):
+    """Per application group and application, what each phase measured from its own window."""
+    groups = []
+    for traffic_class, label in STEERING_CLASSES:
+        keys = sorted({key for phase in phases for key, item in phase["applications"].items()
+                       if item.get("class") == traffic_class})
+        if not keys:
+            continue
+        apps = [{"key": key, "label": APPLICATION_LABELS.get(key, key.replace("_", " ").capitalize()), "cells": {}}
+                for key in keys]
+        cells = {}
+        for phase in phases:
+            present = [phase["applications"][key] for key in keys if key in phase["applications"]]
+            scored = [item for item in present if item["experience"] is not None]
+            pooled = [item for item in scored if item["success"] is not None]
+            weight = sum(item["requests"] for item in pooled)
+            success = sum(item["success"] * item["requests"] for item in pooled) / weight if weight else None
+            p95s = [item["p95_ms"] for item in scored if item["p95_ms"] is not None]
+            if scored:
+                cells[phase["name"]] = _figures_text(min(item["experience"] for item in scored), success,
+                                                     max(p95s, default=None), sum(item["requests"] for item in scored))
+            else:
+                cells[phase["name"]] = _figures_text(None, None, None, sum(item["requests"] for item in present))
+            for row in apps:
+                item = phase["applications"].get(row["key"])
+                row["cells"][phase["name"]] = (_figures_text(item["experience"], item["success"], item["p95_ms"],
+                                                             item["requests"]) if item else "—")
+        groups.append({"label": label, "cells": cells, "apps": apps})
+    return groups
+
+
 def summarize_test(record: dict, result: str, error, targets=None, site_label=None, ended_at=None):
     """Turn a recorded test into what happened, performance per phase, remediation and checks."""
     ended_at = ended_at or time.time()
@@ -5256,12 +5347,26 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                 links[link["id"]]["down"].append(link.get("down_mbps"))
                 links[link["id"]]["up"].append(link.get("up_mbps"))
                 links[link["id"]]["health"] = link.get("health") or links[link["id"]]["health"]
+        window = next((item["dem"] for item in record.get("phase_ends") or []
+                       if item.get("name") == name and "error" not in (item.get("dem") or {})), None)
+        if window is not None:
+            transactions = window.get("requests") or 0
+            scored = transactions >= MIN_PHASE_REQUESTS
+            experience = window.get("experience") if scored else None
+            success = window.get("success") if scored else None
+            p95 = window.get("interactive_p95_ms") if scored else None
+            note = None if scored else f"Too few transactions to score this phase ({transactions} in its window)."
+        else:
+            experience, success, p95 = last.get("experience"), last.get("success"), last.get("interactive_p95_ms")
+            transactions, note = None, None
+        applications = {key: _phase_application(key, item)
+                        for key, item in ((window or {}).get("applications") or {}).items()}
         phases.append({
-            "name": name, "reached": mark is not None,
+            "name": name, "reached": mark is not None, "applications": applications,
             "duration_s": round((following["at"] if following else ended_at) - mark["at"]) if mark else None,
-            "experience_score": last.get("experience"), "success_pct": last.get("success"),
-            "interactive_p95_ms": last.get("interactive_p95_ms"),
-            "worst_success_pct": min((sample["success"] for sample in measured if sample.get("success") is not None), default=None),
+            "experience_score": experience, "success_pct": success,
+            "interactive_p95_ms": p95, "transactions": transactions, "note": note,
+            "worst_success_pct": success,
             "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
                       "health": item["health"]} for item in links.values()],
             "steering": {label: entry["verdict"] for label, entry in ((rows[-1] if rows else {}).get("steering") or {}).items()},
@@ -5310,6 +5415,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     if failed:
         narrative.append("Missed: " + "; ".join(item["label"] for item in failed[:4]) + ".")
     conclusion = narrative[:len(conclusion)] + reacted + narrative[len(conclusion):]
+    application_groups = application_matrix(phases)
     return {
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
         "site": site_label, "result": result, "started_at": record.get("started_at"), "ended_at": ended_at,
@@ -5318,11 +5424,13 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
         "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
                        "items": [{key: item.get(key) for key in ("label", "passed", "observed", "phase")} for item in assertions]},
         "conclusion": conclusion, "narrative": narrative,
+        "application_groups": application_groups, "min_phase_requests": MIN_PHASE_REQUESTS,
     }
 
 
 def recorder_finish(result: str, error):
     global LAST_TEST_SUMMARY
+    recorder_close_phase()
     with TEST_RECORDER_LOCK:
         record = copy.deepcopy(TEST_RECORDER)
         TEST_RECORDER.clear()
@@ -5653,6 +5761,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                     }
                 )
             if phase_index is not None and phase_index != previous_phase:
+                recorder_close_phase()
                 recorder_note("phase_marks", {"name": phases[phase_index]["name"], "at": time.time()})
                 log_event("scenario", f'{scenario["name"]}: phase {phases[phase_index]["name"]}',
                           scenario_id=scenario.get("id"), link_id=link_id, phase=phases[phase_index]["name"])
