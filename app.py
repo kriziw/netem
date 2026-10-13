@@ -9228,7 +9228,9 @@ def current_impacts(diagnosis, by_id, by_label):
     impacts = {}
     for finding in diagnosis.get("findings") or []:
         verb = IMPACT_VERBS.get(finding.get("id"))
-        if finding.get("source") != "experience" or not verb:
+        # An information-level finding is within what users tolerate (for example a lost packet in a voice burst that
+        # stays under its loss target), so it is not a user impact.
+        if finding.get("source") != "experience" or not verb or finding.get("severity") == "info":
             continue
         # Transfers limited by the line speed are expected in a shaped lab unless users suffer badly.
         if finding["id"] == "bandwidth_bound" and finding.get("severity") != "bad":
