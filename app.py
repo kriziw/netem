@@ -12,6 +12,7 @@ import tempfile
 import json
 import math
 import os
+import platform as system_platform
 import re
 import shutil
 import socket
@@ -29,6 +30,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import host_health
+import platform_test
 import site_catalog
 from showroom import create_showroom_app
 import branding
@@ -2768,6 +2770,173 @@ def host_headroom(window_s: int = 1800, now=None):
     for row in rows:
         row["reasons"] = json.loads(row["reasons"] or "[]")
     return host_health.summarize(rows, TELEMETRY_SAMPLE_SECONDS, window_s)
+
+
+PLATFORM_TEST_LOCK = threading.Lock()
+PLATFORM_TEST_DIR = RUNTIME_DIR
+NIC_WINDOW_SECONDS = 5.0
+
+
+def bridge_problem_summary(problem):
+    parts = []
+    if problem.get("bridge_missing"):
+        parts.append("bridge missing")
+    if problem.get("bridge_down"):
+        parts.append("bridge down")
+    for key, text in (("missing", "port missing"), ("outside", "port outside the bridge"),
+                      ("down", "port down"), ("no_link", "port without a link")):
+        parts.extend(f"{text} {name}" for name in problem.get(key) or [])
+    return f"{problem['link_id']}: " + (", ".join(parts) or "not ready")
+
+
+def platform_test_busy():
+    """Why active path checks must wait, or None when the lab is idle."""
+    if SCENARIO_STATE.get("active"):
+        return "a scenario is running"
+    if SITE_PLAN_STATE.get("active"):
+        return "a site test plan is running"
+    snapshot = traffic_generator_snapshot()
+    status = (snapshot.get("status") or {}).get("status") if snapshot.get("connected") else None
+    if status in ("starting", "running"):
+        return "simulated traffic is running"
+    return None
+
+
+def applied_shaping(link, effective):
+    """The configured rate, delay and loss beside what tc reports on each side of the WAN."""
+    shaping = {}
+    expected = {
+        "down": {"rate_mbit": effective.get("download_mbit"), "delay_ms": effective.get("delay_ms"),
+                 "loss_pct": effective.get("loss_pct")},
+        "up": {"rate_mbit": effective.get("upload_mbit"), "delay_ms": 0.0, "loss_pct": 0.0},
+    }
+    for direction, role in (("down", "inner"), ("up", "outer")):
+        device = link.get(role)
+        if not device:
+            continue
+        rc, out, _err = run_cmd(f"{TC} qdisc show dev {device}")
+        applied = parse_qdisc_output(out if rc == 0 else "")["parsed"]
+        shaping[direction] = {"expected": expected[direction], "applied": {
+            "rate_mbit": applied.get("rate_mbit"), "delay_ms": applied.get("delay_ms"),
+            "loss_pct": applied.get("loss_pct")}, "device": device, "raw": out if rc == 0 else ""}
+    return shaping
+
+def gather_platform_facts():
+    """Everything the self-test judges, read from this host now. Nothing here changes the lab."""
+    cfg = load_config()
+    links = cfg.get("wan_links", [])
+    now = time.time()
+    busy = platform_test_busy()
+    host = host_headroom(window_s=1800)
+    pairs = {}
+    for link in links:
+        link_id = link.get("id") or link.get("bridge")
+        pairs[link_id] = [(role, link.get(role)) for role in ("inner", "outer") if link.get(role)]
+    names = [name for items in pairs.values() for _role, name in items]
+    first = {name: host_health.nic_total(host_health.SYS_NET, [name]) for name in names}
+    time.sleep(NIC_WINDOW_SECONDS)
+    second = {name: host_health.nic_total(host_health.SYS_NET, [name]) for name in names}
+    probes = get_probes(cfg)
+    facts_links, evidence = [], []
+    for link in links:
+        link_id = link.get("id") or link.get("bridge")
+        effective = (RUNTIME_EFFECTIVE.get(link_id) or {}).get("effective") or {}
+        interfaces = []
+        for role, name in pairs[link_id]:
+            delta = None
+            if first.get(name) is not None and second.get(name) is not None:
+                delta = second[name] - first[name]
+            interfaces.append({"role": role, "name": name, "present": (host_health.SYS_NET / name).exists(),
+                               "carrier": host_health.read_carrier(host_health.SYS_NET, name),
+                               "errors_delta": delta})
+        fault = ACTIVE_FAULTS.get(link_id, "normal")
+        if fault != "normal":
+            shaping = {"skipped": f"A fault is injected on this WAN: {fault.replace('_', ' ')}."}
+        elif not effective:
+            shaping = {"skipped": "No profile has been applied to this WAN yet."}
+        else:
+            shaping = applied_shaping(link, effective)
+            for direction, item in shaping.items():
+                evidence.append({"name": f"{link_id} {item['device']} qdisc ({direction})", "text": item.pop("raw")})
+        probe = {"skipped": f"Skipped: {busy}."} if busy else {"skipped": "No ICMP probe is configured for this WAN."}
+        candidate = next((item for item in probes if item.get("link_id") == link_id and item.get("kind") == "icmp"), None)
+        if not busy and candidate is not None:
+            outcome = execute_probe(candidate, cfg)
+            success = bool(outcome.get("success")) and outcome.get("latency_ms") is not None
+            probe = {"success": success, "target": outcome.get("target"), "latency_ms": outcome.get("latency_ms"),
+                     "detail": outcome.get("detail"), "configured_delay_ms": effective.get("delay_ms") or 0.0}
+        sample = latest_telemetry_sample(link_id)
+        facts_links.append({"id": link_id, "label": link.get("name") or link_id, "fault": fault,
+                            "interfaces": interfaces, "shaping": shaping, "probe": probe,
+                            "telemetry_age_s": None if sample is None else round(now - sample["timestamp"], 2)})
+    ages = [item["telemetry_age_s"] for item in facts_links]
+    telemetry_age = None if not ages or any(age is None for age in ages) else max(ages)
+    try:
+        with telemetry_connect() as conn:
+            quick = conn.execute("PRAGMA quick_check").fetchone()[0]
+    except sqlite3.Error as exc:
+        quick = f"error: {exc}"
+    problems = wan_bridge_problems(cfg)
+    snapshot = traffic_generator_snapshot()
+    return {"collected_at": now, "links": facts_links, "host": host,
+            "clock": local_time_sync(),
+            "telemetry": {"age_s": telemetry_age, "interval_s": TELEMETRY_SAMPLE_SECONDS},
+            "database": {"quick_check": quick, "disk_free_pct": host_health.disk_free_pct(RUNTIME_DIR)},
+            "simulator": {"connected": bool(snapshot.get("connected")) if snapshot.get("configured") else None,
+                          "detail": snapshot.get("error") or ""},
+            "forwarding": host_health.read_sysctl(host_health.PROC, "net/ipv4/ip_forward"),
+            "bridge_problems": None if problems is None else [
+                {"link_id": item["link_id"], "summary": bridge_problem_summary(item)} for item in problems],
+            "busy": busy, "evidence": evidence}
+
+def platform_environment():
+    uname = system_platform.uname()
+    return {"app version": get_app_version(), "python": sys.version.split()[0],
+            "system": f"{uname.system} {uname.release}", "machine": uname.machine,
+            "host": uname.node}
+
+
+def run_platform_self_test():
+    """Run the self-test once and keep its diagnostics for download. None when a run is already in progress."""
+    if not PLATFORM_TEST_LOCK.acquire(blocking=False):
+        return None
+    try:
+        facts = gather_platform_facts()
+        report = platform_test.run_self_test(facts, now=time.time())
+        environment = platform_environment()
+        configuration = load_config()
+        text = platform_test.diagnostics_text(report, facts, environment)
+        bundle = platform_test.diagnostics_json(report, facts, environment, configuration)
+        (PLATFORM_TEST_DIR / "platform-self-test.txt").write_text(text, encoding="utf-8")
+        (PLATFORM_TEST_DIR / "platform-self-test.json").write_text(bundle, encoding="utf-8")
+        counts = report["counts"]
+        log_event("platform-test", f"Platform self-test {report['status']}: {counts['fail']} fail, "
+                  f"{counts['warn']} warn, {counts['pass']} pass, {counts['skip']} skipped")
+        return report
+    finally:
+        PLATFORM_TEST_LOCK.release()
+
+
+def last_platform_self_test():
+    path = PLATFORM_TEST_DIR / "platform-self-test.json"
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))["report"]
+    except (OSError, ValueError, KeyError):
+        return None
+
+
+def platform_self_test_file(kind):
+    """The saved diagnostics as (text, media type, download name), or None when no run has been saved."""
+    if kind == "text":
+        file_name, media, name = "platform-self-test.txt", "text/plain; charset=utf-8", "netem-platform-self-test.txt"
+    elif kind == "json":
+        file_name, media, name = "platform-self-test.json", "application/json", "netem-platform-self-test.json"
+    else:
+        return None
+    try:
+        return (PLATFORM_TEST_DIR / file_name).read_text(encoding="utf-8"), media, name
+    except OSError:
+        return None
 
 
 def prune_telemetry_history():
