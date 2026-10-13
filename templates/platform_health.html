@@ -31,6 +31,7 @@
 <div class="card-pad">
 {% if calibration_state.running %}<p data-calibration-progress>Calibrating {{ calibration_state.link_id }}: offering {{ calibration_state.target_mbps or 'the first step' }}{% if calibration_state.target_mbps %} Mbit/s{% endif %}…</p>{% endif %}
 {% if calibration %}
+  <p class="actions"><a class="btn" href="{{ url_for('calibration_download', kind='text') }}">Download log (text)</a> <a class="btn" href="{{ url_for('calibration_download', kind='json') }}">Download log (JSON)</a></p>
   {% if calibration.error %}<p class="docs-warning">{{ calibration.error }}</p>{% else %}
   <p><strong>Capacity:</strong> {{ calibration.capacity_mbps if calibration.capacity_mbps is not none else 'none passed' }}{% if calibration.capacity_mbps is not none %} Mbit/s{% endif %} on {{ calibration.link_id }} · <strong>limited by:</strong> {{ calibration.limited_by }}</p>
   <table class="host-table"><thead><tr><th>Offered</th><th>Expected</th><th>Achieved</th><th>Dropped</th><th>Host</th><th>Result</th><th>Reasons</th></tr></thead><tbody>

@@ -395,6 +395,14 @@ def init_app(app, netem):
             flash("Bandwidth calibration started. It takes several minutes; reload this page for the result.", "success")
         return redirect(url_for("platform_health"))
 
+    @app.get("/platform-health/calibration/<kind>", endpoint="calibration_download")
+    def calibration_download(kind):
+        saved = netem.calibration_file(kind)
+        if saved is None:
+            abort(404)
+        body, media, name = saved
+        return Response(body, mimetype=media, headers={"Content-Disposition": f"attachment; filename={name}"})
+
     @app.get("/api/v1/appliances", endpoint="api_inventory")
     def api_inventory():
         response = jsonify(platform.snapshot())
