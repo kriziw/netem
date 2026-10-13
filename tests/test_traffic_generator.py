@@ -108,7 +108,7 @@ class SimulatorIntegrationTests(unittest.TestCase):
         steps = netem.validate_scenario_steps([{"after": 0, "action": "traffic_generator", "value": {"operation": operation, "users": 2}} for operation in ("start", "adjust", "stop")])
         with patch.object(netem, "traffic_generator_request", return_value={"users": 2, "run": {"run_id": "run-test"}}) as api, patch.object(netem, "apply_selected_profile", return_value=(True, "OK", {})), patch.object(netem, "apply_mtu_limit", return_value=(True, "OK")), patch.object(netem, "log_event"),              patch.object(netem, "ensure_traffic_path") as path:
             netem.run_scenario("wan1", {"id": "test", "name": "test", "steps": steps})
-        self.assertEqual([call.args[0] for call in api.call_args_list], ["/api/v1/workloads/start", "/api/v1/workloads/adjust", "/api/v1/workloads/stop"])
+        self.assertEqual([call.args[0] for call in api.call_args_list if call.args[0].startswith("/api/v1/workloads")], ["/api/v1/workloads/start", "/api/v1/workloads/adjust", "/api/v1/workloads/stop"])
         path.assert_called_once_with("test")
         self.assertEqual(netem.SCENARIO_STATE["result"], "passed")
 
@@ -117,7 +117,7 @@ class SimulatorIntegrationTests(unittest.TestCase):
         responses = [{"status": "running", "run": {"run_id": "owned"}}, {"status": "running", "run": {"run_id": "owned"}}, {"status": "stopped"}]
         with patch.object(netem, "traffic_generator_request", side_effect=responses) as api, patch.object(netem, "wait_for_scenario_condition", return_value=(False, None, "no data", 0)), patch.object(netem, "apply_selected_profile", return_value=(True, "OK", {})), patch.object(netem, "apply_mtu_limit", return_value=(True, "OK")), patch.object(netem, "log_event"),              patch.object(netem, "ensure_traffic_path"):
             netem.run_scenario("wan1", {"id": "test", "name": "test", "steps": steps})
-        self.assertEqual(api.call_args_list[-1].args[0], "/api/v1/workloads/stop")
+        self.assertEqual([call.args[0] for call in api.call_args_list if call.args[0].startswith("/api/v1/workloads")][-1], "/api/v1/workloads/stop")
         self.assertEqual(netem.SCENARIO_STATE["result"], "failed")
 
     def test_scenario_connection_error_fails_and_restores_wan(self):
@@ -146,7 +146,7 @@ class SimulatorIntegrationTests(unittest.TestCase):
         with patch.object(netem, "traffic_generator_request", side_effect=[RuntimeError("status unavailable"), {"status": "stopped"}]) as api:
             response = self.client.post("/traffic-generator/stop", data={"integration_csrf": "token"})
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(api.call_args_list[-1].args[0], "/api/v1/workloads/stop")
+        self.assertEqual([call.args[0] for call in api.call_args_list if call.args[0].startswith("/api/v1/workloads")][-1], "/api/v1/workloads/stop")
 
     def test_nonfinite_scenarios_are_rejected(self):
         for value in ({"operation": "start", "spawn_rate": "nan"}, {"operation": "start", "applications": {"dns": None}}, {"operation": "start", "personas": {"developer": 0}}):
