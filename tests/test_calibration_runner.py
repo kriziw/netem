@@ -64,7 +64,7 @@ class CalibrationRunTests(unittest.TestCase):
         self.assertEqual(self.started, [50, 100, 200])
         self.assertEqual(len(self.stopped), 3)
         self.assertEqual(result["capacity_mbps"], 98.0)
-        self.assertEqual(result["limited_by"], "path or traffic generator: the WAN delivered less than offered")
+        self.assertEqual(result["limited_by"], "path or traffic generator: the WAN carried less than the step offered")
 
     def test_each_step_keeps_its_diagnostics_and_logs_one_line(self):
         self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},

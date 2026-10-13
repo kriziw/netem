@@ -3228,6 +3228,8 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                                 (qdisc_after.get(direction) or {}).get("parsed"))
                            for direction in devices if devices.get(direction)}
             shaper = calibration_log.shaper_drops(qdisc_delta, end - start)
+            shaper.update(calibration_log.tail_drops((qdisc_before.get("down") or {}).get("raw"),
+                                                     (qdisc_after.get("down") or {}).get("raw")))
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
                                              shaper["drops_ps"])
@@ -3235,6 +3237,8 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 sparse_window, dem_ms = _timed(simulator_dem_window, int(calibration.MEASURE_S))
             else:
                 sparse_window, dem_ms = {"skipped": "The simulator does not support sparse traffic; update it."}, None
+            # The users that download share the rate; the sparse users send UDP bursts instead.
+            paced_users = users - (round(users * payload["sparse_share"]) if "sparse_share" in payload else 0)
             wan_rows = wan_timeline(link_id, start, end)
             verdict["diagnostics"] = {
                 "sparse": sparse_window,
@@ -3245,7 +3249,7 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 "tc_end": {direction: reading["raw"] for direction, reading in qdisc_after.items()},
                 "simulator_before": sim_before,
                 "simulator_after": sim_after,
-                "trace": calibration_trace.build(polls, wan_rows, start, end),
+                "trace": calibration_trace.build(polls, wan_rows, start, end, paced_users=paced_users),
                 "timings": {"status_before_ms": sim_before_ms, "status_after_ms": sim_after_ms,
                             "stop_workload_ms": stop_ms, "measure_wan_ms": measure_ms, "dem_window_ms": dem_ms},
                 "wan_timeline": wan_rows,

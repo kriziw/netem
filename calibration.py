@@ -53,7 +53,7 @@ def limited_by(step):
     text = " ".join(step["reasons"])
     if "host" in text or "sampler" in text:
         return "NetEm host (CPU, scheduling or NIC)"
-    cause = "path or traffic generator: the WAN delivered less than offered"
+    cause = "path or traffic generator: the WAN carried less than the step offered"
     if step.get("drop_pct") is not None and step["drop_pct"] > DROP_NOTE_PCT:
         cause += f"; the shaper also dropped {step['drop_pct']:.1f}% of packets"
     return cause
@@ -68,7 +68,12 @@ def summarise(steps, shaped_mbps):
         cause = limited_by(failed)
     elif shaped_mbps and capacity is not None and capacity >= shaped_mbps * REACHED_SHAPING:
         cause = f"the configured WAN rate ({shaped_mbps:g} Mbit/s); raise the WAN shaping to test higher"
+    elif shaped_mbps and capacity is not None:
+        cause = (f"no step failed, but the top passing step carried {capacity / shaped_mbps * 100:.0f}% of the configured "
+                 f"{shaped_mbps:g} Mbit/s, short of the {REACHED_SHAPING * 100:.0f}% that shows the shaping as the limit")
+    elif steps:
+        cause = f"no step failed: the ladder stopped at {steps[-1]['target_mbps']} Mbit/s"
     else:
-        cause = "ladder exhausted without a failure"
+        cause = "no step ran"
     return {"capacity_mbps": capacity, "wan_rate_mbps": shaped_mbps, "limited_by": cause,
             "steps": steps, "passed": len(passed), "failed": 1 if failed else 0}

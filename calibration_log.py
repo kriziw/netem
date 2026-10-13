@@ -5,6 +5,7 @@ window, per-second WAN and host samples, simulator state) into a one-line summar
 can be downloaded and read alongside the NetEm event log.
 """
 
+import re
 import time
 
 
@@ -57,7 +58,7 @@ def step_line(verdict):
         parts.append(f"shaper counters carried {_num(shaper['qdisc_mbps'])} Mbit/s")
     summary = ((verdict.get("diagnostics") or {}).get("trace") or {}).get("summary") or {}
     if summary:
-        parts.append(f"simulator sent {_num(summary.get('sim_mbps_mean'))} Mbit/s · loop max "
+        parts.append(f"simulator completed {_num(summary.get('sim_mbps_mean'))} Mbit/s · loop max "
                      f"{_num(summary.get('loop_max_ms'), 0)} ms · quiet WAN seconds {summary.get('quiet_seconds') or 0}")
     if verdict.get("reasons"):
         parts.append("reasons: " + "; ".join(verdict["reasons"]))
@@ -102,32 +103,43 @@ def _simulator_line(label, state):
 
 
 def _trace_lines(trace):
-    """The simulator's readings for the window, and a per-second table beside the WAN."""
+    """The simulator's readings for the window: whether the paced users were busy, what the simulator completed, its
+    CPU, and a per-second table beside the WAN."""
     if not trace:
         return ["  Simulator trace: not recorded (the simulator did not report it)"]
     summary = trace.get("summary") or {}
+    busy = summary.get("busy_fraction")
     lines = [
         f"  Simulator trace: polls {summary.get('polls')} ({summary.get('poll_errors')} unanswered, slowest "
-        f"{_num(summary.get('poll_max_ms'), 0, ' ms')}) · sent {_num(summary.get('sim_mbps_mean'), 1, ' Mbit/s')} · "
-        f"requests/s {_num(summary.get('sim_requests_ps_mean'))} · in flight at most {_num(summary.get('in_flight_max'), 0)}",
-        f"  Event loop held up to {_num(summary.get('loop_max_ms'), 0, ' ms')} "
-        f"({summary.get('loop_stall_seconds')} seconds over 100 ms) · status up to {_num(summary.get('status_ms_max'), 0, ' ms')} · "
-        f"DEM up to {_num(summary.get('dem_ms_max'), 0, ' ms')} · database writes up to {_num(summary.get('write_ms_max'), 0, ' ms')}",
+        f"{_num(summary.get('poll_max_ms'), 0, ' ms')}) · completed {_num(summary.get('sim_mbps_mean'), 1, ' Mbit/s')} · "
+        f"downloads/s {_num(summary.get('sim_completed_ps_mean'))}",
+        f"  Paced users: about {summary.get('paced_users') or '—'}, busy "
+        f"{_num(None if busy is None else busy * 100, 0, '%')} of the window (in flight on average "
+        f"{_num(summary.get('in_flight_mean'))}) · first byte {_num(summary.get('wait_ms_mean'), 0, ' ms')} · "
+        f"transfer {_num(summary.get('transfer_ms_mean'), 0, ' ms')}",
+        f"  Simulator CPU up to {_num(summary.get('sim_cpu_pct_max'), 0, '%')} (mean "
+        f"{_num(summary.get('sim_cpu_pct_mean'), 0, '%')}) of one core · event loop held up to "
+        f"{_num(summary.get('loop_max_ms'), 0, ' ms')} ({summary.get('loop_stall_seconds')} seconds over 100 ms) · "
+        f"status up to {_num(summary.get('status_ms_max'), 0, ' ms')} · DEM up to {_num(summary.get('dem_ms_max'), 0, ' ms')} · "
+        f"database writes up to {_num(summary.get('write_ms_max'), 0, ' ms')}",
         f"  Target health up to {_num(summary.get('target_max_ms'), 0, ' ms')} "
         f"({summary.get('target_no_answer_seconds')} seconds with no answer) · restarts {summary.get('restarts')}",
         f"  Quiet WAN seconds {summary.get('quiet_seconds')}: loop held {summary.get('quiet_loop_seconds')}, target slow "
         f"{summary.get('quiet_target_seconds')}, requests waiting on the WAN {summary.get('quiet_waiting_seconds')}, "
         f"generator idle {summary.get('quiet_idle_seconds')}",
         "  Simulator per second:",
-        "    t(s)  WAN down Mbit/s  sim sent Mbit/s  sim req/s  in flight  loop max ms  poll ms  target ms  quiet",
+        "    t(s)  WAN down Mbit/s  completed Mbit/s  downloads/s  in flight  CPU %  first byte ms  transfer ms  "
+        "loop max ms  poll ms  target ms  quiet",
     ]
     for row in trace.get("seconds") or []:
         poll = "no answer" if row.get("poll_error") else _num(row.get("poll_ms"), 0)
         lines.append(
             f"  {_num(row.get('offset_s'), 0):>6}  {_num(row.get('wan_down_mbps')):>15}  "
-            f"{_num(row.get('sim_mbps')):>15}  {_num(row.get('sim_requests_ps')):>9}  "
-            f"{_num(row.get('in_flight'), 0):>9}  {_num(row.get('loop_max_ms'), 0):>11}  {poll:>7}  "
-            f"{_num(row.get('target_ms'), 0):>9}  {'yes' if row.get('quiet') else ''}")
+            f"{_num(row.get('sim_mbps')):>16}  {_num(row.get('sim_completed_ps')):>11}  "
+            f"{_num(row.get('in_flight'), 0):>9}  {_num(row.get('sim_cpu_pct'), 0):>5}  "
+            f"{_num(row.get('wait_ms'), 0):>13}  {_num(row.get('transfer_ms'), 0):>11}  "
+            f"{_num(row.get('loop_max_ms'), 0):>11}  {poll:>7}  {_num(row.get('target_ms'), 0):>9}  "
+            f"{'yes' if row.get('quiet') else ''}")
     return lines
 
 
@@ -204,6 +216,21 @@ def text_report(result):
     return "\n".join(lines) + "\n"
 
 
+def _drop_overlimit(text):
+    """The fair queue's tail-drop counter from the tc output, or None when the output does not show it."""
+    match = re.search(r"drop_overlimit (\d+)", text or "")
+    return int(match.group(1)) if match else None
+
+
+def tail_drops(before_text, after_text):
+    """Tail drops at the fair queue's memory limit over the window, from the tc output at both ends. The rest of its
+    drops are CoDel's early drops, which it makes by design to hold the queue delay near its target."""
+    before, after = _drop_overlimit(before_text), _drop_overlimit(after_text)
+    if before is None or after is None or after < before:
+        return {"tail_drops": None}
+    return {"tail_drops": after - before}
+
+
 def shaper_drops(delta_by_direction, seconds):
     """Drops at the download shaper over the window, from the aggregate counters: the fair queue when present, else
     the rate limiter. Each reports the drops of the queue below it, so one queue is counted, not both."""
@@ -215,6 +242,7 @@ def shaper_drops(delta_by_direction, seconds):
     sent_bytes = queue.get("sent_bytes")
     return {
         "drop_pct": queue["drop_pct"],
+        "dropped_packets": queue["dropped_packets"],
         "drops_ps": round(queue["dropped_packets"] / seconds, 2) if seconds > 0 else None,
         "qdisc_mbps": None if sent_bytes is None or seconds <= 0 else round(sent_bytes * 8 / 1_000_000 / seconds, 1),
     }

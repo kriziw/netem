@@ -38,21 +38,39 @@ class SimulatorFindingTests(unittest.TestCase):
         self.assertEqual(titled(findings, "2 of 6 quiet seconds")[0]["category"], "path")
         self.assertEqual(titled(findings, "3 of 6 quiet seconds")[0]["category"], "generator")
 
-    def test_the_generator_is_the_limit_when_the_wan_carried_what_was_sent(self):
-        findings = bn.step_findings(step(target=50, achieved=30.0, efficiency=0.6, trace={"sim_mbps_mean": 30.0}), 300)
-        generator = titled(findings, "The simulator sent 30.0 of 50 Mbit/s")
-        self.assertEqual(generator[0]["category"], "generator")
-        self.assertEqual(sum(1 for item in findings if item["category"] == "generator"), 1)
-
-    def test_the_path_is_the_limit_when_the_wan_carried_less_than_was_sent(self):
-        findings = bn.step_findings(step(target=50, achieved=20.0, efficiency=0.4, trace={"sim_mbps_mean": 40.0}), 300)
-        self.assertEqual(titled(findings, "The simulator sent 40.0 of 50 Mbit/s")[0]["category"], "path")
+    def test_busy_paced_users_mean_the_path_set_the_rate(self):
+        trace = {"sim_mbps_mean": 40.0, "busy_fraction": 0.94, "paced_users": 8, "in_flight_mean": 7.5}
+        findings = bn.step_findings(step(target=50, achieved=40.0, efficiency=0.8, trace=trace), 300)
+        path = titled(findings, "paced users were busy 94%")
+        self.assertEqual(path[0]["category"], "path")
+        self.assertIn("never offered", path[0]["evidence"])
         self.assertFalse(any(item["category"] == "generator" for item in findings))
 
-    def test_a_wan_shortfall_is_reported_when_the_simulator_kept_up(self):
-        findings = bn.step_findings(step(target=50, achieved=40.0, efficiency=0.8, trace={"sim_mbps_mean": 48.0}), 300)
-        shortfall = titled(findings, "The WAN carried 40.0 of the 48.0 Mbit/s")
-        self.assertEqual(shortfall[0]["category"], "path")
+    def test_resting_paced_users_mean_the_generator_set_the_rate(self):
+        trace = {"sim_mbps_mean": 30.0, "busy_fraction": 0.5, "paced_users": 8, "in_flight_mean": 4.0}
+        findings = bn.step_findings(step(target=50, achieved=30.0, efficiency=0.6, trace=trace), 300)
+        self.assertEqual(titled(findings, "paced users rested 50%")[0]["category"], "generator")
+
+    def test_without_busy_figures_the_shortfall_is_unattributed_not_blamed_on_the_generator(self):
+        findings = bn.step_findings(step(target=50, achieved=30.0, efficiency=0.6, trace={"sim_mbps_mean": 30.0}), 300)
+        self.assertEqual(titled(findings, "The simulator completed 30.0 of 50")[0]["category"], "unattributed")
+        self.assertFalse(any(item["category"] == "generator" for item in findings))
+
+    def test_a_saturated_simulator_cpu_is_a_bad_simulator_finding(self):
+        findings = bn.step_findings(step(trace={"sim_cpu_pct_max": 95.0, "sim_cpu_pct_mean": 80.0}), 300)
+        cpu = titled(findings, "process CPU up to 95%")
+        self.assertEqual(cpu[0]["category"], "simulator")
+        self.assertEqual(cpu[0]["severity"], "bad")
+
+    def test_slow_first_bytes_with_busy_users_are_a_target_finding(self):
+        trace = {"busy_fraction": 0.95, "wait_ms_mean": 400.0, "transfer_ms_mean": 300.0}
+        findings = bn.step_findings(step(trace=trace), 300)
+        self.assertEqual(titled(findings, "waited 400 ms for their first byte")[0]["category"], "target")
+
+    def test_slow_transfers_after_a_quick_first_byte_are_a_path_finding(self):
+        trace = {"busy_fraction": 0.95, "wait_ms_mean": 20.0, "transfer_ms_mean": 900.0}
+        findings = bn.step_findings(step(trace=trace), 300)
+        self.assertEqual(titled(findings, "took 900 ms to transfer")[0]["category"], "path")
 
     def test_a_slow_target_is_a_target_finding(self):
         findings = bn.step_findings(step(trace={"target_max_ms": 250.0, "target_no_answer_seconds": 0}), 300)
