@@ -117,7 +117,9 @@
         ? 'Not assessed: no simulated user traffic was measured.'
         : (summary.phases || []).some(phase => Object.values(phase.steering || {}).some(verdict => ['stuck', 'stuck_impact'].includes(verdict)))
           ? 'The appliance kept traffic on an impaired WAN and did not move it during the test.'
-          : 'No traffic had to be moved: users stayed on healthy WANs.',
+          : (summary.phases || []).some(phase => Object.keys(phase.steering || {}).length)
+            ? 'No traffic had to be moved: users stayed on healthy WANs.'
+            : 'No steering was recorded for this test, so it cannot say whether the appliance moved traffic.',
     };
   }
 
