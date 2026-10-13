@@ -1826,8 +1826,10 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
-SHAPER_QUEUE_MS = 50
-SHAPER_BURST_MS = 1
+# A burst allowance of 10 ms lets a TCP window's burst through at line rate, so ordinary traffic does not wait for
+# tokens. The queue is sized for 25 ms: it only fills when the link is really overloaded.
+SHAPER_QUEUE_MS = 25
+SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
 
 
@@ -1836,9 +1838,11 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
 
     A fixed 32 KB rate-limiter queue held under 3 ms at 100 Mbit/s, so TCP's
     window bursts overflowed it on an otherwise idle link and every transfer paid
-    for retransmissions. Like a real access link, the queue now holds about
-    50 ms of data. netem also keeps every packet for its delay, so its packet
-    queue must hold rate × (delay + jitter) or it drops on long-delay links.
+    for retransmissions. The fix is a burst allowance that covers those windows
+    (10 ms of rate), so an idle or moderately loaded link adds no queueing delay.
+    The queue holds 25 ms of data, the most a saturated link adds per direction.
+    netem also keeps every packet for its delay, so its packet queue must hold
+    rate × (delay + jitter) or it drops on long-delay links.
     """
     bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
     hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
