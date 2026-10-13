@@ -130,8 +130,13 @@ def rate_intervals(polls):
 
 
 def in_flight(counters):
-    """Paced requests the simulator has started and not yet completed, or None when it does not report them."""
-    if not counters or counters.get("paced_started") is None or counters.get("paced_completed") is None:
+    """Paced downloads in progress as the simulator counts them, or None when it does not report them. The simulator's
+    own gauge is preferred: a count of started minus completed drifts when a run stops with downloads still going."""
+    if not counters:
+        return None
+    if counters.get("paced_in_flight") is not None:
+        return counters["paced_in_flight"]
+    if counters.get("paced_started") is None or counters.get("paced_completed") is None:
         return None
     return counters["paced_started"] - counters["paced_completed"]
 

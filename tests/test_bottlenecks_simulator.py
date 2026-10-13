@@ -72,6 +72,28 @@ class SimulatorFindingTests(unittest.TestCase):
         findings = bn.step_findings(step(trace=trace), 300)
         self.assertEqual(titled(findings, "took 900 ms to transfer")[0]["category"], "path")
 
+    def test_slow_transfers_at_the_configured_rate_are_the_shapers_doing(self):
+        findings = bn.step_findings(step(target=50, achieved=49.0, trace={"busy_fraction": 0.95, "wait_ms_mean": 10.0,
+                                                                          "transfer_ms_mean": 900.0}), 50)
+        transfer = titled(findings, "took 900 ms to transfer")
+        self.assertIn("the shaper set the transfer time", transfer[0]["action"])
+
+    def test_slow_transfers_below_the_configured_rate_point_at_the_receive_side(self):
+        findings = bn.step_findings(step(target=50, achieved=20.0, trace={"busy_fraction": 0.95, "wait_ms_mean": 10.0,
+                                                                          "transfer_ms_mean": 900.0}), 300)
+        transfer = titled(findings, "took 900 ms to transfer")
+        self.assertIn("receive side", transfer[0]["action"])
+
+    def test_a_step_that_ran_no_sparse_users_says_so(self):
+        s = step()
+        s["diagnostics"]["sparse"] = {"ot_loss_pct": None, "requests_per_second": 2.4}
+        findings = bn.step_findings(s, 300)
+        self.assertEqual(titled(findings, "No sparse users ran in this step")[0]["severity"], "info")
+
+    def test_a_step_without_sparse_figures_is_not_reported_as_having_none(self):
+        findings = bn.step_findings(step(), 300)
+        self.assertEqual(titled(findings, "No sparse users ran in this step"), [])
+
     def test_a_slow_target_is_a_target_finding(self):
         findings = bn.step_findings(step(trace={"target_max_ms": 250.0, "target_no_answer_seconds": 0}), 300)
         slow = titled(findings, "Controlled target answered")
