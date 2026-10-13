@@ -8,7 +8,8 @@ This module only judges: app.py drives the load and measures the WAN.
 
 LADDER_MBPS = (50, 100, 200, 400, 600, 800, 1000)
 SETTLE_S = 10.0          # let TCP reach its steady rate before measuring
-MEASURE_S = 20.0         # the window each step is judged on
+MEASURE_S = 30.0         # the window each step is judged on; long enough that a few transfers per user
+                         # cannot tilt it, since the simulator staggers its users
 EFFICIENCY_PASS = 0.90   # achieved / expected, where expected is the target capped at the WAN rate
 DROP_LIMIT_PCT = 0.5     # drops, as a share of offered packets, that a step below the WAN rate may not exceed
 REACHED_SHAPING = 0.95   # a step at or above this share of the WAN rate means the shaping is the limit
