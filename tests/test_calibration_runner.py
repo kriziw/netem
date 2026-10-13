@@ -39,6 +39,8 @@ class CalibrationRunTests(unittest.TestCase):
 
     def request(self, path, method="GET", payload=None, timeout=3.0):
         run_id = f"run-{len(self.started) + 1}"
+        if path != "/api/v1/workloads/start":
+            return {}
         self.started.append((payload or {}).get("paced_mbps"))
         return {"run": {"run_id": run_id}}
 
@@ -150,6 +152,96 @@ class CalibrationDownloadRouteTests(unittest.TestCase):
                 self.assertIn("NetEm bandwidth calibration", response.get_data(as_text=True))
                 self.assertEqual(client.get("/platform-health/calibration/json").status_code, 200)
                 self.assertEqual(client.get("/platform-health/calibration/pdf").status_code, 404)
+
+class UnshapedAndSparseTests(unittest.TestCase):
+    def setUp(self):
+        directory = tempfile.TemporaryDirectory(ignore_cleanup_errors=True)
+        self.addCleanup(directory.cleanup)
+        self.payloads, self.measurements = [], []
+        self.cfg = {"wan_links": [{"id": "wan1", "inner": "eth1", "outer": "eth2", "bridge": "br-wan1"}]}
+        patches = [
+            patch.object(netem, "CALIBRATION_FILE", Path(directory.name) / "calibration.json"),
+            patch.object(netem, "platform_test_busy", return_value=None),
+            patch.object(netem, "ensure_traffic_path", return_value={"ready": True}),
+            patch.object(netem, "traffic_generator_request", side_effect=self.request),
+            patch.object(netem, "stop_test_owned_workload", return_value=None),
+            patch.object(netem, "measure_wan", side_effect=lambda link, start, end: self.measurements.pop(0)),
+            patch.object(netem, "host_headroom", return_value={"status": "ok", "late_seconds": 0}),
+            patch.object(netem, "calibration_device", return_value={"down": None, "up": None}),
+            patch.object(netem, "qdisc_readings", return_value={}),
+            patch.object(netem, "simulator_state", return_value={"status": "running"}),
+            patch.object(netem, "simulator_dem_window", return_value={"ot_loss_pct": 0.0, "ot_jitter_p95_ms": 2.0}),
+            patch.object(netem, "wan_timeline", return_value=[]),
+            patch.object(netem, "host_window", return_value=[]),
+            patch.object(netem, "calibration_probe", return_value={"skipped": "none"}),
+            patch.object(netem, "events_between", return_value=[]),
+            patch.object(netem, "load_config", return_value=self.cfg),
+            patch.object(netem, "get_presets", return_value={}),
+            patch.object(netem, "apply_netem", return_value=(True, "OK")),
+            patch.object(netem, "apply_selected_profile", return_value=(True, "OK", {})),
+            patch.object(netem.time, "sleep"),
+            patch.object(netem, "log_event"),
+            patch.dict(netem.RUNTIME_EFFECTIVE, {"wan1": {"effective": {"delay_ms": 5.0, "jitter_ms": 1.0,
+                                                                        "loss_pct": 0.0, "download_mbit": 300}}}),
+        ]
+        for mock in patches:
+            mock.start()
+            self.addCleanup(mock.stop)
+
+    def request(self, path, method="GET", payload=None, timeout=3.0):
+        self.payloads.append(dict(payload or {}))
+        return {"run": {"run_id": f"run-{len(self.payloads)}"}}
+
+    def test_each_paced_step_asks_for_a_share_of_sparse_users_and_keeps_its_udp_window(self):
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        result = netem.run_bandwidth_calibration("wan1")
+        self.assertEqual(self.payloads[0]["sparse_share"], 0.2)
+        self.assertEqual(result["steps"][0]["diagnostics"]["sparse"]["ot_loss_pct"], 0.0)
+
+    def test_an_older_simulator_runs_without_sparse_users_and_says_so(self):
+        original = netem.traffic_generator_request
+
+        def older(path, method="GET", payload=None, timeout=3.0):
+            if payload and "sparse_share" in payload:
+                raise RuntimeError("Unknown workload configuration fields.")
+            return original(path, method=method, payload=payload, timeout=timeout)
+
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        with patch.object(netem, "traffic_generator_request", side_effect=older):
+            result = netem.run_bandwidth_calibration("wan1")
+        self.assertNotIn("sparse_share", self.payloads[-1])
+        self.assertIn("does not support sparse", result["steps"][0]["diagnostics"]["sparse"]["skipped"])
+
+    def test_an_unshaped_run_lifts_the_download_rate_and_restores_the_profile(self):
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        result = netem.run_bandwidth_calibration("wan1", unshaped=True)
+        self.assertEqual(result["mode"], "unshaped")
+        self.assertIsNone(result["wan_rate_mbps"])
+        netem.apply_netem.assert_called_once_with("eth1", 5.0, 1.0, 0.0, 0.0)
+        netem.apply_selected_profile.assert_called_once()
+
+    def test_the_profile_is_restored_even_when_the_run_fails_part_way(self):
+        def explode(link, start, end):
+            raise RuntimeError("the simulator stopped answering")
+
+        with patch.object(netem, "measure_wan", side_effect=explode):
+            result = netem.run_bandwidth_calibration("wan1", unshaped=True)
+        self.assertIn("simulator stopped answering", result["error"])
+        netem.apply_selected_profile.assert_called_once()
+
+    def test_an_unshaped_run_never_starts_during_a_lab_session(self):
+        with patch.object(netem, "session_snapshot", return_value={"active": True}):
+            result = netem.run_bandwidth_calibration("wan1", unshaped=True)
+        self.assertIn("cannot run during a lab session", result["error"])
+        netem.apply_netem.assert_not_called()
+        netem.apply_selected_profile.assert_not_called()
+
+    def test_a_failed_restore_is_reported_in_the_result(self):
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]
+        with patch.object(netem, "apply_selected_profile", return_value=(False, "tc failed", {})):
+            result = netem.run_bandwidth_calibration("wan1", unshaped=True)
+        self.assertEqual(result["restore_error"], "tc failed")
+
 
 if __name__ == "__main__":
     unittest.main()

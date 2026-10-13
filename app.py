@@ -30,6 +30,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import calibration
+import bottlenecks
 import calibration_log
 import host_health
 import platform_test
@@ -3060,7 +3061,8 @@ def calibration_probe(link_id):
         return {"skipped": "No ICMP probe is configured for this WAN."}
     outcome = execute_probe(candidate, cfg)
     return {"success": bool(outcome.get("success")), "target": outcome.get("target"),
-            "latency_ms": outcome.get("latency_ms"), "detail": outcome.get("detail")}
+            "latency_ms": outcome.get("latency_ms"), "detail": outcome.get("detail"),
+            "configured_delay_ms": ((RUNTIME_EFFECTIVE.get(link_id) or {}).get("effective") or {}).get("delay_ms") or 0.0}
 
 
 def events_between(start, end, limit=2000):
@@ -3094,6 +3096,48 @@ def calibration_file(kind):
         return None
 
 
+def simulator_dem_window(seconds):
+    """The Traffic Simulator's DEM for the last seconds: what the sparse OT-style traffic experienced, with its loss."""
+    try:
+        summary = traffic_generator_request(f"/api/v1/dem/summary?window={int(seconds)}", timeout=5.0)
+    except RuntimeError as exc:
+        return {"error": str(exc)[:200]}
+    apps = summary.get("applications") or {}
+    ot = apps.get("ot_telemetry") or {}
+    quality = ot.get("quality") or {}
+    return {"ot_loss_pct": quality.get("udp_loss_pct"), "ot_jitter_p95_ms": quality.get("udp_rtt_variation_p95_ms"),
+            "ot_p95_ms": ot.get("p95_ms"), "ot_bursts": ot.get("requests"),
+            "requests_per_second": summary.get("requests_per_second"), "p95_ms": summary.get("p95_ms")}
+
+
+def lift_download_shaping(link_id):
+    """Remove the download rate limit from one WAN for an unshaped calibration. Its configured delay and loss stay."""
+    cfg = load_config()
+    link = get_link(cfg, link_id)
+    if not link or not link.get("inner"):
+        raise RuntimeError("Unknown WAN for an unshaped calibration.")
+    effective = (RUNTIME_EFFECTIVE.get(link_id) or {}).get("effective")
+    if not effective:
+        raise RuntimeError("Apply this WAN's profile before an unshaped calibration.")
+    ok, msg = apply_netem(link["inner"], effective["delay_ms"], effective["jitter_ms"], effective["loss_pct"], 0.0)
+    if not ok:
+        raise RuntimeError(f"Could not lift the download shaping: {msg}")
+    log_event("calibration", f"Download shaping lifted on {link_id} for an unshaped calibration")
+
+
+def restore_download_shaping(link_id):
+    """Put a WAN back to its configured profile after a calibration. Returns the error text, or None."""
+    cfg = load_config()
+    link = get_link(cfg, link_id)
+    if not link:
+        return "The WAN is no longer configured; restore its profile by hand."
+    ok, msg, _effective = apply_selected_profile(link, get_presets(cfg))
+    if not ok:
+        return msg
+    log_event("calibration", f"Shaping restored on {link_id} after a calibration")
+    return None
+
+
 def save_calibration(result):
     CALIBRATION_FILE.write_text(json.dumps(result, indent=2, default=str), encoding="utf-8")
     CALIBRATION_FILE.with_suffix(".txt").write_text(calibration_log.text_report(result), encoding="utf-8")
@@ -3107,7 +3151,7 @@ def last_bandwidth_calibration():
         return None
 
 
-def run_bandwidth_calibration(link_id):
+def run_bandwidth_calibration(link_id, unshaped=False):
     """Step paced load up the ladder through the selected traffic path. Each step is judged on what the WAN carried,
     what the shaper dropped, and the host's state. The workload is stopped after every step, even on failure."""
     if not CALIBRATION_LOCK.acquire(blocking=False):
@@ -3115,19 +3159,40 @@ def run_bandwidth_calibration(link_id):
     run_id = None
     steps = []
     session_start = time.time()
+    mode = "unshaped" if unshaped else "shaped"
+    restore_error = None
+    lift_started = False
+    sparse_ok = True
     CALIBRATION_STATE.update(running=True, link_id=link_id, target_mbps=None, started_at=time.time())
     try:
         busy = platform_test_busy()
         if busy:
             raise RuntimeError(f"Calibration needs an idle lab: {busy}.")
+        if unshaped and session_snapshot().get("active"):
+            raise RuntimeError("An unshaped calibration cannot run during a lab session: it lifts the WAN shaping.")
         ensure_traffic_path("bandwidth calibration")
         shaped = wan_shaped_download(link_id)
+        if unshaped:
+            lift_started = True
+            lift_download_shaping(link_id)
+            shaped = None
         for target in calibration.LADDER_MBPS:
             users = max(10, min(500, int(target / 5)))
             CALIBRATION_STATE["target_mbps"] = target
-            status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload={
-                "profile": "office", "pattern": "steady", "users": users, "spawn_rate": users,
-                "paced_mbps": target, "controller_lease_seconds": 120}, timeout=5.0)
+            payload = {"profile": "office", "pattern": "steady", "users": users, "spawn_rate": users,
+                       "paced_mbps": target, "controller_lease_seconds": 120}
+            if sparse_ok:
+                payload["sparse_share"] = round(min(0.2, 4.0 / users), 3)
+            sparse_used = sparse_ok
+            try:
+                status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0)
+            except RuntimeError as exc:
+                if not sparse_used or "Unknown workload" not in str(exc):
+                    raise
+                # An older simulator does not know sparse_share: run the step without it and say so in the log.
+                sparse_ok = sparse_used = False
+                payload.pop("sparse_share")
+                status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0)
             run_id = (status.get("run") or {}).get("run_id")
             time.sleep(calibration.SETTLE_S)
             devices = calibration_device(link_id)
@@ -3150,7 +3215,10 @@ def run_bandwidth_calibration(link_id):
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
                                              shaper["drops_ps"])
+            sparse_window = (simulator_dem_window(int(calibration.MEASURE_S)) if sparse_used
+                             else {"skipped": "The simulator does not support sparse traffic; update it."})
             verdict["diagnostics"] = {
+                "sparse": sparse_window,
                 "window": {"start": start, "end": end},
                 "shaper": shaper,
                 "qdisc_delta": qdisc_delta,
@@ -3168,7 +3236,8 @@ def run_bandwidth_calibration(link_id):
                 break
         result = calibration.summarise(steps, shaped)
         result.update(link_id=link_id, generated_at=time.time(), settle_s=calibration.SETTLE_S,
-                      measure_s=calibration.MEASURE_S)
+                      measure_s=calibration.MEASURE_S, mode=mode)
+        result.update(bottlenecks.analyse(result))
     except RuntimeError as exc:
         result = {"link_id": link_id, "generated_at": time.time(), "error": str(exc), "steps": steps}
     except Exception as exc:
@@ -3181,8 +3250,13 @@ def run_bandwidth_calibration(link_id):
                 stop_test_owned_workload(run_id)
             except RuntimeError:
                 pass
+        if lift_started:
+            restore_error = restore_download_shaping(link_id)
         CALIBRATION_STATE.update(running=False, target_mbps=None)
         CALIBRATION_LOCK.release()
+    if restore_error:
+        result["restore_error"] = restore_error
+        log_event("calibration", f"Restoring the shaping of {link_id} failed: {restore_error}")
     result["events"] = events_between(session_start, time.time())
     save_calibration(result)
     if "error" not in result:
@@ -3191,11 +3265,11 @@ def run_bandwidth_calibration(link_id):
     return result
 
 
-def start_bandwidth_calibration(link_id):
+def start_bandwidth_calibration(link_id, unshaped=False):
     """Start a calibration in the background, since a full ladder takes several minutes. False if one is running."""
     if CALIBRATION_STATE.get("running"):
         return False
-    threading.Thread(target=run_bandwidth_calibration, args=(link_id,), name="netem-calibration", daemon=True).start()
+    threading.Thread(target=run_bandwidth_calibration, args=(link_id, unshaped), name="netem-calibration", daemon=True).start()
     return True
 
 
