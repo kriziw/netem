@@ -170,7 +170,7 @@
 
   // Rates settle over the last ~10 s so the numbers read calmly from across a room.
   function smoothedRate(points, key) {
-    const values = (points || []).map(point => point[key]).filter(number).slice(-5);
+    const values = (points || []).map(point => point[key]).filter(number).slice(-10);
     return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
   }
 
@@ -296,7 +296,7 @@
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
   let latest = null, online = false, page = 0, receivedAt = 0;
-  const text = (id, value) => { const node = document.getElementById(id); if (node) node.textContent = value; };
+  const text = (id, value) => setText(document.getElementById(id), value);
   const element = (tag, className, content) => {
     const node = document.createElement(tag);
     if (className) node.className = className;
@@ -327,35 +327,112 @@
     text('session-site', session.active ? (session.site ? `Validating ${session.site}` : 'Session without a recorded site') : '');
   }
 
+  // ---- Smooth updates: panels keep their elements between samples, numbers ease to their new values, and the
+  // sparklines scroll on every frame. Nothing is rebuilt at each sample, so transitions and animations run through.
+  const frameLoop = typeof requestAnimationFrame === 'function';
+  const setText = (node, value) => {
+    if (!node) return;
+    const next = value == null ? '' : String(value);
+    if (node.textContent !== next) node.textContent = next;
+  };
+  const sigs = new Map();
+  // True when a panel's content changed since it was last built: panels that rarely change are rebuilt only then.
+  const changed = (key, value) => {
+    const signature = JSON.stringify(value);
+    if (sigs.get(key) === signature) return false;
+    sigs.set(key, signature);
+    return true;
+  };
+  // One element per item, found by key and reused; new items are created and removed ones leave; order follows items.
+  function reconcile(container, items, keyOf, create, update) {
+    for (const node of [...container.children]) if (node.dataset.key === undefined) node.remove();
+    const existing = new Map();
+    for (const node of container.children) existing.set(node.dataset.key, node);
+    const nodes = items.map((item, index) => {
+      const key = String(keyOf(item, index));
+      let node = existing.get(key);
+      if (node) existing.delete(key); else node = create(item, index);
+      node.dataset.key = key;
+      update(node, item, index);
+      return node;
+    });
+    existing.forEach(node => node.remove());
+    nodes.forEach((node, index) => {
+      if (container.children[index] !== node) container.insertBefore(node, container.children[index] || null);
+    });
+  }
+  // Numbers ease from the value on screen to the new one, so readings glide rather than jump at each sample.
+  const DURATION = 900;
+  const tweens = new WeakMap();
+  const easing = new Set();
+  let easingFrame = null;
+  function stepEasing(now) {
+    easingFrame = null;
+    for (const node of [...easing]) {
+      const state = tweens.get(node);
+      const k = Math.min(1, (now - state.t0) / DURATION);
+      state.shown = state.from + (state.to - state.from) * (1 - Math.pow(1 - k, 3));
+      setText(node, state.format(state.shown));
+      if (k >= 1) easing.delete(node);
+    }
+    if (easing.size) easingFrame = requestAnimationFrame(stepEasing);
+  }
+  function showNumber(node, value, format) {
+    if (!node) return;
+    const state = tweens.get(node);
+    if (!number(value)) {
+      easing.delete(node);
+      tweens.delete(node);
+      setText(node, format(null));
+      return;
+    }
+    if (!frameLoop || !state) {
+      easing.delete(node);
+      tweens.set(node, {shown: value, from: value, to: value, t0: 0, format});
+      setText(node, format(value));
+      return;
+    }
+    if (state.to === value) {
+      state.format = format;
+      return;
+    }
+    Object.assign(state, {from: state.shown, to: value, t0: performance.now(), format});
+    easing.add(node);
+    if (easingFrame === null) easingFrame = requestAnimationFrame(stepEasing);
+  }
+
   function renderRunning() {
     const scenario = advance(latest.scenario || {}, online ? Math.min(5, (Date.now() - receivedAt) / 1000) : 0);
     const plan = latest.plan || {}, traffic = latest.traffic || {};
-    text('demo-name', `${online ? '' : 'Last known: '}${scenario.active ? scenario.scenario_name || 'Running test'
+    setText(document.getElementById('demo-name'), `${online ? '' : 'Last known: '}${scenario.active ? scenario.scenario_name || 'Running test'
       : plan.active ? plan.label || 'Site test plan' : 'Live network observation'}`);
     const phases = scenario.active ? phaseTimeline(scenario) : [];
-    text('demo-stage', scenario.active
-      ? [scenario.link && `On ${scenario.link}`, scenario.preparing_workload ? 'Waiting for traffic execution' : phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}: ${scenario.phase}` : null,
+    setText(document.getElementById('demo-stage'), scenario.active
+      ? [scenario.link && `On ${scenario.link}`, phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}: ${scenario.phase}` : null,
         scenario.step_label].filter(Boolean).join(' · ')
       : showReport(latest) ? `Last test: ${latest.last_test.name} ${latest.last_test.result || 'finished'} · report on the right`
       : plan.result ? `Last site test plan: ${plan.result}` : 'Waiting for the next test');
     const track = document.getElementById('demo-phases');
     track.hidden = !phases.length;
-    track.replaceChildren(...phases.map(phase => {
-      const part = element('span', `phase ${phase.state}`);
+    reconcile(track, phases, (phase, index) => `${index}:${phase.name}`, () => {
+      const part = element('span', 'phase');
+      part.append(element('i'), element('b'));
+      return part;
+    }, (part, phase) => {
+      part.className = `phase ${phase.state}`;
       part.style.flexBasis = `${phase.share.toFixed(2)}%`;
       part.title = `${phase.name} · ${clock(phase.planned_s)}`;
-      const fill = element('i');
-      fill.style.width = `${phase.fill.toFixed(1)}%`;
-      part.append(fill, element('b', '', phase.name));
-      return part;
-    }));
+      part.querySelector('i').style.width = `${phase.fill.toFixed(1)}%`;
+      setText(part.querySelector('b'), phase.name);
+    });
     document.querySelector('.demo').classList.toggle('paused', Boolean(scenario.active && scenario.paused));
-    text('demo-time', scenario.active && phases.length ? [`${clock(scenario.elapsed_s)} of about ${clock(scenario.planned_s)}`,
+    setText(document.getElementById('demo-time'), scenario.active && phases.length ? [`${clock(scenario.elapsed_s)} of about ${clock(scenario.planned_s)}`,
       scenario.paused ? `Paused by the operator, holding ${scenario.phase}` : null, phaseCountdown(scenario)].filter(Boolean).join(' · ') : '');
-    text('plan-progress', planProgress(plan));
+    setText(document.getElementById('plan-progress'), planProgress(plan));
     const running = ['starting', 'running'].includes(traffic.status);
-    text('workload-users', running && number(traffic.users) ? traffic.users.toLocaleString() : traffic.connected ? 'Idle' : '—');
-    text('workload-summary', !traffic.configured ? 'Traffic Simulator not connected'
+    showNumber(document.getElementById('workload-users'), running && number(traffic.users) ? traffic.users : null,
+      value => number(value) ? Math.round(value).toLocaleString() : traffic.connected ? 'Idle' : '—');
+    setText(document.getElementById('workload-summary'), !traffic.configured ? 'Traffic Simulator not connected'
       : !traffic.connected ? 'Traffic Simulator unavailable'
       : [traffic.label, traffic.activity && `${traffic.activity} activity`, traffic.media_mode && `${traffic.media_mode} voice/video`]
         .filter(Boolean).join(' · ') || (running ? 'Simulated corporate users' : 'No workload running'));
@@ -363,34 +440,50 @@
 
   function renderOutcome() {
     const view = resultView(latest.experience);
+    const experience = latest.experience || {};
+    const live = online && Boolean(experience.available);
+    const scoreText = value => number(value) ? `${Math.round(value)} / 100` : '—';
+    const latencyText = value => number(value) ? `${Math.round(value)} ms` : '—';
+    const tiles = {
+      experience: [experience.experience_score, scoreText],
+      success: [experience.success_pct, value => pct(value, 2)],
+      interactive: [experience.interactive_p95_ms, latencyText],
+    };
     for (const key of ['experience', 'success', 'interactive']) {
       const tile = document.getElementById(`result-${key}`);
       tile.className = `result ${online ? view[key].verdict : 'unknown'}`;
-      tile.querySelector('[data-value]').textContent = online ? view[key].value : '—';
-      tile.querySelector('[data-target]').textContent = view[key].target;
+      const [raw, format] = tiles[key];
+      showNumber(tile.querySelector('[data-value]'), live ? raw : null, format);
+      setText(tile.querySelector('[data-target]'), view[key].target);
     }
     const traffic = latest.traffic || {};
-    text('outcome-window', number(traffic.requests) ? `Last ${traffic.window_seconds || 60} s · ${traffic.requests.toLocaleString()} transactions` : '');
+    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${traffic.window_seconds || 60} s · ${traffic.requests.toLocaleString()} transactions` : '');
     const story = latest.story || {};
-    text('story-status', online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
-    document.getElementById('impacts').replaceChildren(...(story.impacts || []).map(item => {
-      const card = element('article', `impact ${item.state} ${item.severity}`);
-      card.append(element('strong', '', item.impact), element('span', '', `${item.state === 'resolved' ? 'Resolved · ' : ''}${item.cause}`));
-      return card;
-    }));
-    document.getElementById('routes').replaceChildren(...((story.routes || []).length ? story.routes.map(route => {
-      const view = routeView(route);
-      const row = element('div', `route ${view.tone}`);
-      row.append(element('span', '', view.label), element('strong', '', view.text));
-      return row;
-    }) : [element('p', 'muted', 'Shown once simulated users are running.')]));
+    setText(document.getElementById('story-status'), online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
+    reconcile(document.getElementById('impacts'), story.impacts || [], item => `${item.impact}|${item.cause}`,
+      () => { const card = element('article', 'impact'); card.append(element('strong'), element('span')); return card; },
+      (card, item) => {
+        card.className = `impact ${item.state} ${item.severity}`;
+        setText(card.querySelector('strong'), item.impact);
+        setText(card.querySelector('span'), `${item.state === 'resolved' ? 'Resolved · ' : ''}${item.cause}`);
+      });
+    const routesBox = document.getElementById('routes');
+    reconcile(routesBox, story.routes || [], route => route.label,
+      () => { const row = element('div', 'route'); row.append(element('span'), element('strong')); return row; },
+      (row, route) => {
+        const view = routeView(route);
+        row.className = `route ${view.tone}`;
+        setText(row.querySelector('span'), view.label);
+        setText(row.querySelector('strong'), view.text);
+      });
+    if (!(story.routes || []).length) routesBox.append(element('p', 'muted', 'Shown once simulated users are running.'));
   }
 
   function renderReport() {
     const visible = showReport(latest);
     document.getElementById('report').hidden = !visible;
     document.getElementById('live-outcome').hidden = visible;
-    if (!visible) return;
+    if (!visible || !changed('report', latest.last_test)) return;
     const view = reportView(latest.last_test);
     text('report-name', view.name);
     text('report-meta', view.meta);
@@ -416,34 +509,52 @@
       : [element('p', 'muted', view.remediationNote)]));
   }
 
+  // The WAN cards: one per link, updated in place. Rates ease to the smoothed value of each new sample.
+  const scales = new Map();
+  function updatePath(node, link) {
+    const field = name => node.querySelector(`[data-field="${name}"]`);
+    const health = link.display_health || (link.fault !== 'normal' ? 'failed' : link.health || 'healthy');
+    node.className = `path ${({healthy: 'good', congested: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good')}`;
+    setText(field('name'), link.name);
+    setText(field('profile'), [link.profile, number(link.download_limit_mbit) && number(link.upload_limit_mbit)
+      ? `${format(link.download_limit_mbit)}/${format(link.upload_limit_mbit)} Mbit/s` : null].filter(Boolean).join(' · '));
+    setText(field('health'), `${online ? '' : 'Last known · '}${HEALTH[health] || words(health)}`);
+    setText(field('impairment'), link.impairment || '');
+    const points = histories.get(link.id) || [];
+    showNumber(field('down'), online ? smoothedRate(points, 'down_mbps') : null, rateText);
+    showNumber(field('up'), online ? smoothedRate(points, 'up_mbps') : null, rateText);
+    setText(field('carries'), online ? carriesText(link.carries) : '');
+  }
   function renderPaths() {
     const links = latest.links;
     const pages = Math.max(1, Math.ceil(links.length / pageSize()));
     page %= pages;
-    text('page-number', pages > 1 ? `Page ${page + 1} of ${pages} · rotates every 12 seconds` : '');
+    setText(document.getElementById('page-number'), pages > 1 ? `Page ${page + 1} of ${pages} · rotates every 12 seconds` : '');
     const container = document.getElementById('paths');
-    container.replaceChildren();
     if (!links.length) {
-      container.append(element('p', 'empty', 'No WAN paths configured. Configure the lab from the operator interface.'));
+      container.replaceChildren(element('p', 'empty', 'No WAN paths configured. Configure the lab from the operator interface.'));
+      return;
     }
-    for (const link of links.slice(page * pageSize(), (page + 1) * pageSize())) {
-      const node = document.getElementById('path-template').content.firstElementChild.cloneNode(true);
-      const field = (name, value) => { node.querySelector(`[data-field="${name}"]`).textContent = value; };
-      const health = link.display_health || (link.fault !== 'normal' ? 'failed' : link.health || 'healthy');
-      node.classList.add({healthy: 'good', congested: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good');
-      field('name', link.name);
-      field('profile', [link.profile, number(link.download_limit_mbit) && number(link.upload_limit_mbit)
-        ? `${format(link.download_limit_mbit)}/${format(link.upload_limit_mbit)} Mbit/s` : null].filter(Boolean).join(' · '));
-      field('health', `${online ? '' : 'Last known · '}${HEALTH[health] || words(health)}`);
-      field('impairment', link.impairment || '');
-      const points = histories.get(link.id) || [];
-      field('down', rateText(online ? smoothedRate(points, 'down_mbps') : null));
-      field('up', rateText(online ? smoothedRate(points, 'up_mbps') : null));
-      field('carries', online ? carriesText(link.carries) : '');
-      const max = Math.max(1, ...points.flatMap(point => [point.down_mbps, point.up_mbps]).filter(number));
-      node.querySelector('.download').setAttribute('d', chart(points, 'down_mbps', latest.timestamp, max));
-      node.querySelector('.upload').setAttribute('d', chart(points, 'up_mbps', latest.timestamp, max));
-      container.append(node);
+    const visible = links.slice(page * pageSize(), (page + 1) * pageSize());
+    reconcile(container, visible, link => link.id,
+      () => document.getElementById('path-template').content.firstElementChild.cloneNode(true), updatePath);
+    drawSparklines();
+  }
+
+  // Each frame the sparklines move on: the time axis runs on from the last sample, so the lines scroll rather than step.
+  // The vertical scale eases too, so a new peak does not jump the whole chart.
+  function drawSparklines() {
+    if (!latest || !latest.links) return;
+    const now = latest.timestamp + (Date.now() - receivedAt) / 1000;
+    for (const card of document.querySelectorAll('#paths .path')) {
+      const id = card.dataset.key;
+      const points = histories.get(id) || [];
+      const target = Math.max(1, ...points.flatMap(point => [point.down_mbps, point.up_mbps]).filter(number));
+      const previous = scales.get(id);
+      const scale = number(previous) && frameLoop ? previous + (target - previous) * 0.06 : target;
+      scales.set(id, scale);
+      card.querySelector('.download').setAttribute('d', chart(points, 'down_mbps', now, scale));
+      card.querySelector('.upload').setAttribute('d', chart(points, 'up_mbps', now, scale));
     }
   }
 
@@ -484,21 +595,25 @@
     if (mode === 'summary') {
       const view = planSummaryView(latest.plan_summary);
       document.getElementById('plan-summary').className = `plan-summary ${view.tone}`;
-      text('ps-eyebrow', view.eyebrow);
-      text('ps-title', view.title);
-      text('ps-meta', view.meta);
+      setText(document.getElementById('ps-eyebrow'), view.eyebrow);
+      setText(document.getElementById('ps-title'), view.title);
+      setText(document.getElementById('ps-meta'), view.meta);
       const result = document.getElementById('ps-result');
       result.className = `pill ${view.tone}`;
-      result.textContent = view.result;
-      document.getElementById('ps-tests').replaceChildren(...view.tests.map(test => {
-        const item = element('li');
-        const name = element('strong', '', test.name);
-        if (test.where) name.append(element('small', '', test.where));
-        item.append(element('span', `pill ${test.tone}`, test.result), name, element('p', '', test.facts));
-        for (const line of test.moved) item.append(element('p', 'moved', line));
-        return item;
-      }));
-      document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
+      setText(result, view.result);
+      if (changed('summary-tests', view.tests)) {
+        document.getElementById('ps-tests').replaceChildren(...view.tests.map(test => {
+          const item = element('li');
+          const name = element('strong', '', test.name);
+          if (test.where) name.append(element('small', '', test.where));
+          item.append(element('span', `pill ${test.tone}`, test.result), name, element('p', '', test.facts));
+          for (const line of test.moved) item.append(element('p', 'moved', line));
+          return item;
+        }));
+      }
+      if (changed('summary-insights', view.insights)) {
+        document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
+      }
     }
     if (mode === 'waiting') {
       renderWaitingMedia(latest.showcase_video);
@@ -516,16 +631,20 @@
       text('intro-description', view.description);
       text('intro-seconds', view.countdown);
       text('intro-meta', view.meta);
-      document.getElementById('intro-phases').replaceChildren(...view.phases.map(phase => {
-        const item = element('li');
-        const head = element('div', 'intro-phase-head');
-        head.append(element('b', '', String(phase.number)), element('strong', '', phase.name), element('span', '', phase.duration));
-        item.append(head);
-        if (phase.what) item.append(element('p', '', phase.what));
-        return item;
-      }));
+      if (changed('intro-phases', view.phases)) {
+        document.getElementById('intro-phases').replaceChildren(...view.phases.map(phase => {
+          const item = element('li');
+          const head = element('div', 'intro-phase-head');
+          head.append(element('b', '', String(phase.number)), element('strong', '', phase.name), element('span', '', phase.duration));
+          item.append(head);
+          if (phase.what) item.append(element('p', '', phase.what));
+          return item;
+        }));
+      }
       document.getElementById('intro-checks-block').hidden = !view.checks.length;
-      document.getElementById('intro-checks').replaceChildren(...view.checks.map(check => element('li', '', check)));
+      if (changed('intro-checks', view.checks)) {
+        document.getElementById('intro-checks').replaceChildren(...view.checks.map(check => element('li', '', check)));
+      }
     }
   }
 
@@ -539,6 +658,12 @@
     renderReport();
     renderPaths();
   }
+  // Resizes and other bursts of changes are drawn once per frame.
+  let renderFrame = null;
+  const scheduleRender = () => {
+    if (!frameLoop) return render();
+    if (renderFrame === null) renderFrame = requestAnimationFrame(() => { renderFrame = null; render(); });
+  };
 
   function connection(connected) {
     online = connected;
@@ -563,7 +688,7 @@
       const ids = new Set(data.links.map(link => link.id));
       for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
       for (const link of data.links) {
-        const points = (histories.get(link.id) || []).filter(point => point.timestamp >= data.timestamp - 120 && point.timestamp <= data.timestamp).slice(-60);
+        const points = (histories.get(link.id) || []).filter(point => point.timestamp >= data.timestamp - 120 && point.timestamp <= data.timestamp).slice(-130);
         points.push({timestamp: data.timestamp, down_mbps: link.down_mbps, up_mbps: link.up_mbps});
         histories.set(link.id, points);
       }
@@ -573,7 +698,7 @@
       // Retain labelled last-known state while blanking all live rates.
       const now = Date.now() / 1000;
       for (const [id, points] of histories) {
-        const recent = points.filter(point => point.timestamp >= now - 120).slice(-60);
+        const recent = points.filter(point => point.timestamp >= now - 120).slice(-130);
         recent.push({timestamp: now, down_mbps: null, up_mbps: null});
         histories.set(id, recent);
       }
@@ -581,11 +706,23 @@
     } finally {
       clearTimeout(timeout);
       // Poll faster while nothing runs, so an announced test appears within a second.
-      setTimeout(poll, latest && stageMode(latest) === 'live' && (latest.scenario || {}).active ? 2000 : 1000);
+      setTimeout(poll, 1000);
     }
   }
-  setInterval(() => { if (latest) { page += 1; render(); } }, 12000);
+  // The WAN pages turn with a short fade, so the change reads as a turn rather than a cut.
+  setInterval(() => {
+    if (!latest) return;
+    const container = document.getElementById('paths');
+    if (!frameLoop || !container) { page += 1; render(); return; }
+    container.classList.add('turning');
+    setTimeout(() => { page += 1; render(); container.classList.remove('turning'); }, 380);
+  }, 12000);
   setInterval(() => { if (latest && online && (latest.scenario || {}).active) { renderStage(); renderRunning(); } }, 1000);
-  window.addEventListener('resize', render);
+  window.addEventListener('resize', scheduleRender);
+  // The sparklines scroll on every frame, whatever arrives from the server.
+  if (frameLoop) {
+    const frame = () => { drawSparklines(); requestAnimationFrame(frame); };
+    requestAnimationFrame(frame);
+  }
   poll();
 })();
