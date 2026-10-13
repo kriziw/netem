@@ -6,6 +6,7 @@ const {JSDOM} = require('jsdom');
 const source = fs.readFileSync('static/showroom.js', 'utf8');
 const context = {window: {}};
 vm.createContext(context);
+vm.runInContext(fs.readFileSync('static/time-format.js', 'utf8'), context);
 vm.runInContext(source, context);
 const ui = context.window.ShowroomUI;
 // Values built inside the vm context come from another realm; compare their plain form.
@@ -44,6 +45,7 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
     if (failed) throw new Error('offline');
     return {ok: true, json: async () => snapshot};
   };
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
   win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
   // No session and no test: the waiting screen covers the dashboard, which still renders underneath.
@@ -152,6 +154,7 @@ test('screen shows the site, the running test with phases, then the report betwe
       wan_lines: {primary: {preset: 'dia', download_mbit: 1000, upload_mbit: 1000}, backup: {preset: 'dia', download_mbit: 1000, upload_mbit: 1000}}},
     experience: {available: false, targets: {}}, traffic: {}, findings: [], steering: [], plan: {}, last_test: null};
   win.fetch = async () => ({ok: true, json: async () => snapshot});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
   win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(doc.getElementById('site-title').textContent, 'Automotive · Manufacturing plant');
@@ -215,6 +218,7 @@ test('the live view shows the story, impacts with causes and where traffic goes'
                       {impact: '<img src=x>', cause: 'WAN1 is full', state: 'resolved', severity: 'warn'}],
             routes: [{label: 'Voice and video', wan: 'WAN2', state: 'good'}, {label: 'File transfers', wan: 'WAN1', state: 'warn'}]}};
   win.fetch = async () => ({ok: true, json: async () => snapshot});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
   win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
   assert.match(doc.getElementById('story-status').textContent, /^Users are affected/);
@@ -305,4 +309,14 @@ test('after a run sequence the results replace the dashboard until the next test
   assert.equal(view.tests[2].facts, 'Not run: the plan stopped before this test');
   assert.equal(view.tests[2].tone, 'unknown');
   assert.deepEqual(plain(view.insights.map(item => item.tone)), ['fail', 'pass']);
+});
+
+test('the report and the showroom clock follow the chosen time format', () => {
+  const ended = new Date(2026, 9, 13, 14, 5).getTime() / 1000;
+  const summary = {name: 'Brownout', result: 'passed', ended_at: ended, phases: [], conclusion: []};
+  context.window.NetEmTime.setFormat('24h');
+  assert.match(ui.reportView(summary).meta, /finished 14:05$/);
+  context.window.NetEmTime.setFormat('12h');
+  assert.match(ui.reportView(summary).meta, /finished 2:05 PM$/);
+  context.window.NetEmTime.setFormat('24h');
 });

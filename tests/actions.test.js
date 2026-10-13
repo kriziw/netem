@@ -5,7 +5,7 @@ const {JSDOM} = require('jsdom');
 const source = fs.readFileSync('static/actions.js', 'utf8');
 
 // A page as base.html renders it: live top-bar pills, the impairment banner slot and the page.
-const page = ({version, pills = '', banner = '', body = ''}) => `<!doctype html><html><head><title>Tests</title></head><body>
+const page = ({version, pills = '', banner = '', body = '', timeFormat = '24h'}) => `<!doctype html><html><head><title>Tests</title></head><body data-time-format="${timeFormat}">
   <header><div class="top-actions"><span class="top-status" id="top-status">${pills}</span><button id="activity-toggle">Activity</button></div></header>
   <div id="global-alert-slot">${banner}</div>
   <main class="page" data-ui-version="${version}">${body}</main>
@@ -25,12 +25,13 @@ function open(first, next, {visible = true} = {}) {
     if (String(url).endsWith('/api/v1/ui-version')) return {ok: true, json: async () => ({version: serverVersion})};
     return {ok: true, url: 'http://netem.test/tests', text: async () => page(next)};
   };
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
   win.eval(source);
   win.NetEmActions.mount();
   return {win, doc: win.document, calls, tick: async () => { await loop(); }, change: version => { serverVersion = version; }};
 }
 
-const next = {version: 'v2', pills: '<span class="top-pill scenario">Scenario · Brownout</span>',
+const next = {version: 'v2', timeFormat: '12h', pills: '<span class="top-pill scenario">Scenario · Brownout</span>',
   banner: '<div class="global-alert">Active runtime impairment</div>',
   body: '<form method="post" action="/x"><input name="length_min" value="5"></form>'};
 
@@ -95,4 +96,14 @@ test('action results stay visible across the refresh they cause', () => {
   const toast = page.doc.querySelector('#action-toasts .flash.success');
   assert.equal(toast.textContent, 'Impairment applied to WAN1.');
   assert.equal(page.doc.getElementById('action-toasts').getAttribute('aria-live'), 'polite');
+});
+
+test('a saved clock format applies to the open page at once', async () => {
+  const page = open({version: 'v1', body: '<form method="post" action="/x"><input name="length_min" value="5"></form>'}, next);
+  assert.equal(page.win.NetEmTime.format(), '24h');
+  page.change('v2');
+  await page.tick();
+  assert.equal(page.doc.body.dataset.timeFormat, '12h');
+  assert.equal(page.win.NetEmTime.format(), '12h');
+  assert.equal(page.win.NetEmTime.clock(new Date(2026, 9, 13, 14, 5)), '2:05:00 PM');
 });

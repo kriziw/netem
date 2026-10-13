@@ -50,6 +50,10 @@ def create_showroom_app(snapshot, branding_source=None):
     def javascript():
         return send_from_directory(root / "static", "showroom.js")
 
+    @viewer.get("/assets/time-format.js")
+    def time_format_script():
+        return send_from_directory(root / "static", "time-format.js")
+
     @viewer.get("/assets/vendors/<vendor>.png")
     def vendor_mark(vendor):
         if not re.fullmatch(r"[a-z0-9-]{1,40}", vendor) or not (root / "static" / "vendors" / f"{vendor}.png").is_file():

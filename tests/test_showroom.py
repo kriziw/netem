@@ -99,6 +99,11 @@ class SnapshotTests(unittest.TestCase):
         self.assertEqual(scenario["checks"][0], "Voice steered off [address]")
         self.assertNotIn("intro_clock", scenario)
 
+    def test_snapshot_publishes_the_clock_format(self):
+        self.assertEqual(self.snapshot(None)["time_format"], "24h")
+        with patch.object(netem, "load_config", return_value={"time_format": "12h"}):
+            self.assertEqual(self.snapshot(None)["time_format"], "12h")
+
     def test_finished_test_report_is_published_only_between_tests(self):
         summary = {"name": "Brownout", "link": "WAN1", "result": "failed", "ended_at": 90, "duration_s": 240,
                    "link_id": "internal-link", "scenario_id": "internal-id",
@@ -137,7 +142,7 @@ class ListenerTests(unittest.TestCase):
         self.client = self.viewer.test_client()
 
     def test_surface_is_only_presentation_routes(self):
-        allowed = {"/", "/api/snapshot", "/assets/showroom.css", "/assets/showroom.js", "/assets/branding-live.js"}
+        allowed = {"/", "/api/snapshot", "/assets/showroom.css", "/assets/showroom.js", "/assets/branding-live.js", "/assets/time-format.js"}
         # Brand and vendor assets are the only other routes; without a brand they return 404.
         assets = {"/branding/theme.css", "/branding/assets/<path:filename>", "/branding/status", "/assets/vendors/<vendor>.png"}
         self.assertEqual({rule.rule for rule in self.viewer.url_map.iter_rules()}, allowed | assets)

@@ -12,7 +12,7 @@
   {% endif %}
   {% block head %}{% endblock %}
 </head>
-<body>
+<body data-time-format="{{ time_format }}">
 {% set inventory_summary = inventory_summary|default({'critical': 0, 'warnings': 0}) %}
 <div class="app-shell">
   <aside class="sidebar" id="sidebar">
@@ -171,6 +171,7 @@
   </div>
 </div>
 
+<script src="{{ url_for('static', filename='time-format.js') }}"></script>
 <script>
 (() => {
   const menu = document.getElementById("mobile-menu");
@@ -190,7 +191,7 @@
   let activityTimer = null;
 
   function formatEventTime(ts) {
-    return new Date(Number(ts) * 1000).toLocaleTimeString([], {hour:"2-digit", minute:"2-digit", second:"2-digit"});
+    return NetEmTime.clock(Number(ts));
   }
 
   async function refreshActivity() {

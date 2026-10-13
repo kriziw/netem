@@ -319,7 +319,7 @@ window.NetEmUI = (() => {
 
   function eventTime(timestamp) {
     if (!timestamp) return "—";
-    return new Date(Number(timestamp) * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"});
+    return NetEmTime.clock(Number(timestamp));
   }
 
   function renderDemSummary(root, dem = {}, connected = true, targets = null) {
