@@ -84,6 +84,23 @@
     </div>
   </a>
 
+  <section class="card" id="time-format">
+    <div class="card-head"><div><div class="card-title">Time format</div><div class="card-sub">How clock times appear on every page, in session records and on the showroom</div></div><span class="status info">{{ '24-hour' if time_format == '24h' else '12-hour' }}</span></div>
+    <div class="card-pad">
+      <form method="post" action="{{ url_for('time_format_save') }}">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <div class="form-grid">
+          <div><label for="time-format-select">Clock</label>
+            <select id="time-format-select" name="time_format">
+              <option value="24h" {% if time_format == '24h' %}selected{% endif %}>24-hour, for example 14:05:09 · default</option>
+              <option value="12h" {% if time_format == '12h' %}selected{% endif %}>12-hour, for example 2:05:09 PM</option>
+            </select></div>
+        </div>
+        <div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="submit">Save time format</button></div>
+      </form>
+    </div>
+  </section>
+
   <section class="card" id="appliance">
     <div class="card-head"><div><div class="card-title">Appliance under test</div><div class="card-sub">The SD-WAN vendor clients see next to the MSP brand</div></div>
       {% if appliance.vendor %}<img class="vendor-mark" src="{{ url_for('static', filename='vendors/' ~ appliance.vendor ~ '.png') }}" alt="{{ appliance.vendor_name }}">{% else %}<span class="status info">Not set</span>{% endif %}</div>

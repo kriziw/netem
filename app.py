@@ -98,7 +98,7 @@ def protect_integration_forms():
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
         "branding_activate", "branding_save", "branding_delete", "branding_import", "appliance_save",
-        "site_save", "site_apply_wan", "site_run", "site_stop",
+        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -3803,7 +3803,7 @@ def platform_clock_status(max_age=CLOCK_CHECK_SECONDS):
             issues.append(f"{item['name']} is not synchronized to a time server"
                           + (": time sync is turned off." if item.get("ntp") is False else "."))
     for step in [step for step in CLOCK_STEPS if time.monotonic() - step["clock"] <= 3600][-1:]:
-        when = time.strftime("%H:%M", time.localtime(step["at"]))
+        when = clock_label(step["at"], time_format())
         if step["step_s"]:
             issues.append(f"NetEm's clock moved {'back' if step['step_s'] < 0 else 'forward'} {describe_seconds(step['step_s'])} at {when}"
                           + (f"; {step['discarded']} samples dated in the future were discarded." if step["discarded"] else "."))
@@ -5284,6 +5284,39 @@ def inject_settings_nav():
     return {"settings_groups": SETTINGS_GROUPS, "settings_group": group_id}
 
 
+# ---------- Time display ----------
+
+TIME_FORMATS = ("24h", "12h")
+
+
+def time_format(cfg=None):
+    """How clock times are shown everywhere: 24-hour unless the operator chose 12-hour."""
+    value = (cfg if cfg is not None else load_config()).get("time_format")
+    return value if value in TIME_FORMATS else "24h"
+
+
+def clock_label(timestamp, fmt):
+    """Hours and minutes of a Unix time in the chosen format, for server-written labels."""
+    moment = time.localtime(timestamp)
+    if fmt == "12h":
+        return time.strftime("%I:%M %p", moment).lstrip("0")
+    return time.strftime("%H:%M", moment)
+
+
+@app.route("/settings/time-format", methods=["POST"])
+def time_format_save():
+    value = request.form.get("time_format", "")
+    if value not in TIME_FORMATS:
+        flash("Choose 24-hour or 12-hour time.", "error")
+        return redirect(url_for("settings", section="appearance"))
+    cfg = load_config()
+    cfg["time_format"] = value
+    save_config(cfg)
+    log_event("settings", f"Clock times now shown in {'24-hour' if value == '24h' else '12-hour'} format", time_format=value)
+    flash(f"Clock times now use the {'24-hour' if value == '24h' else '12-hour'} format.", "success")
+    return redirect(url_for("settings", section="appearance"))
+
+
 @app.context_processor
 def inject_nav():
     cfg = load_config()
@@ -5319,6 +5352,7 @@ def inject_nav():
         ],
         "config": cfg,
         "app_version": get_app_version(),
+        "time_format": time_format(cfg),
         "help_doc_slug": DOC_HELP_BY_ENDPOINT.get(request.endpoint),
         "global_links": build_link_states(cfg) if cfg.get("wan_links") else [],
         # Stamped on the page, so it can tell when the lab has moved on.
@@ -7907,7 +7941,7 @@ def showroom_snapshot():
     outcome = showroom_outcome(diagnosis, site_plan)
     story = showroom_story(diagnosis, links, outcome)
     return {
-        "timestamp": now, "links": links, "story": story,
+        "timestamp": now, "links": links, "story": story, "time_format": time_format(cfg),
         "appliance": {key: value for key, value in appliance_under_test().items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",

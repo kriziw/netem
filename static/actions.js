@@ -82,6 +82,9 @@ window.NetEmActions = (() => {
     const url = new URL(response.url || location.href);
     if (url.origin !== location.origin) throw new Error('Navigation must stay within this NetEm instance.');
     const next = new DOMParser().parseFromString(await response.text(), 'text/html');
+    // The clock format is a page-wide setting: a saved change applies here at once, not on the next reload.
+    const format = next.body?.dataset.timeFormat;
+    if (format) { document.body.dataset.timeFormat = format; window.NetEmTime?.setFormat(format); }
     if (options.isCurrent && !options.isCurrent()) return false;
     if (options.beforeCommit && !(await options.beforeCommit())) return false;
     if (options.isCurrent && !options.isCurrent()) return false;

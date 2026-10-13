@@ -105,7 +105,7 @@
       name: summary.name || 'Test', result, tone,
       meta: [summary.link && `on ${summary.link}`, summary.site, number(summary.duration_s) && `${clock(summary.duration_s)} long`,
         number(checks.total) && checks.total ? `${checks.passed} of ${checks.total} checks passed` : 'no checks',
-        number(summary.ended_at) && `finished ${new Date(summary.ended_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`]
+        number(summary.ended_at) && `finished ${window.NetEmTime.clock(summary.ended_at, {seconds: false})}`]
         .filter(Boolean).join(' · '),
       // The first line repeats the result shown in the heading.
       conclusion: (summary.conclusion || []).slice(1),
@@ -249,7 +249,7 @@
       title: summary.title || 'Site test plan finished', result, tone,
       meta: [number(summary.duration_s) && `${clock(summary.duration_s)} in total`,
         number(checks.total) && checks.total ? `${checks.passed} of ${checks.total} checks met` : null,
-        number(summary.ended_at) && `finished ${new Date(summary.ended_at * 1000).toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`]
+        number(summary.ended_at) && `finished ${window.NetEmTime.clock(summary.ended_at, {seconds: false})}`]
         .filter(Boolean).join(' · '),
       tests: (summary.tests || []).map(test => {
         const [label, rowTone] = TEST_RESULTS[test.result] || [words(test.result) || '—', 'unknown'];
@@ -509,6 +509,7 @@
       const data = await response.json();
       if (!number(data.timestamp) || !Array.isArray(data.links) || !data.scenario || !data.session) throw new Error('Invalid snapshot');
       latest = data;
+      window.NetEmTime.setFormat(data.time_format);
       receivedAt = Date.now();
       const ids = new Set(data.links.map(link => link.id));
       for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
@@ -517,7 +518,7 @@
         points.push({timestamp: data.timestamp, down_mbps: link.down_mbps, up_mbps: link.up_mbps});
         histories.set(link.id, points);
       }
-      text('updated', `Updated ${new Date(data.timestamp * 1000).toLocaleTimeString()}`);
+      text('updated', `Updated ${window.NetEmTime.clock(data.timestamp)}`);
       connection(true);
     } catch (error) {
       // Retain labelled last-known state while blanking all live rates.

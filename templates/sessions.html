@@ -151,7 +151,7 @@
 const sessionStartForm = document.getElementById("session-start");
 if (sessionStartForm) NetEmSites.selectors(sessionStartForm, {{ site_options|tojson }}, {{ site_selection|tojson }});
 function fullTime(ts) {
-  return new Date(Number(ts)*1000).toLocaleString([], {dateStyle:"medium", timeStyle:"medium"});
+  return NetEmTime.stamp(Number(ts));
 }
 function duration(start,end) {
   if (!end) return "Active";

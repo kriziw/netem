@@ -55,7 +55,7 @@ test('closing a dialog stops polling and ignores late responses',async()=>{
 
 test('throughput samples expose WAN, time and rate without labelling missing data as zero',()=>{
   const dom=new JSDOM('<div id="axis"></div><div id="time"></div><svg><path id="wan1"></path><path id="wan2"></path></svg>',{runScripts:'outside-only'});
-  const w=dom.window;w.eval(fs.readFileSync('static/app.js','utf8'));
+  const w=dom.window;w.eval(fs.readFileSync('static/time-format.js','utf8'));w.eval(fs.readFileSync('static/app.js','utf8'));
   const paths=['wan1','wan2'].map(id=>w.document.getElementById(id));
   const options={axis:w.document.getElementById('axis'),timeAxis:w.document.getElementById('time'),slots:4,timestamps:[1000,1002,1004],hoverLabels:['WAN1','WAN2'],sampleUnit:'Mbit/s'};
   w.NetEmUI.renderSeries(paths,[[null,0,.001],[2,null,3]],options);
@@ -75,7 +75,7 @@ test('DEM indicators distinguish good, degraded, poor, no timing and disconnecte
   const metrics=['experience','success','response'];
   const markup=metrics.map(key=>'<div data-dem-indicator="'+key+'"><span data-dem-symbol></span><span data-dem-value></span><span data-dem-status></span><p data-dem-explanation></p></div>').join('');
   const dom=new JSDOM('<div id="dem">'+markup+'<p data-dem-window></p></div>',{runScripts:'outside-only'});
-  const w=dom.window;w.eval(fs.readFileSync('static/app.js','utf8'));const root=w.document.getElementById('dem');
+  const w=dom.window;w.eval(fs.readFileSync('static/time-format.js','utf8'));w.eval(fs.readFileSync('static/app.js','utf8'));const root=w.document.getElementById('dem');
   const tone=key=>root.querySelector('[data-dem-indicator="'+key+'"]').className;
   for(const [score,success,p95,expected] of [[75,99,400,'good'],[55,95,1800,'warn'],[54,94,1801,'bad']]){
     w.NetEmUI.renderDemSummary(root,{requests:20,experience_score:score,availability_pct:success,p95_ms:p95,window_seconds:60});

@@ -1,6 +1,6 @@
 window.NetEmInventory = (() => {
   const text = (selector, value) => document.querySelectorAll(selector).forEach(node => { node.textContent = value; });
-  const date = value => value ? new Date(value * 1000).toLocaleString() : 'Not checked';
+  const date = value => value ? NetEmTime.stamp(value) : 'Not checked';
   function render(snapshot) {
     for (const row of snapshot.appliances || []) {
       const element = document.querySelector('[data-inventory-row="' + CSS.escape(row.id) + '"]');
