@@ -62,6 +62,11 @@ class ShapingTests(unittest.TestCase):
         self.assertEqual(run.call_count, 1)
         self.assertIn("qdisc show", run.call_args.args[0])
 
+    def test_counters_are_not_differenced_across_a_qdisc_generation(self):
+        previous = {"kind": "netem", "generation": 1, "packets": 10, "netem_drops": 1, "queue_drops": 0, "backlog_bytes": 0}
+        current = dict(previous, generation=2, packets=100)
+        self.assertIsNone(netem.qdisc_rates(current, previous, 1))
+
     def test_partial_failure_restores_old_profile_or_exposes_unknown(self):
         old = {"delay_ms": 5, "jitter_ms": 1, "loss_pct": 0, "download_mbit": 100, "upload_mbit": 50}
         link = {"id": "wan1", "inner": "in", "outer": "out"}

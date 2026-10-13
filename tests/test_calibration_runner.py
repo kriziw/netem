@@ -109,6 +109,26 @@ class CalibrationRunTests(unittest.TestCase):
         self.assertEqual(verdict["warnings"], ["5.0% of packets dropped at the shaper"])
         self.assertEqual(verdict["diagnostics"]["shaper"]["drop_pct"], 5.0)
 
+    def test_latency_is_measured_before_the_active_workload_stops(self):
+        self.measurements = [{"achieved_mbps": 10.0}]
+        def probe(link_id):
+            self.assertEqual(len(self.started), 1)
+            self.assertEqual(self.stopped, [])
+            return {"success": True, "latency_ms": 5}
+        with patch.object(netem, "calibration_probe", side_effect=probe):
+            result = netem.run_bandwidth_calibration("wan1")
+        self.assertEqual(result["steps"][0]["diagnostics"]["probe"]["latency_ms"], 5)
+        self.assertEqual(len(self.stopped), 1)
+
+    def test_a_different_path_cannot_be_reported_as_this_wans_capacity(self):
+        def wrong_path(*args, **kwargs):
+            return {"run": {"run_id": "wrong", "traffic_path": {"mode": "direct_netem", "wan_id": "wan2"}}}
+        with patch.object(netem, "traffic_generator_request", side_effect=wrong_path):
+            result = netem.run_bandwidth_calibration("wan1")
+        self.assertIn("matching direct NetEm path", result["error"])
+        self.assertEqual(result["steps"], [])
+        self.assertEqual(self.stopped, ["wrong"])
+
     def test_a_busy_lab_is_not_loaded_and_the_refusal_is_saved(self):
         with patch.object(netem, "platform_test_busy", return_value="a scenario is running"):
             result = netem.run_bandwidth_calibration("wan1")

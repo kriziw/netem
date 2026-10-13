@@ -42,7 +42,7 @@ class ShaperSizingTests(unittest.TestCase):
         output = chr(10).join(lines) + chr(10)
         with patch.object(netem, "run_cmd", return_value=(0, output, "")):
             value = netem.qdisc_counters("eth1")
-        self.assertEqual(value, {"kind": "netem", "packets": 9000, "netem_drops": 120, "queue_drops": 35,
+        self.assertEqual(value, {"kind": "netem", "generation": netem.QDISC_GENERATIONS.get("eth1", 0), "packets": 9000, "netem_drops": 120, "queue_drops": 35,
                                  "backlog_bytes": 36 * 1024, "shaped": True})
 
 

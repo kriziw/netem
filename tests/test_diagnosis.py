@@ -50,7 +50,7 @@ class QdiscStatsTests(unittest.TestCase):
     def test_counters_separate_queue_overflow_from_injected_loss(self):
         with patch.object(netem, "run_cmd", return_value=(0, TBF_OUTPUT, "")):
             value = netem.qdisc_counters("eth1")
-        self.assertEqual(value, {"kind": "netem", "packets": 9000, "netem_drops": 120, "queue_drops": 100,
+        self.assertEqual(value, {"kind": "netem", "generation": netem.QDISC_GENERATIONS.get("eth1", 0), "packets": 9000, "netem_drops": 120, "queue_drops": 100,
                                  "backlog_bytes": 31 * 1024, "shaped": True})
         with patch.object(netem, "run_cmd", return_value=(0, BLACKHOLE_OUTPUT, "")):
             self.assertFalse(netem.qdisc_counters("eth1")["shaped"])

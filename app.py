@@ -133,6 +133,7 @@ ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
 PROFILE_APPLY_LOCK = threading.RLock()
 APPLIED_QDISCS = {}
+QDISC_GENERATIONS = {}
 EVENT_LOG = []
 LAB_SESSIONS = []
 ACTIVE_SESSION = {
@@ -1869,11 +1870,13 @@ def get_qdisc_state(ifname: str):
 
 
 def clear_qdisc(ifname: str):
+    QDISC_GENERATIONS[ifname] = QDISC_GENERATIONS.get(ifname, 0) + 1
+    APPLIED_QDISCS.pop(ifname, None)
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
 # A burst allowance of 10 ms lets a TCP window's burst through at line rate, so ordinary traffic does not wait for
-# tokens. The queue is sized for 25 ms: it only fills when the link is really overloaded.
+# tokens. The nominal payload budget is 25 ms; actual queue delay depends on skb sizes and scheduling.
 SHAPER_QUEUE_MS = 25
 SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
@@ -2581,10 +2584,12 @@ def qdisc_counters(ifname: str):
     tbf = next((item for item in qdiscs if item["kind"] == "tbf"), None)
     fq = next((item for item in qdiscs if item["kind"] == "fq_codel"), None)
     # The fair queue holds what the rate limiter paces, so the rate limiter's backlog is already counted in it.
-    # The root netem and the rate limiter report the drops of the queue below them, so only the fair queue is counted.
+    # Netem root backlog semantics differ by kernel. Use only the rate queue
+    # to estimate additional serialization delay, excluding intentional delay backlog.
     backlog = (fq or tbf or {}).get("backlog_bytes") or 0
     return {
         "kind": root["kind"],
+        "generation": QDISC_GENERATIONS.get(ifname, 0),
         "packets": root["packets"],
         "netem_drops": (netem or {}).get("drops") or 0,
         "queue_drops": (fq or tbf or {}).get("drops") or 0,
@@ -2601,7 +2606,7 @@ def qdisc_rates(current, previous, dt):
     when CoDel signals congestion. netem's own counter adds its injected random loss to
     the overflow handed back by that queue.
     """
-    if not current or not previous or dt <= 0 or current["kind"] != previous["kind"]:
+    if not current or not previous or dt <= 0 or current["kind"] != previous["kind"] or current.get("generation", 0) != previous.get("generation", 0):
         return None
     sent = current["packets"] - previous["packets"]
     netem_drops = current["netem_drops"] - previous["netem_drops"]
@@ -3602,7 +3607,7 @@ def path_signals(state: dict, samples: list):
         dropped = signals["directions"]["down"]["injected_drops_ps"]
         signals["causes"].append({
             "kind": "injected_loss", "direction": "down", "severity": "warn",
-            "text": f"{loss:g}% random loss injected on download" + (f" ({dropped:.1f} packets/s)" if dropped else ""),
+            "text": f"{loss:g}% random loss injected on download" + (f" (estimated {dropped:.1f} packets/s from counters)" if dropped else ""),
         })
     delay, jitter = signals["injected"]["delay_ms"], signals["injected"]["jitter_ms"]
     if (delay > 0 or jitter > 0) and fault == "normal":
