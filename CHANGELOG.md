@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.26.1](https://github.com/kriziw/netem/compare/v0.26.0...v0.26.1) (2026-10-13)
+
+
+### Bug Fixes
+
+* calibration measures over 30 s so phase-aligned transfers cannot tilt a step ([#93](https://github.com/kriziw/netem/issues/93)) ([4fd909f](https://github.com/kriziw/netem/commit/4fd909fe514e74857b21fbce83bcc930dae722a3))
+
 ## [0.26.0](https://github.com/kriziw/netem/compare/v0.25.0...v0.26.0) (2026-10-13)
 
 
