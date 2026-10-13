@@ -1,0 +1,18 @@
+{% set scenario_minutes = ([1, scenario.planned_s / 60, 60]|sort)[1] %}
+<section class="test-card {% if selected_scenario == scenario.id %}selected{% endif %}" id="test-{{ scenario.id }}">
+    <span class="status info test-badge">{{ scenario.steps|length }} stages</span>
+    <div class="test-card-title">{{ scenario.name }}</div>
+    <div class="test-card-desc">{{ scenario.description }}</div>
+    <div class="test-card-meta">~{{ "%.1f"|format(scenario.planned_s / 60) }} min · {{ scenario.phases|join(" → ") }} · restores baseline when complete</div>
+    <form method="post" action="{{ url_for('lab_scenario_start') }}" class="test-card-actions">
+      <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+      {% include "_appliance_override.html" %}
+      <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+      <input type="hidden" name="return_to" value="{{ scenario_return_to|default('tests') }}">
+      <select name="link_id" aria-label="WAN" required>
+        {% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}
+      </select>
+      <label class="length-field" title="Phases stretch or shrink proportionally">Minutes<input type="number" name="length_min" min="1" max="60" step="0.1" value="{{ '%.1f'|format(scenario_minutes) }}"></label>
+      <button class="btn btn-primary" type="submit" {% if scenario_state.active or (site_state and site_state.active) or not links %}disabled{% endif %}>Run</button>
+    </form>
+  </section>

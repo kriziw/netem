@@ -1,0 +1,6 @@
+<div data-scenario-configuration>
+  {% if scenario_state.active or site_state.active %}<div class="flash info">A test is already running. Stop &amp; restore it before starting another scenario.</div>{% endif %}
+  {% if not links %}<div class="flash info">Configure a WAN under Settings before starting a scenario.</div>{% endif %}
+  {% include "_scenario_card.html" %}
+  <p class="field-help">NetEm starts the site workload automatically and restores the WAN baseline when the scenario ends.</p>
+</div>

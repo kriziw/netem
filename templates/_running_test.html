@@ -1,5 +1,5 @@
 {% if scenario_state.active %}
-<section class="running-test-bar {{ 'paused' if scenario_state.paused else '' }}" id="running-test" data-pause-url="{{ url_for('lab_scenario_pause') }}" data-resume-url="{{ url_for('lab_scenario_resume') }}">
+<section class="running-test-bar {{ 'paused' if scenario_state.paused else '' }}" id="running-test" data-scenario-id="{{ scenario_state.scenario_id }}" data-pause-url="{{ url_for('lab_scenario_pause') }}" data-resume-url="{{ url_for('lab_scenario_resume') }}">
   <div class="running-test-line">
     <div>
       <div class="eyebrow" style="margin:0 0 3px">Current test</div>

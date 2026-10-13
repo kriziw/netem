@@ -270,7 +270,7 @@ document.querySelectorAll("[data-open-drawer]").forEach(btn => btn.addEventListe
   backdrop.classList.add("open");
 }));
 document.querySelectorAll("[data-close-drawer]").forEach(btn => btn.addEventListener("click", closeDrawers));
-backdrop.addEventListener("click", closeDrawers);
+document.addEventListener("click", event => { if (event.target === backdrop) closeDrawers(); });
 document.addEventListener("keydown", e => { if (e.key === "Escape") closeDrawers(); });
 
 document.querySelectorAll(".drawer").forEach(drawer => {
