@@ -322,6 +322,15 @@ window.NetEmUI = (() => {
     return NetEmTime.clock(Number(timestamp));
   }
 
+  function renderExperienceGroups(root, groups) {
+    const holder = root.querySelector('[data-dem-groups]');
+    if (!holder) return;
+    holder.innerHTML = (Array.isArray(groups) ? groups : []).map(group => {
+      const score = group.score == null ? '—' : group.score+'/100';
+      return '<div class="dem-group '+escapeHtml(group.tone)+'"><div class="dem-group-head"><span>'+escapeHtml(group.label)+'</span><strong>'+score+'</strong></div><p>'+escapeHtml(group.text)+'</p></div>';
+    }).join('');
+  }
+
   function renderDemSummary(root, dem = {}, connected = true, targets = null) {
     if (!root) return;
     const hasData = connected && Number(dem.requests) > 0;
@@ -375,6 +384,7 @@ window.NetEmUI = (() => {
       element.querySelector('[data-dem-status]').textContent = (targets ? {good:'Target met',bad:'Target missed',unknown:'No data'} : {good:'Good',warn:'Degraded',bad:'Poor',unknown:'No data'})[row.tone];
       element.querySelector('[data-dem-explanation]').textContent = row.explanation;
     }
+    renderExperienceGroups(root, dem.experience_groups);
     const window = root.querySelector('[data-dem-window]');
     if (window) window.textContent = connected ? 'Last '+(number(dem.window_seconds) || 60)+' seconds · '+(number(dem.requests) || 0)+' measured transactions'+(dem.truncated ? ' · sample limit reached' : '') : 'Measurements unavailable';
   }

@@ -30,6 +30,7 @@ from urllib import error as urllib_error
 from urllib import request as urllib_request
 
 import calibration
+from experience_groups import attach_experience_groups
 import bottlenecks
 import calibration_log
 import calibration_trace
@@ -534,6 +535,7 @@ def traffic_generator_snapshot(include_catalog=False):
         return result
     try:
         result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
+        attach_experience_groups((result["status"] or {}).get("dem"), showroom_app_label)
         result["connected"] = True
         if include_catalog:
             result["catalog"] = traffic_generator_request(
