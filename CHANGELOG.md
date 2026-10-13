@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.25.0](https://github.com/kriziw/netem/compare/v0.24.0...v0.25.0) (2026-10-13)
+
+
+### Features
+
+* platform self-test with a downloadable diagnostics report ([#87](https://github.com/kriziw/netem/issues/87)) ([3bd75de](https://github.com/kriziw/netem/commit/3bd75de2704840242e018362f7bbdc47fbdfdd08))
+* show whether the NetEm host is at its limits on Platform Health ([#85](https://github.com/kriziw/netem/issues/85)) ([4e8ac25](https://github.com/kriziw/netem/commit/4e8ac2514c79f3e404f4ad1419bef372b379d705))
+
+
+### Bug Fixes
+
+* drop bulk flows first with a fair queue behind the rate limiter ([#83](https://github.com/kriziw/netem/issues/83)) ([bf3409b](https://github.com/kriziw/netem/commit/bf3409b969b29b50373f30c8f34850f25f2f09e7))
+* sample WAN telemetry and refresh diagnosis every second ([#84](https://github.com/kriziw/netem/issues/84)) ([310f6a4](https://github.com/kriziw/netem/commit/310f6a4047afe7937ec6ae93a3991592bce35911))
+* showcase moves smoothly and reports the level the experience stayed at ([#89](https://github.com/kriziw/netem/issues/89)) ([3fbb8a2](https://github.com/kriziw/netem/commit/3fbb8a26bd2aadefa1bad10c7170738e9fc25140))
+* WAN rates and their share of the limit now use one average ([#82](https://github.com/kriziw/netem/issues/82)) ([2dffb22](https://github.com/kriziw/netem/commit/2dffb225a2a764026386e08f2f4ef29718046f34))
+
 ## [0.24.0](https://github.com/kriziw/netem/compare/v0.23.1...v0.24.0) (2026-10-13)
 
 
