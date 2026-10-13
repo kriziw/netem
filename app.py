@@ -1905,13 +1905,24 @@ def apply_netem(
     if rate_mbit and rate_mbit > 0:
         rate_value = int(round(rate_mbit))
         rate_str = f"{rate_value}mbit"
+        # The rate limiter only paces. A fair queue behind it holds the backlog, so when it is full the drop falls
+        # on the largest flow, not on whichever packet arrives last: a sparse flow such as telemetry is not lost
+        # behind a bulk transfer. The fair queue's memory is the same 25 ms budget as before, so the longest queue
+        # is unchanged. The rate limiter's own limit is doubled so that it never drops before the fair queue does.
         tbf_cmd = (
             f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
-            f"rate {rate_str} buffer {burst_bytes} limit {limit_bytes}"
+            f"rate {rate_str} buffer {burst_bytes} limit {2 * limit_bytes}"
         )
         rc2, out2, err2 = run_cmd(tbf_cmd)
         if rc2 != 0:
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
+        fq_cmd = (
+            f"{TC} qdisc add dev {ifname} parent 10:1 handle 20: fq_codel "
+            f"memory_limit {limit_bytes} target 5ms interval 100ms"
+        )
+        rc3, out3, err3 = run_cmd(fq_cmd)
+        if rc3 != 0:
+            return False, f"Netem and tbf OK, but fq_codel failed: {err3 or out3 or 'unknown error'}"
 
     return True, "OK"
 
@@ -2497,12 +2508,15 @@ def qdisc_counters(ifname: str):
         return None
     netem = next((item for item in qdiscs if item["kind"] == "netem"), None)
     tbf = next((item for item in qdiscs if item["kind"] == "tbf"), None)
+    fq = next((item for item in qdiscs if item["kind"] == "fq_codel"), None)
+    # The fair queue holds what the rate limiter paces, so the rate limiter's backlog is already counted in it.
+    backlog = sum(item["backlog_bytes"] or 0 for item in qdiscs if not (fq and item is tbf))
     return {
         "kind": root["kind"],
         "packets": root["packets"],
         "netem_drops": (netem or {}).get("drops") or 0,
-        "queue_drops": (tbf or {}).get("drops") or 0,
-        "backlog_bytes": sum(item["backlog_bytes"] or 0 for item in qdiscs),
+        "queue_drops": sum((item or {}).get("drops") or 0 for item in (fq, tbf)),
+        "backlog_bytes": backlog,
         "shaped": tbf is not None,
     }
 
@@ -2510,8 +2524,10 @@ def qdisc_counters(ifname: str):
 def qdisc_rates(current, previous, dt):
     """Per-second drops for one direction, or None across a reset or unknown read.
 
-    The rate limiter (tbf) drops only when its small queue is full. netem's own
-    counter adds its injected random loss to the overflow handed back by tbf.
+    The queue that holds traffic when the link is full (the fair queue behind the rate
+    limiter, or the rate limiter alone on older shaping) drops only when it is full or
+    when CoDel signals congestion. netem's own counter adds its injected random loss to
+    the overflow handed back by that queue.
     """
     if not current or not previous or dt <= 0 or current["kind"] != previous["kind"]:
         return None
