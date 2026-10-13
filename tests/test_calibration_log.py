@@ -138,5 +138,13 @@ class FindingsReportTests(unittest.TestCase):
         self.assertIn("check next: check the Proxmox host", text)
         self.assertIn("Sparse UDP (ot_telemetry) over the step: loss 1.50%", text)
 
+class TailDropTests(unittest.TestCase):
+    def test_tail_drops_are_the_growth_of_the_fair_queue_overflow_counter(self):
+        before = "qdisc fq_codel 20: parent 10:1 limit 10240p\\n  maxpacket 238 drop_overlimit 284 new_flow_count 807"
+        after = "qdisc fq_codel 20: parent 10:1 limit 10240p\\n  maxpacket 238 drop_overlimit 715 new_flow_count 4469"
+        self.assertEqual(log.tail_drops(before, after), {"tail_drops": 431})
+        self.assertEqual(log.tail_drops(None, after), {"tail_drops": None})
+
+
 if __name__ == "__main__":
     unittest.main()

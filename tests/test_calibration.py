@@ -43,7 +43,7 @@ class CapacitySummaryTests(unittest.TestCase):
         summary = cal.summarise(steps, 300)
         self.assertEqual(summary["capacity_mbps"], 98.0)
         self.assertEqual(summary["failed"], 1)
-        self.assertEqual(summary["limited_by"], "path or traffic generator: the WAN delivered less than offered; "
+        self.assertEqual(summary["limited_by"], "path or traffic generator: the WAN carried less than the step offered; "
                                                 "the shaper also dropped 3.0% of packets")
 
     def test_reaching_the_wan_rate_says_the_shaping_is_the_limit(self):
@@ -59,7 +59,7 @@ class CapacitySummaryTests(unittest.TestCase):
     def test_no_passing_step_means_no_capacity(self):
         summary = cal.summarise([step(50, 300, 10.0)], 300)
         self.assertIsNone(summary["capacity_mbps"])
-        self.assertEqual(summary["limited_by"], "path or traffic generator: the WAN delivered less than offered")
+        self.assertEqual(summary["limited_by"], "path or traffic generator: the WAN carried less than the step offered")
 
     def test_the_ladder_is_ascending_and_reaches_the_gigabit_level(self):
         self.assertEqual(list(cal.LADDER_MBPS), sorted(cal.LADDER_MBPS))

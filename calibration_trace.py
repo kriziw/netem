@@ -1,10 +1,11 @@
 """What the Traffic Simulator was doing during each second of a calibration step, read beside the WAN.
 
-The simulator reports how late its event loop woke, its cumulative byte and request counters, how many paced requests
-it has started and completed, how long its status, DEM and database writes took, and how long the controlled target
-took to answer. NetEm polls its health endpoint once a second for the length of the measured window, so each second of
-the WAN timeline can be read next to what the generator was doing. This module only joins and summarises those
-readings; app.py does the polling and bottlenecks.py judges the result.
+The simulator reports how late its event loop woke, its cumulative byte and request counters, how many paced downloads
+it has started and completed, how long those downloads waited for their first byte and how long they transferred, its
+process CPU time, how long its status, DEM and database writes took, and how long the controlled target took to answer.
+NetEm polls its health endpoint once a second for the length of the measured window, so each second of the WAN timeline
+can be read next to what the generator was doing. This module only joins and summarises those readings; app.py does the
+polling and bottlenecks.py judges the result.
 """
 
 import threading
@@ -15,6 +16,7 @@ POLL_TIMEOUT_S = 2.0      # a poll still unanswered after this long counts as no
 QUIET_MBPS = 0.1          # a second carrying less than this on the WAN carried no traffic
 LOOP_STALL_MS = 100.0     # the simulator's loop held this long is treated as a stall for the quiet-second split
 TARGET_SLOW_MS = 100.0    # the target answering its health check this slowly is treated as slow
+RESTART_KEYS = ("bytes", "requests", "cpu_s", "paced_completed", "paced_wait_ms", "paced_transfer_ms")
 
 
 def _samples(items, allow_none=False):
@@ -87,24 +89,43 @@ class SimulatorPoller:
         return list(self._polls)
 
 
+def _delta(before, after, name):
+    """How much a cumulative counter grew between two polls, or None when either poll does not report it."""
+    if before is None or after is None or before.get(name) is None or after.get(name) is None:
+        return None
+    return after[name] - before[name]
+
+
+def _mean(total, count):
+    """Mean per completed download, or None when nothing completed or the total is not reported."""
+    return round(total / count, 1) if total is not None and count else None
+
+
 def rate_intervals(polls):
-    """Simulator throughput and request rate between consecutive polls. A counter that went backwards means the
-    simulator restarted: that interval is dropped and counted rather than shown as a negative rate."""
+    """Simulator figures between consecutive polls: completed throughput, request and download rates, the CPU share of
+    the simulator process, and for paced downloads the mean wait for the first byte and the mean transfer time. A counter
+    that went backwards means the simulator restarted: that interval is dropped and counted rather than shown as negative."""
     usable = [poll for poll in polls if not poll["error"] and poll["counters"]]
     intervals, restarts = [], 0
     for earlier, later in zip(usable, usable[1:]):
         before, after = earlier["counters"], later["counters"]
-        if any(before.get(key) is None or after.get(key) is None for key in ("bytes", "requests")):
-            continue
         seconds = later["mid"] - earlier["mid"]
-        if seconds <= 0:
+        if seconds <= 0 or _delta(before, after, "bytes") is None or _delta(before, after, "requests") is None:
             continue
-        if after["bytes"] < before["bytes"] or after["requests"] < before["requests"]:
+        deltas = {name: _delta(before, after, name) for name in RESTART_KEYS}
+        if any(value is not None and value < 0 for value in deltas.values()):
             restarts += 1
             continue
-        intervals.append({"mid": (earlier["mid"] + later["mid"]) / 2.0,
-                          "mbps": round((after["bytes"] - before["bytes"]) * 8 / seconds / 1_000_000, 2),
-                          "requests_ps": round((after["requests"] - before["requests"]) / seconds, 2)})
+        completed = deltas["paced_completed"]
+        intervals.append({
+            "mid": (earlier["mid"] + later["mid"]) / 2.0,
+            "mbps": round(deltas["bytes"] * 8 / seconds / 1_000_000, 2),
+            "requests_ps": round(deltas["requests"] / seconds, 2),
+            "completed_ps": None if completed is None else round(completed / seconds, 2),
+            "cpu_pct": None if deltas["cpu_s"] is None else round(deltas["cpu_s"] / seconds * 100.0, 1),
+            "wait_ms": _mean(deltas["paced_wait_ms"], completed),
+            "transfer_ms": _mean(deltas["paced_transfer_ms"], completed),
+        })
     return intervals, restarts
 
 
@@ -126,8 +147,9 @@ def _local(polls, key):
 
 
 def seconds_table(wan_rows, start, polls, loop, target, intervals):
-    """One row per second of the WAN timeline: what the WAN carried beside what the simulator sent, how late its loop
-    ran, how long its polls and the target took, and how many paced requests were waiting on the WAN."""
+    """One row per second of the WAN timeline: what the WAN carried beside what the simulator completed, how many paced
+    downloads were in flight, how late its loop ran, its CPU share, the paced downloads' wait and transfer times, and how
+    long its polls and the target took."""
     rows = []
     for wan in wan_rows:
         high = float(wan["timestamp"])
@@ -150,6 +172,10 @@ def seconds_table(wan_rows, start, polls, loop, target, intervals):
             "wan_drops_ps": wan.get("down_queue_drops_ps"),
             "sim_mbps": rate["mbps"] if rate else None,
             "sim_requests_ps": rate["requests_ps"] if rate else None,
+            "sim_completed_ps": rate["completed_ps"] if rate else None,
+            "sim_cpu_pct": rate["cpu_pct"] if rate else None,
+            "wait_ms": rate["wait_ms"] if rate else None,
+            "transfer_ms": rate["transfer_ms"] if rate else None,
             "in_flight": in_flight(probe["counters"]) if probe else None,
             "loop_max_ms": max(lags) if lags else None,
             "poll_ms": probe["latency_ms"] if probe else None,
@@ -173,38 +199,60 @@ def _quiet_cause(row):
     return "idle"
 
 
-def summarise(rows, polls, intervals, restarts, start, end):
-    """The step's simulator figures: throughput and rates over the window, the worst stalls and delays, and why each
-    quiet second was quiet."""
+def summarise(rows, polls, intervals, restarts, start, end, paced_users=None):
+    """The step's simulator figures: throughput and rates over the window, how busy the paced users were, the simulator's
+    CPU, the paced downloads' wait and transfer times, the worst stalls and delays, and why each quiet second was quiet.
+
+    paced_users is the number of users that download, when the caller knows it. The share of the window those users
+    spent with a download in flight is busy_fraction: near 1, the users never rested, so the path set the rate and the
+    target was never offered; well below 1, the users rested between downloads and the generator set the rate."""
     inside = [poll for poll in polls if start <= poll["mid"] <= end]
     answered = [poll for poll in inside if not poll["error"]]
     usable = [poll for poll in answered if poll["counters"] and poll["counters"].get("bytes") is not None]
     span = usable[-1]["mid"] - usable[0]["mid"] if len(usable) >= 2 else 0.0
-    mbps = rps = None
+    mbps = rps = completed_ps = wait_ms = transfer_ms = None
     if span > 0:
         first, last = usable[0]["counters"], usable[-1]["counters"]
-        mbps = round((last["bytes"] - first["bytes"]) * 8 / span / 1_000_000, 2)
-        rps = round((last["requests"] - first["requests"]) / span, 2)
+        mbps = round(_delta(first, last, "bytes") * 8 / span / 1_000_000, 2)
+        rps = round(_delta(first, last, "requests") / span, 2)
+        completed = _delta(first, last, "paced_completed")
+        completed_ps = None if completed is None else round(completed / span, 2)
+        wait_ms = _mean(_delta(first, last, "paced_wait_ms"), completed)
+        transfer_ms = _mean(_delta(first, last, "paced_transfer_ms"), completed)
     lags = [row["loop_max_ms"] for row in rows if row["loop_max_ms"] is not None]
     targets = [row["target_ms"] for row in rows if row["target_ms"] is not None]
     quiet = [row for row in rows if row["quiet"]]
     causes = {"loop": 0, "target": 0, "waiting": 0, "idle": 0}
     for row in quiet:
         causes[_quiet_cause(row)] += 1
+    window_cpu = [item["cpu_pct"] for item in intervals
+                  if start <= item["mid"] <= end and item["cpu_pct"] is not None]
+    flights = [row["in_flight"] for row in rows if row["in_flight"] is not None]
+    in_flight_mean = round(sum(flights) / len(flights), 2) if flights else None
+    busy = None
+    if paced_users and in_flight_mean is not None:
+        busy = round(min(1.0, in_flight_mean / paced_users), 3)
 
     def peak(name):
         values = [poll["counters"][name] for poll in answered
                   if poll["counters"] and poll["counters"].get(name) is not None]
         return max(values) if values else None
 
-    flights = [row["in_flight"] for row in rows if row["in_flight"] is not None]
     return {
         "polls": len(inside),
         "poll_errors": sum(1 for poll in inside if poll["error"]),
         "poll_max_ms": max((poll["latency_ms"] for poll in answered), default=None),
         "sim_mbps_mean": mbps,
         "sim_requests_ps_mean": rps,
+        "sim_completed_ps_mean": completed_ps,
+        "sim_cpu_pct_max": max(window_cpu) if window_cpu else None,
+        "sim_cpu_pct_mean": round(sum(window_cpu) / len(window_cpu), 1) if window_cpu else None,
+        "wait_ms_mean": wait_ms,
+        "transfer_ms_mean": transfer_ms,
         "in_flight_max": max(flights) if flights else None,
+        "in_flight_mean": in_flight_mean,
+        "paced_users": paced_users,
+        "busy_fraction": busy,
         "loop_max_ms": max(lags) if lags else None,
         "loop_stall_seconds": sum(1 for lag in lags if lag >= LOOP_STALL_MS),
         "status_ms_max": peak("status_ms"),
@@ -222,14 +270,14 @@ def summarise(rows, polls, intervals, restarts, start, end):
     }
 
 
-def build(polls, wan_rows, start, end):
+def build(polls, wan_rows, start, end, paced_users=None):
     """The per-second trace of one step and its summary. The polls are whatever SimulatorPoller recorded."""
     loop = _local(polls, "loop")
     target = _local(polls, "target")
     intervals, restarts = rate_intervals(polls)
     rows = seconds_table(wan_rows, start, polls, loop, target, intervals)
     return {
-        "summary": summarise(rows, polls, intervals, restarts, start, end),
+        "summary": summarise(rows, polls, intervals, restarts, start, end, paced_users),
         "seconds": rows,
         "polls": [{"sent": poll["sent"], "latency_ms": poll["latency_ms"], "error": poll["error"],
                    "offset_s": poll["offset_s"], "counters": poll["counters"]} for poll in polls],

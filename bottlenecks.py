@@ -17,12 +17,16 @@ LATENCY_WARN_MS, LATENCY_BAD_MS = 5.0, 15.0
 WAN_RATE_REACHED = 0.95
 LOOP_STALL_BAD_MS = 500.0                # the simulator's event loop held this long is bad
 QUIET_MIN_SECONDS = 3                    # quiet WAN seconds at or above this count are reported
+BUSY_CLOSED_LOOP = 0.9                   # paced users busy this share of the window: the path set the rate
+SIM_CPU_WARN, SIM_CPU_BAD = 70.0, 90.0   # the simulator process's CPU share of one core, percent
+WAIT_SLOW_MS = 100.0                     # a paced download this slow to start sending is a slow target
 
 SEVERITY_RANK = {"info": 0, "warn": 1, "bad": 2}
 # The cause reported for a failing step is the most severe finding of the first of these categories present.
 CAUSE_ORDER = ("hypervisor", "netem_host", "measurement", "simulator", "target", "shaper", "path", "latency", "generator")
 # A step whose findings already name one of these is not also blamed on the generator by default.
-EXPLAINED = {"hypervisor", "netem_host", "measurement", "simulator", "target", "path", "generator"}
+EXPLAINED = {"hypervisor", "netem_host", "measurement", "simulator", "target", "path", "generator",
+             "unattributed"}
 # What a quiet WAN second is blamed on, by the cause the trace found for it.
 QUIET_CAUSES = (
     ("loop", "simulator", "with the simulator event loop held", "Fix the loop stall in the simulator findings."),
@@ -110,11 +114,18 @@ def step_findings(step, shaped_mbps):
 
     drop_pct = step.get("drop_pct")
     if drop_pct is not None and drop_pct > SHAPER_OVERFLOW_PCT and efficiency is not None and efficiency >= DELIVERED:
+        shaper = diagnostics.get("shaper") or {}
+        tail, dropped = shaper.get("tail_drops"), shaper.get("dropped_packets")
+        if tail is not None and dropped:
+            split = (f"{tail} tail drops at the queue's memory limit and {max(dropped - tail, 0)} CoDel early drops "
+                     f"that keep its delay near the target")
+        else:
+            split = "the split between tail and CoDel drops was not read"
         findings.append(finding(
             target, "shaper", "warn",
-            f"The shaper's buffer overflowed ({drop_pct:.1f}% of packets) while the WAN delivered",
-            f"Drops at the shaper with {efficiency * 100:.0f}% of the expected rate delivered: TCP bursts exceed the buffer.",
-            "Each drop costs a retransmission. Check the sparse loss and latency in this step for who pays for it."))
+            f"The shaper dropped {drop_pct:.1f}% of packets while the WAN delivered",
+            f"Drops at the shaper with {efficiency * 100:.0f}% of the expected rate delivered: {split}.",
+            "Tail drops mean the queue's memory limit is short for TCP bursts. Each drop costs a retransmission."))
 
     sparse = diagnostics.get("sparse") or {}
     loss = sparse.get("ot_loss_pct")
@@ -137,7 +148,7 @@ def step_findings(step, shaped_mbps):
                 "The extra delay is queueing. Compare with the shaper backlog in the per-second readings."))
 
     trace = (diagnostics.get("trace") or {}).get("summary") or {}
-    findings.extend(_simulator_findings(target, achieved, trace))
+    findings.extend(_simulator_findings(target, trace))
     seen = {item["category"] for item in findings}
     if efficiency is not None and efficiency < DELIVERED and not seen & EXPLAINED:
         findings.append(finding(
@@ -147,9 +158,10 @@ def step_findings(step, shaped_mbps):
     return findings
 
 
-def _simulator_findings(target, achieved, trace):
-    """Findings from the simulator's own readings: its event loop, its status polls, the target's health, the quiet
-    seconds, and what the generator sent against what the WAN carried."""
+def _simulator_findings(target, trace):
+    """Findings from the simulator's own figures: its event loop, status polls, CPU, the target, the paced downloads,
+    the quiet seconds, and what it completed against the target. A shortfall is attributed by whether the paced users
+    were busy, not by comparing bytes with the WAN: both count the same bytes."""
     found = []
     loop = trace.get("loop_max_ms")
     if loop is not None and loop >= calibration_trace.LOOP_STALL_MS:
@@ -165,6 +177,13 @@ def _simulator_findings(target, achieved, trace):
             target, "simulator", "bad", f"{trace['poll_errors']} status polls got no answer within 2 s",
             "A poll unanswered after 2 s means the simulator's loop was held for at least that long.",
             "Read the event-loop finding for this step: the simulator was not answering NetEm."))
+    cpu = trace.get("sim_cpu_pct_max")
+    if cpu is not None and cpu >= SIM_CPU_WARN:
+        found.append(finding(
+            target, "simulator", "bad" if cpu >= SIM_CPU_BAD else "warn",
+            f"Traffic Simulator process CPU up to {cpu:.0f}% of one core",
+            f"Its mean over the window was {_fmt(trace.get('sim_cpu_pct_mean'))}%. Receiving the paced downloads runs on that core.",
+            "A saturated receive side slows every download it reads. Use fewer users per simulator, or more simulators."))
     slow = trace.get("target_max_ms")
     unanswered = trace.get("target_no_answer_seconds") or 0
     if unanswered or (slow is not None and slow >= calibration_trace.TARGET_SLOW_MS):
@@ -181,22 +200,44 @@ def _simulator_findings(target, achieved, trace):
             if count:
                 found.append(finding(target, category, "warn", f"{count} of {quiet} quiet seconds {phrase}",
                                      f"Quiet WAN seconds at {offsets} into the window.", action))
+    busy = trace.get("busy_fraction")
+    wait = trace.get("wait_ms_mean")
+    transfer = trace.get("transfer_ms_mean")
+    if busy is not None and busy >= BUSY_CLOSED_LOOP and wait is not None and transfer is not None:
+        if wait >= WAIT_SLOW_MS and wait >= transfer:
+            found.append(finding(
+                target, "target", "warn", f"Downloads waited {wait:.0f} ms for their first byte",
+                f"Mean first byte {wait:.0f} ms against {transfer:.0f} ms to transfer, with the paced users busy "
+                f"{busy * 100:.0f}% of the window.",
+                "The target was slow to start sending. Check its load and its sending side."))
+        else:
+            found.append(finding(
+                target, "path", "warn", f"Downloads took {transfer:.0f} ms to transfer once started",
+                f"Mean first byte {wait:.0f} ms, then {transfer:.0f} ms of transfer, with the paced users busy "
+                f"{busy * 100:.0f}% of the window.",
+                "The bytes arrived slowly once started: check the receive side's CPU and the path to the target."))
     sent = trace.get("sim_mbps_mean")
     if sent is not None and target and sent < DELIVERED * target:
-        title = f"The simulator sent {sent:.1f} of {target} Mbit/s it was asked for"
-        if achieved is not None and achieved >= DELIVERED * sent:
-            found.append(finding(target, "generator", "warn", title,
-                                 f"The WAN carried {achieved:.1f} Mbit/s, the same as was sent: the generator was the limit.",
-                                 "Check the simulator's loop and pacing findings for this step, then offer more load."))
+        shortfall = f"The simulator completed {sent:.1f} of {target} Mbit/s"
+        users = trace.get("paced_users")
+        basis = (f"{_fmt(trace.get('in_flight_mean'))} requests in flight on average across about {users} paced users"
+                 if users else "The paced users")
+        if busy is None:
+            found.append(finding(
+                target, "unattributed", "warn", shortfall,
+                "This simulator does not report paced requests in flight, so the generator and the path cannot be told apart.",
+                "Update the simulator: its paced-download counters show whether users waited on the path or rested."))
+        elif busy >= BUSY_CLOSED_LOOP:
+            found.append(finding(
+                target, "path", "warn", f"{shortfall}: paced users were busy {busy * 100:.0f}% of the window",
+                f"{basis}. Users waited on a download almost the whole time, so the {target} Mbit/s was never offered: "
+                f"the path set the rate.",
+                "Read the first-byte and transfer findings for this step to see whether the target or the receive side was slow."))
         else:
-            found.append(finding(target, "path", "warn", title,
-                                 f"The WAN carried {_fmt(achieved)} Mbit/s, less than was sent.",
-                                 "Check the shaper and path findings: traffic was lost between the simulator and the WAN."))
-    elif sent is not None and achieved is not None and achieved < DELIVERED * sent:
-        found.append(finding(target, "path", "warn",
-                             f"The WAN carried {achieved:.1f} of the {sent:.1f} Mbit/s the simulator sent",
-                             "Traffic left the simulator and did not all arrive at the WAN.",
-                             "Check the shaper finding for drops and the quiet seconds for where the WAN fell behind."))
+            found.append(finding(
+                target, "generator", "warn", f"{shortfall}: paced users rested {100 - busy * 100:.0f}% of the window",
+                f"{basis}. Users finished downloads early and waited before the next, so the generator did not offer the target.",
+                "Check the generator's pacing: users should keep offering while the path has room."))
     return found
 
 

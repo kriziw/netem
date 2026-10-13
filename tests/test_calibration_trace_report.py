@@ -41,7 +41,7 @@ class TraceReportTests(unittest.TestCase):
 
     def test_the_event_line_names_what_the_simulator_sent_and_its_loop_stall(self):
         text = calibration_log.text_report(result_with(self.trace, self.timings))
-        self.assertIn("simulator sent 12.5 Mbit/s · loop max 300 ms · quiet WAN seconds 3", text)
+        self.assertIn("simulator completed 12.5 Mbit/s · loop max 300 ms · quiet WAN seconds 3", text)
 
     def test_an_older_simulator_is_reported_as_not_recording_the_trace(self):
         text = calibration_log.text_report(result_with(None, None))

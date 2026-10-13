@@ -112,5 +112,32 @@ class PollerTests(unittest.TestCase):
         self.assertTrue(any(item["counters"] for item in polls))
 
 
+class BusyAndTimingTests(unittest.TestCase):
+    def test_busy_fraction_timings_and_cpu_come_from_the_paced_counters(self):
+        polls = [
+            poll(1000.0, {"bytes": 0, "requests": 0, "paced_started": 0, "paced_completed": 0,
+                          "paced_wait_ms": 0.0, "paced_transfer_ms": 0.0, "cpu_s": 0.0}),
+            poll(1001.0, {"bytes": 6_250_000, "requests": 10, "paced_started": 8, "paced_completed": 2,
+                          "paced_wait_ms": 400.0, "paced_transfer_ms": 900.0, "cpu_s": 0.5}),
+            poll(1002.0, {"bytes": 12_500_000, "requests": 20, "paced_started": 10, "paced_completed": 4,
+                          "paced_wait_ms": 800.0, "paced_transfer_ms": 1800.0, "cpu_s": 1.0}),
+        ]
+        wan_rows = [wan(1001.0, 50.0), wan(1002.0, 50.0)]
+        summary = ct.build(polls, wan_rows, 1000.0, 1002.0, paced_users=8)["summary"]
+        self.assertEqual(summary["in_flight_mean"], 6.0)
+        self.assertEqual(summary["paced_users"], 8)
+        self.assertEqual(summary["busy_fraction"], 0.75)
+        self.assertEqual(summary["wait_ms_mean"], 200.0)
+        self.assertEqual(summary["transfer_ms_mean"], 450.0)
+        self.assertEqual(summary["sim_cpu_pct_max"], 50.0)
+        self.assertEqual(summary["sim_cpu_pct_mean"], 50.0)
+
+    def test_without_the_paced_user_count_no_busy_fraction_is_claimed(self):
+        polls = [poll(1000.0, {"bytes": 0, "requests": 0, "paced_started": 2, "paced_completed": 0}),
+                 poll(1001.0, {"bytes": 1, "requests": 1, "paced_started": 2, "paced_completed": 0})]
+        summary = ct.build(polls, [wan(1001.0, 1.0)], 1000.0, 1001.0)["summary"]
+        self.assertIsNone(summary["busy_fraction"])
+
+
 if __name__ == "__main__":
     unittest.main()
