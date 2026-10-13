@@ -5589,6 +5589,20 @@ def tests():
     )
 
 
+@app.get("/tests/scenario/<scenario_id>")
+def scenario_configuration(scenario_id):
+    cfg = load_config()
+    scenario = next((item for item in get_scenarios(cfg) if item["id"] == scenario_id), None)
+    if scenario is None:
+        abort(404)
+    response = app.make_response(render_template(
+        "scenario_configuration.html", scenario=scenario, links=build_link_states(cfg),
+        scenario_state=scenario_snapshot(), site_state=site_plan_snapshot(), scenario_return_to="overview",
+    ))
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
 @app.route("/sessions")
 def sessions():
     active = session_snapshot()

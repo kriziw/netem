@@ -92,6 +92,18 @@ test('chart animation reaches exact samples and preserves missing-data gaps', ()
   ctx.window.NetEmUI.renderSeries([element],[[1,null,2]],{animate:true});
   assert.equal((element.d.match(/M/g)||[]).length,2);
 });
+
+test('a stopped page client cannot report a late connection error on the next page', async () => {
+  let reject, statuses = 0, timers = 0;
+  const ctx = {window: {}, fetch: () => new Promise((resolve, failure) => { reject = failure; }),
+    setTimeout: () => { timers++; }, clearTimeout() {}};
+  vm.createContext(ctx); vm.runInContext(fs.readFileSync('static/app.js', 'utf8'), ctx);
+  const client = ctx.window.NetEmUI.createLiveClient({onStatus: () => { statuses++; }});
+  client.stop(); reject(new Error('Late failure'));
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(statuses, 0);
+  assert.equal(timers, 0);
+});
 test('fixed slots retain a stable x step and stable scale avoids shrink jumps', () => {
   const element={setAttribute(_,value){this.d=value;}};
   ui.renderSeries([element],[[10,20]],{slots:5,stableScale:true});
@@ -131,7 +143,7 @@ test('generic controls resolve relative URLs despite a named action input', asyn
     setAttribute(){} removeAttribute(){}}
   class Data {constructor(form){this.form=form;} append(){}}
   const notice={textContent:''};
-  const ctx={window:{},document:{addEventListener:(name,fn)=>{submit=fn;},getElementById:()=>notice},
+  const ctx={window:{addEventListener(){}},history:{state:null},document:{querySelector:()=>null,addEventListener:(name,fn)=>{submit=fn;},getElementById:()=>notice},
     HTMLFormElement:Form,FormData:Data,URL,location:{href:'https://netem.example/',origin:'https://netem.example'},
     fetch:async(url,options)=>{sent={url,options};return {ok:false,status:400};}};
   vm.createContext(ctx);vm.runInContext(fs.readFileSync('static/actions.js','utf8'),ctx);

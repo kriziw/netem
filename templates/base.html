@@ -78,9 +78,9 @@
       </div>
       <div class="top-actions">
         <span id="inventory-alerts">{% if inventory_summary.critical %}<a class="top-pill alert" href="{{ url_for('inventory') }}">{{ inventory_summary.critical }} appliance alert{{ '' if inventory_summary.critical == 1 else 's' }}</a>{% elif inventory_summary.warnings %}<a class="top-pill" href="{{ url_for('inventory') }}">{{ inventory_summary.warnings }} appliance warning{{ '' if inventory_summary.warnings == 1 else 's' }}</a>{% endif %}</span>
-        {% if help_doc_slug %}
+        <span id="page-guide">{% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
-        {% endif %}
+        {% endif %}</span>
         {# Refreshed with the page after actions and lab changes. #}
         <span class="top-status" id="top-status">
         {% if global_runtime.session.active %}
@@ -238,11 +238,10 @@
   const commandBackdrop = document.getElementById("command-backdrop");
   const commandToggle = document.getElementById("command-toggle");
   const commandSearch = document.getElementById("command-search");
-  const commandItems = [...document.querySelectorAll(".command-item")];
 
   function filterCommands() {
     const query = commandSearch.value.trim().toLowerCase();
-    commandItems.forEach(item => {
+    document.querySelectorAll(".command-item").forEach(item => {
       item.style.display = !query || item.dataset.commandSearch.includes(query) ? "" : "none";
     });
   }
@@ -271,6 +270,11 @@
       closeActivity();
     }
   });
+  document.addEventListener("netem:navigated", () => {
+    closeCommands();
+    closeActivity();
+    sidebar?.classList.remove("mobile-open");
+  });
 })();
 </script>
 <dialog id="traffic-simulator-dialog" aria-labelledby="traffic-simulator-dialog-title">
@@ -278,11 +282,22 @@
   <div class="simulator-dialog-feedback" data-simulator-feedback role="status" aria-live="polite"></div>
   <div data-simulator-content></div>
 </dialog>
+<dialog id="scenario-configuration-dialog" aria-labelledby="scenario-dialog-title">
+  <div class="simulator-dialog-head"><h2 id="scenario-dialog-title">Configure scenario</h2><button class="btn" type="button" data-scenario-close aria-label="Close scenario configuration">Close</button></div>
+  <div data-scenario-feedback role="status" aria-live="polite"></div>
+  <div data-scenario-content></div>
+</dialog>
+<dialog id="navigation-confirm-dialog" aria-labelledby="navigation-confirm-title">
+  <h2 id="navigation-confirm-title">Leave this page?</h2>
+  <p>Unsaved changes will be discarded.</p>
+  <div class="actions"><button class="btn" type="button" data-navigation-stay>Keep editing</button><button class="btn btn-danger" type="button" data-navigation-leave>Discard &amp; leave</button></div>
+</dialog>
 <script src="{{ url_for('static', filename='app.js') }}"></script>
 <script src="{{ url_for('static', filename='site-scenarios.js') }}"></script>
 <script src="{{ url_for('static', filename='actions.js') }}"></script>
 <script src="{{ url_for('static', filename='update-screen.js') }}"></script>
 <script src="{{ url_for('static', filename='simulator-dialog.js') }}"></script>
+<script src="{{ url_for('static', filename='scenario-dialog.js') }}"></script>
 <script src="{{ url_for('static', filename='traffic-settings.js') }}"></script>
 <script src="{{ url_for('static', filename='inventory.js') }}"></script>
 <template id="page-scripts">{% block scripts %}{% endblock %}</template>

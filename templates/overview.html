@@ -24,9 +24,9 @@
 
 <nav class="command-shortcuts" aria-label="Quick actions">
 
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
+          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='progressive_brownout') }}" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
+          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='sla_failover') }}" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
+          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='flaky_underlay') }}" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
           <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
 
 </nav>
@@ -407,7 +407,7 @@ function openWanDrawer(id) {
 }
 document.querySelectorAll("[data-open-wan]").forEach(el => el.addEventListener("click", () => openWanDrawer(el.dataset.openWan)));
 document.querySelectorAll("[data-close-wan]").forEach(el => el.addEventListener("click", closeWanDrawers));
-drawerBackdrop.addEventListener("click", closeWanDrawers);
+document.addEventListener("click", event => { if (event.target === drawerBackdrop) closeWanDrawers(); });
 document.addEventListener("keydown", event => { if (event.key === "Escape") closeWanDrawers(); });
 
 const requestedWan = new URLSearchParams(location.search).get("wan");

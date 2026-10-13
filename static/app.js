@@ -299,7 +299,7 @@ window.NetEmUI = (() => {
         if (options.onSample) options.onSample({telemetry, state, history});
         if (options.onStatus) options.onStatus(true);
       } catch (error) {
-        if (options.onStatus) options.onStatus(false, error);
+        if (!stopped && options.onStatus) options.onStatus(false, error);
       } finally {
         if (!stopped) timer = setTimeout(sample, interval);
       }
