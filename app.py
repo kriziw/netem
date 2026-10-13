@@ -9142,6 +9142,8 @@ def showroom_outcome(diagnosis, site_plan):
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
             "verdicts": verdicts,
+            # Each traffic group's own sub-score and sentence, under the overall experience tiles.
+            "groups": dem.get("experience_groups") or [],
         },
         "findings": [{
             "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),

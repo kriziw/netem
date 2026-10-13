@@ -277,6 +277,7 @@ jobs:
           node --check static/showroom.js
           node --test tests/site-scenarios.test.js
           node --test tests/experience-groups.test.js
+          node --test tests/showcase-groups.test.js
           node --check static/site-scenarios.js
           node --test tests/update-screen.test.js
           node --check static/update-screen.js

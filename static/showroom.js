@@ -293,7 +293,7 @@
   }
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
     phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView,
-    showPlanSummary, planSummaryView, waitingMedia, embedAddress};
+    showPlanSummary, planSummaryView, waitingMedia, embedAddress, groupCards};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -440,6 +440,16 @@
         .filter(Boolean).join(' · ') || (running ? 'Simulated corporate users' : 'No workload running'));
   }
 
+  // Each traffic group under the experience tiles: its own score, its tone and one sentence on how it is performing.
+  function groupCards(groups, live) {
+    return (Array.isArray(groups) ? groups : []).map(group => {
+      const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
+      const score = live && group.score != null ? group.score + ' / 100' : '—';
+      card.append(element('span', '', group.label), element('strong', '', score), element('p', '', group.text));
+      return card;
+    });
+  }
+
   function renderOutcome() {
     const view = resultView(latest.experience);
     const experience = latest.experience || {};
@@ -458,6 +468,8 @@
       showNumber(tile.querySelector('[data-value]'), live ? raw : null, format);
       setText(tile.querySelector('[data-target]'), view[key].target);
     }
+    const groupHolder = document.getElementById('experience-groups');
+    if (groupHolder) groupHolder.replaceChildren(...groupCards(experience.groups, live));
     const traffic = latest.traffic || {};
     setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${traffic.window_seconds || 60} s · ${traffic.requests.toLocaleString()} transactions` : '');
     const story = latest.story || {};
