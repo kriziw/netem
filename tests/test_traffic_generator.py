@@ -99,7 +99,7 @@ class SimulatorIntegrationTests(unittest.TestCase):
             self.assertTrue(snapshot["error"])
 
     def test_dem_score_reads_experience_contract(self):
-        self.payload = {"endpoint_experience": {"score": 93, "rating": "Excellent"}, "active_users": 10}
+        self.payload = {"scoring_complete": True, "timestamp": netem.time.time(), "endpoint_experience": {"score": 93, "rating": "Excellent"}, "active_users": 10}
         passed, observed, _detail = netem.evaluate_scenario_condition({"type": "dem", "field": "experience_score", "op": ">=", "value": 90}, "wan1")
         self.assertTrue(passed)
         self.assertEqual(observed, 93)
@@ -115,7 +115,7 @@ class SimulatorIntegrationTests(unittest.TestCase):
     def test_scenario_owned_workload_is_stopped_after_failure(self):
         steps = [{"after": 0, "action": "traffic_generator", "value": {"operation": "start"}}, {"after": 0, "action": "assert", "condition": {"type": "dem"}}]
         responses = [{"status": "running", "run": {"run_id": "owned"}}, {"status": "running", "run": {"run_id": "owned"}}, {"status": "stopped"}]
-        with patch.object(netem, "traffic_generator_request", side_effect=responses) as api, patch.object(netem, "wait_for_scenario_condition", return_value=(False, None, "no data", 0)), patch.object(netem, "apply_selected_profile", return_value=(True, "OK", {})), patch.object(netem, "apply_mtu_limit", return_value=(True, "OK")), patch.object(netem, "log_event"),              patch.object(netem, "ensure_traffic_path"):
+        with patch.object(netem, "recorder_close_phase"), patch.object(netem, "traffic_generator_request", side_effect=responses) as api, patch.object(netem, "wait_for_scenario_condition", return_value=(False, None, "no data", 0)), patch.object(netem, "apply_selected_profile", return_value=(True, "OK", {})), patch.object(netem, "apply_mtu_limit", return_value=(True, "OK")), patch.object(netem, "log_event"),              patch.object(netem, "ensure_traffic_path"):
             netem.run_scenario("wan1", {"id": "test", "name": "test", "steps": steps})
         self.assertEqual([call.args[0] for call in api.call_args_list if call.args[0].startswith("/api/v1/workloads")][-1], "/api/v1/workloads/stop")
         self.assertEqual(netem.SCENARIO_STATE["result"], "failed")

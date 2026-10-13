@@ -108,6 +108,8 @@ class SummaryTests(unittest.TestCase):
                     "steering": {"Voice & video": {"verdict": steering, "impaired": []}}}
         return {"name": "Brownout", "scenario_id": "b", "link_id": "wan1", "started_at": 1000.0,
                 "phases": ["Baseline", "Brownout", "Recovery"],
+                "phase_ends": [{"name": "Baseline", "dem": {"requests": 100, "experience": 95, "success": 100, "interactive_p95_ms": 100, "scoring_complete": True}},
+                               {"name": "Brownout", "dem": {"requests": 100, "experience": 60, "success": 97.5, "interactive_p95_ms": 100, "scoring_complete": True}}],
                 "phase_marks": [{"name": "Baseline", "at": 1000.0}, {"name": "Brownout", "at": 1060.0}],
                 "samples": [sample("Baseline", 95, 100.0, 50, "balanced"), sample("Brownout", 70, 99.0, 30, "stuck"),
                             sample("Brownout", 60, 97.5, 10, "steered")],
@@ -132,7 +134,7 @@ class SummaryTests(unittest.TestCase):
         self.assertTrue(summary["narrative"][-1].startswith("Missed: Experience ≥ 80"))
 
     def test_without_measurements_the_summary_says_so(self):
-        record = dict(self.record(), samples=[], reactions=[], assertions=[])
+        record = dict(self.record(), samples=[], phase_ends=[], reactions=[], assertions=[])
         summary = netem.summarize_test(record, "passed", None, ended_at=1100.0)
         self.assertIn("No simulated user traffic was measured", summary["conclusion"][1])
         self.assertIsNone(summary["steering_target_s"])
@@ -160,7 +162,7 @@ class SummaryTests(unittest.TestCase):
             self.assertEqual(json.loads((Path(temp.name) / "summary.json").read_text())["name"], "Brownout")
         self.assertEqual(summary["link"], "WAN1")
         self.assertEqual(summary["site"], "Automotive · Manufacturing plant · Large · Business-critical")
-        self.assertEqual(summary["phases"][0]["experience_score"], 88)
+        self.assertIsNone(summary["phases"][0]["experience_score"])
         self.assertEqual(summary["phases"][0]["wans"][0]["down_mbps"], 12.5)
         self.assertEqual(log.call_args.args[0], "test-summary")
         self.assertIsNone(netem.recorder_finish("passed", None))

@@ -42,7 +42,7 @@ class CalibrationRunTests(unittest.TestCase):
         if path != "/api/v1/workloads/start":
             return {}
         self.started.append((payload or {}).get("paced_mbps"))
-        return {"run": {"run_id": run_id}}
+        return {"run": {"run_id": run_id, "traffic_path": {"mode": "direct_netem", "wan_id": "wan1"}}}
 
     def test_a_clean_climb_ends_at_the_wan_rate_and_stops_every_workload(self):
         self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
@@ -191,7 +191,7 @@ class UnshapedAndSparseTests(unittest.TestCase):
     def request(self, path, method="GET", payload=None, timeout=3.0):
         if path.startswith("/api/v1/workloads"):
             self.payloads.append(dict(payload or {}))
-        return {"run": {"run_id": f"run-{len(self.payloads)}"}}
+        return {"run": {"run_id": f"run-{len(self.payloads)}", "traffic_path": {"mode": "direct_netem", "wan_id": "wan1"}}}
 
     def test_each_paced_step_asks_for_a_share_of_sparse_users_and_keeps_its_udp_window(self):
         self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]

@@ -144,7 +144,7 @@ class CorrelationTests(unittest.TestCase):
         media = findings["media_loss"]
         self.assertEqual([(wan["label"], wan["affected"]) for wan in media["wans"]], [("WAN2", 18)])
         self.assertTrue(any("random loss" in text for text in media["wans"][0]["causes"]))
-        self.assertTrue(any("queue full" in text for text in media["wans"][0]["causes"]))
+        self.assertTrue(any("queue drops" in text for text in media["wans"][0]["causes"]))
         self.assertEqual((media["unattributed"], media["candidates"]), (3, ["WAN2"]))
         bandwidth = findings["bandwidth_bound"]
         self.assertEqual(bandwidth["wans"][0]["label"], "WAN1")

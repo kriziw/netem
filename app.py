@@ -131,6 +131,8 @@ MAX_PROBES = 20
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
+PROFILE_APPLY_LOCK = threading.RLock()
+APPLIED_QDISCS = {}
 EVENT_LOG = []
 LAB_SESSIONS = []
 ACTIVE_SESSION = {
@@ -1289,6 +1291,20 @@ def validate_scenario_steps(raw_steps):
                         cleaned[key] = weights
 
             if operation == "start":
+                if "experience_policy" in value:
+                    policy = value["experience_policy"]
+                    if not isinstance(policy, dict) or len(policy) > 30:
+                        raise ValueError(f"Step {index}: experience_policy must be an application target object.")
+                    try:
+                        if len(json.dumps(policy, allow_nan=False)) > 32000:
+                            raise ValueError()
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Step {index}: invalid experience policy.") from None
+                    cleaned["experience_policy"] = copy.deepcopy(policy)
+                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed"):
+                    if field in value:
+                        cleaned[field] = value[field]
+            if operation == "start":
                 cleaned.setdefault("profile", "office")
                 cleaned.setdefault("users", 50)
                 cleaned.setdefault("spawn_rate", 5.0)
@@ -1650,6 +1666,11 @@ def get_effective_profile(link: dict, presets: dict):
 
 
 def apply_selected_profile(link: dict, presets: dict):
+    with PROFILE_APPLY_LOCK:
+        return _apply_selected_profile(link, presets)
+
+
+def _apply_selected_profile(link: dict, presets: dict):
     """Apply either the quality-derived or custom profile stored on one WAN."""
     inner = link.get("inner")
     outer = link.get("outer")
@@ -1660,6 +1681,10 @@ def apply_selected_profile(link: dict, presets: dict):
     if not effective:
         return False, "Missing interface or preset", {}
 
+    link_id = link.get("id") or link.get("bridge") or inner
+    previous = copy.deepcopy(RUNTIME_EFFECTIVE.get(link_id) or {})
+    if (effective.get("jitter_ms", 0) > 0 or effective.get("reorder_pct", 0) > 0) and effective.get("delay_ms", 0) <= 0:
+        return False, "Jitter and reordering require a positive delay", effective
     ok_down, msg_down = apply_netem(
         inner,
         effective["delay_ms"],
@@ -1684,10 +1709,22 @@ def apply_selected_profile(link: dict, presets: dict):
             "effective": dict(effective),
             "quality": int(link.get("quality", 100)),
             "mode": link.get("mode", "quality"),
-            "updated_at": time.time(),
+            "updated_at": time.time(), "apply_status": "applied", "desired": dict(effective),
+            "generation": previous.get("generation", 0) + (previous.get("effective") != effective),
         }
         return True, "OK", effective
 
+    old = previous.get("effective")
+    restored = False
+    if old:
+        down_restored, _ = apply_netem(inner, old["delay_ms"], old["jitter_ms"], old["loss_pct"], old["download_mbit"],
+                                     old.get("loss_correlation_pct", 0), old.get("duplicate_pct", 0),
+                                     old.get("corrupt_pct", 0), old.get("reorder_pct", 0))
+        up_restored = not outer or apply_netem(outer, 0, 0, 0, old["upload_mbit"])[0]
+        restored = down_restored and up_restored
+    RUNTIME_EFFECTIVE[link_id] = {**previous, "desired": dict(effective),
+                                "effective": old if restored else {}, "apply_status": "rolled_back" if restored else "unknown",
+                                "apply_error": f"download: {msg_down}; upload: {msg_up}", "updated_at": time.time()}
     details = []
     if not ok_down:
         details.append(f"download/impairment: {msg_down}")
@@ -1849,7 +1886,8 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
     window bursts overflowed it on an otherwise idle link and every transfer paid
     for retransmissions. The fix is a burst allowance that covers those windows
     (10 ms of rate), so an idle or moderately loaded link adds no queueing delay.
-    The queue holds 25 ms of data, the most a saturated link adds per direction.
+    The nominal payload budget is 25 ms; skb memory accounting and packet sizes
+    mean this is not a bound on measured queue delay.
     netem also keeps every packet for its delay, so its packet queue must hold
     rate × (delay + jitter) or it drops on long-delay links.
     """
@@ -1861,7 +1899,31 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
     return netem_limit, burst, limit
 
 
-def apply_netem(
+def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
+                loss_correlation_pct=0.0, duplicate_pct=0.0, corrupt_pct=0.0, reorder_pct=0.0):
+    values = (delay_ms, jitter_ms, loss_pct, rate_mbit, loss_correlation_pct, duplicate_pct, corrupt_pct, reorder_pct)
+    if not all(isinstance(value, (int, float)) and math.isfinite(value) and value >= 0 for value in values):
+        return False, "Impairments must be finite, nonnegative numbers"
+    if jitter_ms > 0 and delay_ms <= 0:
+        return False, "Jitter requires a positive delay"
+    if reorder_pct > 0 and delay_ms <= 0:
+        return False, "Reordering requires a positive delay"
+    with PROFILE_APPLY_LOCK:
+        previous = APPLIED_QDISCS.get(ifname)
+        if previous and previous["values"] == values:
+            rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
+            if rc == 0 and observed.strip() and observed == previous["observed"]:
+                return True, "OK"
+        result = _apply_netem(ifname, *values)
+        APPLIED_QDISCS.pop(ifname, None)
+        if result[0]:
+            rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
+            if rc == 0 and observed.strip():
+                APPLIED_QDISCS[ifname] = {"values": values, "observed": observed}
+        return result
+
+
+def _apply_netem(
     ifname: str,
     delay_ms: float,
     jitter_ms: float,
@@ -2520,7 +2582,7 @@ def qdisc_counters(ifname: str):
     fq = next((item for item in qdiscs if item["kind"] == "fq_codel"), None)
     # The fair queue holds what the rate limiter paces, so the rate limiter's backlog is already counted in it.
     # The root netem and the rate limiter report the drops of the queue below them, so only the fair queue is counted.
-    backlog = sum(item["backlog_bytes"] or 0 for item in qdiscs if not (fq and item is tbf))
+    backlog = (fq or tbf or {}).get("backlog_bytes") or 0
     return {
         "kind": root["kind"],
         "packets": root["packets"],
@@ -2558,13 +2620,21 @@ def qdisc_rates(current, previous, dt):
 
 # ---------- Persistent telemetry / active measurement ----------
 
+from contextlib import contextmanager
+
+
+@contextmanager
 def telemetry_connect():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_telemetry_db():
@@ -3099,16 +3169,19 @@ def calibration_file(kind):
         return None
 
 
-def simulator_dem_window(seconds):
+def simulator_dem_window(seconds, since=None, until=None, run_id=None):
     """The Traffic Simulator's DEM for the last seconds: what the sparse OT-style traffic experienced, with its loss."""
     try:
-        summary = traffic_generator_request(f"/api/v1/dem/summary?window={int(seconds)}", timeout=5.0)
+        from urllib.parse import urlencode
+        query = urlencode({"since": since, "until": until, "run_id": run_id}) if since is not None else urlencode({"window": int(seconds)})
+        summary = traffic_generator_request(f"/api/v1/dem/summary?{query}", timeout=7.0)
     except RuntimeError as exc:
         return {"error": str(exc)[:200]}
     apps = summary.get("applications") or {}
     ot = apps.get("ot_telemetry") or {}
     quality = ot.get("quality") or {}
-    return {"ot_loss_pct": quality.get("udp_loss_pct"), "ot_jitter_p95_ms": quality.get("udp_rtt_variation_p95_ms"),
+    return {"scoring_complete": summary.get("scoring_complete"), "evidence_issues": summary.get("evidence_issues"),
+            "ot_loss_pct": quality.get("udp_loss_pct"), "ot_jitter_p95_ms": quality.get("udp_rtt_variation_p95_ms"),
             "ot_p95_ms": ot.get("p95_ms"), "ot_bursts": ot.get("requests"),
             "requests_per_second": summary.get("requests_per_second"), "p95_ms": summary.get("p95_ms")}
 
@@ -3210,19 +3283,24 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 payload.pop("sparse_share")
                 status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0)
             run_id = (status.get("run") or {}).get("run_id")
+            path = (status.get("run") or {}).get("traffic_path") or {}
+            if path.get("mode") != "direct_netem" or path.get("wan_id") != link_id:
+                raise RuntimeError("WAN calibration requires the matching direct NetEm path; select this WAN before calibrating.")
             poller = calibration_trace.SimulatorPoller(fetch=calibration_health).start()
             time.sleep(calibration.SETTLE_S)
             devices = calibration_device(link_id)
             qdisc_before = qdisc_readings(devices)
             sim_before, sim_before_ms = _timed(simulator_state)
             start = time.time()
-            time.sleep(calibration.MEASURE_S)
+            time.sleep(calibration.MEASURE_S / 2)
+            probe = calibration_probe(link_id)
+            remaining = calibration.MEASURE_S - (time.time() - start)
+            if remaining > 0:
+                time.sleep(remaining)
             end = time.time()
             qdisc_after = qdisc_readings(devices)
             polls, poller = poller.stop(), None
             sim_after, sim_after_ms = _timed(simulator_state)
-            _, stop_ms = _timed(stop_test_owned_workload, run_id)
-            run_id = None
             measured, measure_ms = _timed(measure_wan, link_id, start, end)
             host = host_headroom(window_s=int(calibration.MEASURE_S), now=end)
             qdisc_delta = {direction: calibration_log.qdisc_deltas(
@@ -3236,9 +3314,11 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
                                              shaper["drops_ps"])
             if sparse_used:
-                sparse_window, dem_ms = _timed(simulator_dem_window, int(calibration.MEASURE_S))
+                sparse_window, dem_ms = _timed(simulator_dem_window, end - start, start, end, run_id)
             else:
                 sparse_window, dem_ms = {"skipped": "The simulator does not support sparse traffic; update it."}, None
+            _, stop_ms = _timed(stop_test_owned_workload, run_id)
+            run_id = None
             # The users that download share the rate; the sparse users send UDP bursts instead.
             paced_users = users - (round(users * payload["sparse_share"]) if "sparse_share" in payload else 0)
             wan_rows = wan_timeline(link_id, start, end)
@@ -3256,7 +3336,7 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                             "stop_workload_ms": stop_ms, "measure_wan_ms": measure_ms, "dem_window_ms": dem_ms},
                 "wan_timeline": wan_rows,
                 "host_timeline": host_window(start, end),
-                "probe": calibration_probe(link_id),
+                "probe": probe,
             }
             log_event("calibration", calibration_log.step_line(verdict), target_mbps=target, status=verdict["status"])
             steps.append(verdict)
@@ -3515,7 +3595,7 @@ def path_signals(state: dict, samples: list):
         if (info["queue_drops_ps"] or 0) >= 1:
             signals["causes"].append({
                 "kind": "queue_drops", "direction": direction, "severity": "warn",
-                "text": f"{name} queue full: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
+                "text": f"{name} queue drops: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
             })
     loss = signals["injected"]["loss_pct"]
     if loss > 0 and fault == "normal":
@@ -3535,7 +3615,9 @@ def path_signals(state: dict, samples: list):
     # Health decides where a well-behaved SD-WAN appliance should steer traffic.
     sla = state.get("sla") or {}
     failing = [name for name, ok in (sla.get("checks") or {}).items() if not ok and name != "data_plane"]
-    if fault != "normal":
+    if state.get("apply_status") == "unknown":
+        signals["health"], signals["health_reason"] = "unknown", "Impairment application failed; actual state is unverified"
+    elif fault != "normal":
         signals["health"], signals["health_reason"] = "failed", f"{fault.replace('_', ' ')} active"
     elif not sla.get("pass", True):
         signals["health"], signals["health_reason"] = "degraded", "Model SLA fails on " + ", ".join(failing or ["impairment"])
@@ -3561,6 +3643,8 @@ def configured_egress(cfg: dict):
 
 def resolve_egress(address: str, cfg: dict):
     """Map an appliance egress address to its WAN: entered addresses first, then learned ones."""
+    if cfg.get("_direct_wan_id"):
+        return {"link_id": cfg["_direct_wan_id"], "source": "declared_direct_path"}
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
@@ -3699,7 +3783,7 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
 
         per_link, unattributed = {}, 0
         for address, value in (symptom.get("by_egress") or {}).items():
-            mapped = resolve_egress(address, cfg) if address != "unknown" else None
+            mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
             if mapped and mapped.get("link_id") in by_link:
                 per_link[mapped["link_id"]] = per_link.get(mapped["link_id"], 0) + _egress_count(value)
             else:
@@ -3752,7 +3836,7 @@ def wan_experience(dem_diagnosis, signals: list, cfg: dict):
     totals = {item["link_id"]: {"requests": 0, "failures": 0, "apps": {}} for item in signals}
     unattributed = {"requests": 0, "failures": 0}
     for address, item in ((dem_diagnosis or {}).get("egress") or {}).items():
-        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
         bucket = totals.get((mapped or {}).get("link_id"))
         if bucket is None:
             unattributed["requests"] += item.get("requests") or 0
@@ -3905,7 +3989,7 @@ def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
         return (applications.get(app) or {}).get("class") or DEFAULT_APP_CLASSES.get(app, "interactive")
 
     def link_of(address):
-        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
         return (mapped or {}).get("link_id")
 
     classes = []
@@ -4024,7 +4108,13 @@ def build_diagnosis():
     dem = (status or {}).get("dem") or {}
     traffic_path = ((status or {}).get("run") or {}).get("traffic_path") or {}
     traffic_mode = traffic_path.get("mode", "appliance")
+    if traffic_mode == "direct_netem" and traffic_path.get("wan_id"):
+        cfg = dict(cfg, _direct_wan_id=traffic_path["wan_id"])
     dem_diagnosis = dem.get("diagnosis") if isinstance(dem.get("diagnosis"), dict) else None
+    identity = (((status or {}).get("run") or {}).get("run_id"), traffic_mode, traffic_path.get("wan_id"))
+    with DIAGNOSIS_LOCK:
+        if STEERING_STATE.get("identity") != identity:
+            STEERING_STATE.update(identity=identity, links={}, classes={}, baseline={})
     signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
     findings = correlate_findings(dem_diagnosis, signals, cfg)
     steering = assess_steering(dem, signals, cfg) if traffic_mode == "appliance" else None
@@ -5117,6 +5207,15 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         field = condition.get("field", "experience_score")
         if field != "active_users" and payload.get("truncated"):
             return False, None, "DEM transaction window exceeded the sample limit"
+        if field != "active_users":
+            if payload.get("scoring_complete") is not True or payload.get("evidence_issues"):
+                return False, None, "DEM evidence is incomplete; a complete measurement is required"
+            stamp = payload.get("timestamp")
+            if not isinstance(stamp, (int, float)) or not 0 <= time.time() - stamp <= 10:
+                return False, None, "DEM evidence is stale or future-dated"
+            expected_run = SCENARIO_STATE.get("workload_run_id")
+            if expected_run and payload.get("run_id") != expected_run:
+                return False, None, "DEM belongs to a different workload"
         experience = payload.get("endpoint_experience") or {}
         if field in ("realtime_availability_pct", "interactive_availability_pct"):
             actual = class_availability(payload.get("applications") or {}, field.split("_", 1)[0])
@@ -5255,20 +5354,28 @@ def recorder_note(kind: str, item: dict):
 MIN_PHASE_REQUESTS = 20
 
 
-def phase_window_dem(seconds):
+def phase_window_dem(seconds, since=None, until=None, run_id=None):
     """The Traffic Simulator's DEM over exactly the seconds one phase ran: what that phase's own transactions scored."""
-    window = int(min(3600, max(10, seconds)))
+    until = time.time() if until is None else until
+    since = until - seconds if since is None else since
+    run_id = run_id or SCENARIO_STATE.get("workload_run_id")
+    if not run_id:
+        return {"error": "Phase workload identity is unavailable", "scoring_complete": False}
+    from urllib.parse import urlencode
+    query = urlencode({"run_id": run_id, "since": since, "until": until})
     try:
-        dem = traffic_generator_request(f"/api/v1/dem/summary?window={window}", timeout=5.0)
+        dem = traffic_generator_request(f"/api/v1/dem/summary?{query}", timeout=7.0)
     except RuntimeError as exc:
         return {"error": str(exc)[:200]}
     applications = {key: {"class": item.get("class"), "requests": item.get("requests") or 0,
                           "success": item.get("availability_pct"), "p95_ms": item.get("p95_ms"),
-                          "experience": item.get("experience_score")}
+                          "experience": item.get("experience_score"), "weight": item.get("weight"),
+                          "scoring_complete": item.get("scoring_complete")}
                     for key, item in (dem.get("applications") or {}).items()}
     return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
             "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
-            "p95_ms": dem.get("p95_ms"), "applications": applications}
+            "p95_ms": dem.get("p95_ms"), "applications": applications,
+            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts")}}
 
 
 def recorder_close_phase():
@@ -5278,7 +5385,12 @@ def recorder_close_phase():
     if not marks:
         return
     last = marks[-1]
-    recorder_note("phase_ends", {"name": last["name"], "dem": phase_window_dem(time.time() - last["at"])})
+    with TEST_RECORDER_LOCK:
+        if any(item.get("started_at") == last["at"] for item in TEST_RECORDER.get("phase_ends", [])):
+            return
+    end = time.time()
+    recorder_note("phase_ends", {"name": last["name"], "started_at": last["at"], "ended_at": end,
+                                "dem": phase_window_dem(end - last["at"], since=last["at"], until=end)})
 
 
 def record_test_sample(payload: dict):
@@ -5328,11 +5440,11 @@ APPLICATION_LABELS = {
 def _phase_application(key, item):
     """One application's figures in one phase; too few of its own transactions means no score for it."""
     requests = item.get("requests") or 0
-    scored = requests >= MIN_PHASE_REQUESTS
+    scored = item.get("scoring_complete") is True
     return {"key": key, "class": item.get("class"), "requests": requests,
             "experience": item.get("experience") if scored else None,
             "success": item.get("success") if scored else None,
-            "p95_ms": item.get("p95_ms") if scored else None}
+            "p95_ms": item.get("p95_ms") if scored else None, "weight": item.get("weight"), "scoring_complete": scored}
 
 
 def _figures_text(experience, success, p95_ms, requests):
@@ -5364,8 +5476,10 @@ def application_matrix(phases):
             success = sum(item["success"] * item["requests"] for item in pooled) / weight if weight else None
             p95s = [item["p95_ms"] for item in scored if item["p95_ms"] is not None]
             if scored:
-                cells[phase["name"]] = _figures_text(min(item["experience"] for item in scored), success,
-                                                     max(p95s, default=None), sum(item["requests"] for item in scored))
+                weights = [item.get("weight") if item.get("weight") is not None else 1 for item in scored]
+                group_score = sum(item["experience"] * weight for item, weight in zip(scored, weights)) / sum(weights) if sum(weights) else None
+                cells[phase["name"]] = _figures_text(group_score, success,
+                                                     max(p95s, default=None), sum(item["requests"] for item in scored)) + " [worst app P95]"
             else:
                 cells[phase["name"]] = _figures_text(None, None, None, sum(item["requests"] for item in present))
             for row in apps:
@@ -5399,14 +5513,14 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                        if item.get("name") == name and "error" not in (item.get("dem") or {})), None)
         if window is not None:
             transactions = window.get("requests") or 0
-            scored = transactions >= MIN_PHASE_REQUESTS
+            scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and not any(row.get("paused") for row in rows)
             experience = window.get("experience") if scored else None
             success = window.get("success") if scored else None
             p95 = window.get("interactive_p95_ms") if scored else None
-            note = None if scored else f"Too few transactions to score this phase ({transactions} in its window)."
+            note = None if scored else f"Incomplete phase evidence ({transactions} transactions); no target verdict."
         else:
-            experience, success, p95 = last.get("experience"), last.get("success"), last.get("interactive_p95_ms")
-            transactions, note = None, None
+            experience, success, p95 = None, None, None
+            transactions, note = None, "Exact phase evidence unavailable; rolling measurements were not substituted."
         applications = {key: _phase_application(key, item)
                         for key, item in ((window or {}).get("applications") or {}).items()}
         phases.append({
@@ -5414,6 +5528,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             "duration_s": round((following["at"] if following else ended_at) - mark["at"]) if mark else None,
             "experience_score": experience, "success_pct": success,
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
+            "critical_alerts": (window or {}).get("critical_alerts", []),
             "worst_success_pct": success,
             "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
                       "health": item["health"]} for item in links.values()],
@@ -5425,7 +5540,21 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     remediation = [dict(item, within_target=None if steering_target is None else item["seconds"] <= steering_target)
                    for item in record.get("reactions") or []]
 
-    conclusion = [f"{record.get('name') or 'Test'} {result}" +
+    evaluated = [phase for phase in phases if phase["reached"]]
+    def phase_verdict(phase):
+        if phase["note"] or not targets:
+            return "unknown"
+        checks = [(phase["experience_score"], targets.get("experience_min"), True),
+                  (phase["success_pct"], targets.get("success_min_pct"), True),
+                  (phase["interactive_p95_ms"], targets.get("interactive_p95_max_ms"), False)]
+        if phase.get("critical_alerts"):
+            return "fail"
+        if any(actual is None or target is None for actual, target, _ in checks):
+            return "unknown"
+        return "pass" if all(actual >= target if higher else actual <= target for actual, target, higher in checks) else "fail"
+    verdicts = [phase_verdict(phase) for phase in evaluated]
+    experience_result = "fail" if "fail" in verdicts else "pass" if verdicts and all(value == "pass" for value in verdicts) else "unknown"
+    conclusion = [f"{record.get('name') or 'Test'} {'execution completed' if result == 'passed' and not assertions else result}" +
                   (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
     if error and result != "passed":
         conclusion.append(str(error)[:200])
@@ -5466,7 +5595,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     application_groups = application_matrix(phases)
     return {
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
-        "site": site_label, "result": result, "started_at": record.get("started_at"), "ended_at": ended_at,
+        "site": site_label, "result": result, "execution_result": result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
         "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
         "phases": phases, "remediation": remediation, "steering_target_s": steering_target,
         "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
@@ -5867,6 +5996,8 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                         payload['controller_lease_seconds'] = 30
                 elif operation == 'stop' and supervised and scenario_workload_id:
                     payload['run_id'] = scenario_workload_id
+                if operation == "stop":
+                    recorder_close_phase()
                 result = traffic_generator_request(
                     f"/api/v1/workloads/{operation}", method="POST",
                     payload=payload, timeout=5.0,
@@ -5944,6 +6075,10 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
         scenario_error = str(exc)[:240]
 
     finally:
+        try:
+            recorder_close_phase()
+        except Exception as exc:
+            log_event("scenario", "Final phase evidence unavailable", error=str(exc)[:200])
         if scenario_workload_id:
             try:
                 stop_test_owned_workload(scenario_workload_id)
@@ -6019,7 +6154,7 @@ def build_link_states(cfg: dict, include_qdisc=False):
 
         configured_effective = get_effective_profile(link, presets)
         runtime = RUNTIME_EFFECTIVE.get(link_id) or {}
-        effective = runtime.get("effective") or configured_effective
+        effective = runtime.get("effective", {}) if runtime.get("apply_status") == "unknown" else runtime.get("effective") or configured_effective
         runtime_quality = runtime.get("quality", quality)
         runtime_mode = runtime.get("mode", mode)
         fault = ACTIVE_FAULTS.get(link_id, "normal")
@@ -6048,6 +6183,8 @@ def build_link_states(cfg: dict, include_qdisc=False):
             "bandwidth_upload_mbit": bandwidth_upload,
             "nominal_download_mbit": nominal_download,
             "nominal_upload_mbit": nominal_upload,
+            "apply_status": runtime.get("apply_status", "unverified"),
+            "apply_error": runtime.get("apply_error"),
             "configured_effective": configured_effective,
             "effective": effective,
             "fault": fault,
@@ -9142,8 +9279,12 @@ def showroom_outcome(diagnosis, site_plan):
     }
     if "fail" in verdicts.values():
         verdicts["experience"] = "fail"
-    elif "unknown" in verdicts.values() or dem.get("scoring_complete") is False:
+    elif "unknown" in verdicts.values() or dem.get("scoring_complete") is not True:
         verdicts["experience"] = "unknown"
+    if dem.get("truncated") or dem.get("evidence_issues") or dem.get("scoring_complete") is not True:
+        verdicts = {key: "unknown" for key in verdicts}
+    elif dem.get("critical_alerts"):
+        verdicts["experience"] = "fail"
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -9160,6 +9301,8 @@ def showroom_outcome(diagnosis, site_plan):
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
             "verdicts": verdicts,
+            **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
+                                            "critical_alerts", "limiting_application", "missing_measurements")},
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
         },
@@ -9200,7 +9343,7 @@ SHOWROOM_STATE = {"values": {}, "impacts": {}}
 STORY_LOCK = threading.Lock()
 CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business apps", "bulk": "File transfers"}
 CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
-IMPACT_VERBS = {"media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
+IMPACT_VERBS = {"target_violation": "missing a configured application target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
                 "connection_errors": "cannot connect", "slow_wait": "responding slowly",
                 "bandwidth_bound": "slowed by a full line", "http_errors": "getting errors"}
 HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "degraded": "Degraded", "failed": "Down"}

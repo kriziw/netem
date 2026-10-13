@@ -5,6 +5,13 @@ import app as netem
 
 class ControllerExecutionTests(unittest.TestCase):
     def setUp(self):
+        from tempfile import TemporaryDirectory
+        from appliance_inventory import Store
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        isolated = patch.object(netem.app.extensions["appliance_platform"], "store", Store(directory.name))
+        isolated.start()
+        self.addCleanup(isolated.stop)
         netem.reset_scenario_state(None, None)
         netem.SCENARIO_STATE['active'] = True
         self.addCleanup(netem.reset_scenario_state, None, None)

@@ -25,7 +25,7 @@ class SnapshotTests(unittest.TestCase):
                                            (100, 300, "pass")):
             with self.subTest(success=success, latency=latency):
                 diagnosis = {"traffic_generator": {"connected": True, "status": {"dem": {
-                    "requests": 100, "experience_score": 82, "availability_pct": success,
+                    "requests": 100, "scoring_complete": True, "experience_score": 82, "availability_pct": success,
                     "interactive_p95_ms": latency}}}}
                 result = netem.showroom_outcome(diagnosis, {"targets": targets})
                 self.assertEqual(result["experience"]["verdicts"]["experience"], expected)

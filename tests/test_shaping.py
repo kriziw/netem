@@ -22,7 +22,8 @@ class ShaperSizingTests(unittest.TestCase):
         self.assertIn("netem limit 1000 delay 15.0ms loss 0.100%", commands[1])
         self.assertIn("tbf rate 300mbit buffer 375000 limit 1875000", commands[2])
         self.assertIn("parent 10:1 handle 20: fq_codel memory_limit 937500 target 5ms interval 100ms", commands[3])
-        self.assertEqual(len(commands), 4)
+        self.assertEqual(len(commands), 5)
+        self.assertIn("qdisc show dev eth1", commands[-1])
 
     def test_counters_read_the_fair_queue_behind_the_rate_limiter(self):
         # The fair queue holds the backlog and makes the drops, so its drops are the queue drops and its

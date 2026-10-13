@@ -379,6 +379,23 @@ def fit_to_simulator(load, catalog_payload):
         warnings.append("Update the simulator for industry applications: " + ", ".join(sorted(missing_apps)) + ".")
     if not personas:
         personas = {"knowledge_worker": load["users"]}
+    # Industry requirements must have an executable cohort, not just a multiplier
+    # on zero persona activity. Reassign one staff member, preserving device counts.
+    catalog_personas = (catalog_payload or {}).get("personas") or {}
+    required = {app for app, weight in load["application_weights"].items() if weight > 1 and app in apps_known}
+    for app in sorted(required):
+        if any((catalog_personas.get(name, {}).get("applications") or {}).get(app, 0) > 0 for name in personas):
+            continue
+        candidates = {name: (item.get("applications") or {}).get(app, 0) for name, item in catalog_personas.items()}
+        candidates = {name: weight for name, weight in candidates.items() if weight > 0}
+        donors = {name: count for name, count in personas.items() if name not in load.get("devices", {}) and count > 1}
+        if not candidates or not donors:
+            warnings.append(f"Required application {app} has no executable staff cohort.")
+            continue
+        recipient = max(candidates, key=candidates.get)
+        donor = max(donors, key=donors.get)
+        personas[donor] -= 1
+        personas[recipient] = personas.get(recipient, 0) + 1
     payload = {
         "operation": "start",
         "users": max(1, min(MAX_SIMULATED_USERS, sum(personas.values()))),
@@ -542,6 +559,15 @@ def build_site_plan(raw_selection, simulator_catalog=None):
         for app, weight in weighted.items():
             if weight:
                 application_mix[app] = application_mix.get(app, 0) + weight / total * share / persona_total * 100
+    if "workload-utility-v2" in (simulator_catalog or {}).get("engine_capabilities", []):
+        targets = criticality["targets"]
+        app_catalog = simulator_catalog.get("applications") or {}
+        required = {app for app, weight in load["application_weights"].items() if weight > 1}
+        start["experience_policy"] = {
+            app: dict({"criticality": "critical" if app in required else "important" if app_catalog.get(app, {}).get("class") == "interactive" else "standard",
+                       "success_min_pct": targets["success_min_pct"]},
+                      **({"deadline_ms": targets["interactive_p95_max_ms"]} if app_catalog.get(app, {}).get("class") == "interactive" else {}))
+            for app in application_mix}
     return {
         "selection": selection,
         "label": load["label"],

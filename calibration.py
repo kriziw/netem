@@ -26,6 +26,8 @@ def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, l
     else:
         achieved = achieved_mbps
     efficiency = achieved / expected if expected > 0 else 0.0
+    if host_status in (None, "unknown", "unavailable"):
+        reasons.append("NetEm host measurement unavailable")
     if host_status == "at_limit":
         reasons.append("NetEm host at its limit")
     if late_seconds:

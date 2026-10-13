@@ -18,7 +18,7 @@ def label(name):
 
 
 class GroupScoreTests(unittest.TestCase):
-    def test_each_group_takes_its_worst_application_and_names_what_limits_it(self):
+    def test_each_group_weights_applications_and_names_what_limits_it(self):
         dem = {"applications": {
             "voice": application(96, "realtime"),
             "dns": application(10, components={"deadline": 10.0, "reliability": 100.0, "response_time": 91.0},
@@ -28,7 +28,7 @@ class GroupScoreTests(unittest.TestCase):
         realtime, web, bulk = experience_groups(dem, label)
         self.assertEqual((realtime["key"], web["key"], bulk["key"]), ("realtime", "interactive", "bulk"))
         self.assertEqual((realtime["score"], realtime["tone"]), (96, "good"))
-        self.assertEqual((web["score"], web["tone"]), (10, "bad"))
+        self.assertEqual((web["score"], web["tone"]), (51, "bad"))
         self.assertTrue(web["text"].startswith("Limited by DNS (10/100): 67% of transactions met the 120 ms target."))
         self.assertIn("1 of 2 scored applications are performing well.", web["text"])
 
@@ -46,8 +46,8 @@ class GroupScoreTests(unittest.TestCase):
     def test_a_healthy_group_says_so_and_names_unscored_applications(self):
         dem = {"applications": {"web_saas": application(95), "collaboration": application(None, requests=4)}}
         web = experience_groups(dem, label)[1]
-        self.assertEqual(web["tone"], "good")
-        self.assertEqual(web["text"], "Performing well. 1 with too few transactions to score yet.")
+        self.assertEqual(web["tone"], "unknown")
+        self.assertEqual(web["text"], "Incomplete application evidence; this group cannot yet be judged.")
 
     def test_failures_are_named_in_plain_words(self):
         dem = {"applications": {"erp": application(40, components={"reliability": 40.0, "deadline": 100.0},
