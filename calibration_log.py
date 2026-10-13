@@ -31,11 +31,12 @@ def qdisc_deltas(before, after):
         if sent < 0 or dropped < 0 or overlimits < 0:
             deltas.append({"qdisc": name, "note": "counters reset during the window"})
             continue
+        sent_bytes = None if item.get("bytes") is None or prior.get("bytes") is None else item["bytes"] - prior["bytes"]
         offered = sent + dropped
         deltas.append({"qdisc": name, "root": bool(item.get("root")), "sent_packets": sent,
                        "dropped_packets": dropped, "overlimits": overlimits,
                        "drop_pct": round(100.0 * dropped / offered, 3) if offered else 0.0,
-                       "backlog_bytes_end": item.get("backlog_bytes")})
+                       "backlog_bytes_end": item.get("backlog_bytes"), "sent_bytes": sent_bytes})
     return deltas
 
 
@@ -51,6 +52,9 @@ def step_line(verdict):
             else:
                 parts.append(f"{direction} {delta['qdisc']} sent {delta['sent_packets']} "
                              f"dropped {delta['dropped_packets']} ({delta['drop_pct']}%)")
+    shaper = (verdict.get("diagnostics") or {}).get("shaper") or {}
+    if shaper.get("qdisc_mbps") is not None:
+        parts.append(f"shaper counters carried {_num(shaper['qdisc_mbps'])} Mbit/s")
     if verdict.get("reasons"):
         parts.append("reasons: " + "; ".join(verdict["reasons"]))
     if verdict.get("warnings"):
@@ -135,3 +139,20 @@ def text_report(result):
             stamp = time.strftime("%H:%M:%S", time.localtime(event.get("timestamp", 0)))
             lines.append(f"  {stamp} [{event.get('kind')}] {event.get('message')}")
     return "\n".join(lines) + "\n"
+
+
+def shaper_drops(delta_by_direction, seconds):
+    """Drops at the download shaper over the window, from the aggregate counters: the fair queue when present, else
+    the rate limiter. Each reports the drops of the queue below it, so one queue is counted, not both."""
+    deltas = [delta for delta in (delta_by_direction or {}).get("down") or [] if "note" not in delta]
+    queue = (next((delta for delta in deltas if delta["qdisc"].startswith("fq_codel")), None)
+             or next((delta for delta in deltas if delta["qdisc"].startswith("tbf")), None))
+    if queue is None:
+        return {"drop_pct": None, "drops_ps": None, "qdisc_mbps": None}
+    sent_bytes = queue.get("sent_bytes")
+    return {
+        "drop_pct": queue["drop_pct"],
+        "drops_ps": round(queue["dropped_packets"] / seconds, 2) if seconds > 0 else None,
+        "qdisc_mbps": None if sent_bytes is None or seconds <= 0 else round(sent_bytes * 8 / 1_000_000 / seconds, 1),
+    }
+

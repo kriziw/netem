@@ -32,7 +32,7 @@ class ShaperSizingTests(unittest.TestCase):
             " Sent 1000000 bytes 9000 pkt (dropped 120, overlimits 0 requeues 0)",
             " backlog 0b 0p requeues 0",
             "qdisc tbf 10: parent 1:1 rate 300Mbit burst 375000b lat 25ms",
-            " Sent 990000 bytes 8900 pkt (dropped 0, overlimits 5000 requeues 0)",
+            " Sent 990000 bytes 8900 pkt (dropped 35, overlimits 5000 requeues 0)",
             " backlog 40Kb 30p requeues 0",
             "qdisc fq_codel 20: parent 10:1 limit 10240p memory_limit 937500b target 5ms interval 100ms",
             " Sent 980000 bytes 8880 pkt (dropped 35, overlimits 0 requeues 0)",
