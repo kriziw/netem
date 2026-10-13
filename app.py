@@ -2515,12 +2515,13 @@ def qdisc_counters(ifname: str):
     tbf = next((item for item in qdiscs if item["kind"] == "tbf"), None)
     fq = next((item for item in qdiscs if item["kind"] == "fq_codel"), None)
     # The fair queue holds what the rate limiter paces, so the rate limiter's backlog is already counted in it.
+    # The root netem and the rate limiter report the drops of the queue below them, so only the fair queue is counted.
     backlog = sum(item["backlog_bytes"] or 0 for item in qdiscs if not (fq and item is tbf))
     return {
         "kind": root["kind"],
         "packets": root["packets"],
         "netem_drops": (netem or {}).get("drops") or 0,
-        "queue_drops": sum((item or {}).get("drops") or 0 for item in (fq, tbf)),
+        "queue_drops": (fq or tbf or {}).get("drops") or 0,
         "backlog_bytes": backlog,
         "shaped": tbf is not None,
     }
@@ -2990,7 +2991,7 @@ def qdisc_readings(devices):
         if rc != 0:
             readings[direction] = {"device": device, "raw": f"tc failed: {err or out}", "parsed": []}
             continue
-        parsed = [{key: item.get(key) for key in ("kind", "handle", "root", "packets", "drops", "overlimits",
+        parsed = [{key: item.get(key) for key in ("kind", "handle", "root", "bytes", "packets", "drops", "overlimits",
                                                   "backlog_bytes")}
                   for item in parse_qdisc_stats(out)]
         readings[direction] = {"device": device, "raw": out, "parsed": parsed}
@@ -3141,15 +3142,18 @@ def run_bandwidth_calibration(link_id):
             run_id = None
             measured = measure_wan(link_id, start, end)
             host = host_headroom(window_s=int(calibration.MEASURE_S), now=end)
-            verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), measured.get("drop_pct"),
+            qdisc_delta = {direction: calibration_log.qdisc_deltas(
+                                (qdisc_before.get(direction) or {}).get("parsed"),
+                                (qdisc_after.get(direction) or {}).get("parsed"))
+                           for direction in devices if devices.get(direction)}
+            shaper = calibration_log.shaper_drops(qdisc_delta, end - start)
+            verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
-                                             measured.get("drops_ps"))
+                                             shaper["drops_ps"])
             verdict["diagnostics"] = {
                 "window": {"start": start, "end": end},
-                "qdisc_delta": {direction: calibration_log.qdisc_deltas(
-                                    (qdisc_before.get(direction) or {}).get("parsed"),
-                                    (qdisc_after.get(direction) or {}).get("parsed"))
-                                for direction in devices if devices.get(direction)},
+                "shaper": shaper,
+                "qdisc_delta": qdisc_delta,
                 "tc_start": {direction: reading["raw"] for direction, reading in qdisc_before.items()},
                 "tc_end": {direction: reading["raw"] for direction, reading in qdisc_after.items()},
                 "simulator_before": sim_before,

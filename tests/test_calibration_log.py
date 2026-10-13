@@ -97,5 +97,29 @@ class SessionEventTests(unittest.TestCase):
         self.assertIn("NetEm events during the session:", text)
         self.assertIn("[calibration] 50 Mbit/s PASS", text)
 
+class ShaperDropTests(unittest.TestCase):
+    def test_the_fair_queue_counts_the_drops_once_and_gives_the_window_rate(self):
+        delta = {"down": [
+            {"qdisc": "netem 1:", "sent_packets": 950, "dropped_packets": 50, "drop_pct": 5.0, "sent_bytes": 1500000},
+            {"qdisc": "tbf 10:", "sent_packets": 950, "dropped_packets": 50, "drop_pct": 5.0, "sent_bytes": 1500000},
+            {"qdisc": "fq_codel 20:", "sent_packets": 950, "dropped_packets": 50, "drop_pct": 5.0, "sent_bytes": 1500000}]}
+        shaper = log.shaper_drops(delta, 10.0)
+        self.assertEqual((shaper["drop_pct"], shaper["drops_ps"], shaper["qdisc_mbps"]), (5.0, 5.0, 1.2))
+
+    def test_without_a_fair_queue_the_rate_limiter_is_used(self):
+        delta = {"down": [{"qdisc": "tbf 10:", "sent_packets": 90, "dropped_packets": 10, "drop_pct": 10.0,
+                           "sent_bytes": None}]}
+        shaper = log.shaper_drops(delta, 5.0)
+        self.assertEqual((shaper["drop_pct"], shaper["drops_ps"], shaper["qdisc_mbps"]), (10.0, 2.0, None))
+
+    def test_no_counters_give_no_figures(self):
+        self.assertEqual(log.shaper_drops({}, 30.0)["drop_pct"], None)
+
+    def test_the_qdisc_bytes_give_the_window_throughput(self):
+        before = [{"kind": "fq_codel", "handle": "20:", "root": False, "bytes": 1000, "packets": 10, "drops": 0,
+                   "overlimits": 0, "backlog_bytes": 0}]
+        after = [dict(before[0], bytes=3000001000, packets=20)]
+        self.assertEqual(log.qdisc_deltas(before, after)[0]["sent_bytes"], 3000000000)
+
 if __name__ == "__main__":
     unittest.main()

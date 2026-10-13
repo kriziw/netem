@@ -62,8 +62,7 @@ class CalibrationRunTests(unittest.TestCase):
         self.assertEqual(self.started, [50, 100, 200])
         self.assertEqual(len(self.stopped), 3)
         self.assertEqual(result["capacity_mbps"], 98.0)
-        self.assertEqual(result["limited_by"], "path or traffic generator: the WAN delivered less than offered; "
-                                                "the shaper also dropped 3.0% of packets")
+        self.assertEqual(result["limited_by"], "path or traffic generator: the WAN delivered less than offered")
 
     def test_each_step_keeps_its_diagnostics_and_logs_one_line(self):
         self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
@@ -93,6 +92,20 @@ class CalibrationRunTests(unittest.TestCase):
         saved = json.loads(netem.calibration_file("json")[0])
         self.assertEqual(saved["link_id"], "wan1")
         self.assertIsNone(netem.calibration_file("pdf"))
+
+    def test_the_drop_warning_comes_from_the_window_counters(self):
+        before = [{"kind": "fq_codel", "handle": "20:", "root": False, "bytes": 1000, "packets": 1000,
+                   "drops": 0, "overlimits": 0, "backlog_bytes": 0}]
+        after = [dict(before[0], bytes=2000, packets=1950, drops=50)]
+        self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.5, "drops_ps": 0.2}]
+        readings = [{"down": {"device": "eth1", "raw": "", "parsed": before}},
+                    {"down": {"device": "eth1", "raw": "", "parsed": after}}]
+        with patch.object(netem, "calibration_device", return_value={"down": "eth1", "up": None}):
+            with patch.object(netem, "qdisc_readings", side_effect=readings):
+                result = netem.run_bandwidth_calibration("wan1")
+        verdict = result["steps"][0]
+        self.assertEqual(verdict["warnings"], ["5.0% of packets dropped at the shaper"])
+        self.assertEqual(verdict["diagnostics"]["shaper"]["drop_pct"], 5.0)
 
     def test_a_busy_lab_is_not_loaded_and_the_refusal_is_saved(self):
         with patch.object(netem, "platform_test_busy", return_value="a scenario is running"):
