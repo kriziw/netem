@@ -4704,7 +4704,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                 text += f", ending at {measured_phases[-1]['experience_score']:.0f} in {measured_phases[-1]['name']}"
             conclusion.append(text + ".")
         else:
-            conclusion.append(f"Experience held at {base['experience_score']:.0f} or better through the test.")
+            conclusion.append(f"Experience stayed at {base['experience_score']:.0f} through the test.")
     else:
         conclusion.append("No simulated user traffic was measured, so user impact and steering were not assessed.")
     # Remediation lines are kept apart so a report can show them in their own section.

@@ -187,7 +187,8 @@ test('screen shows the site, the running test with phases, then the report betwe
 
 test('calm view helpers smooth rates and phrase carried traffic, routes and plan progress', () => {
   const points = [3, 5, null, 7, 9, 11, 13].map((value, index) => ({timestamp: index, down_mbps: value}));
-  assert.equal(ui.smoothedRate(points, 'down_mbps'), 9);
+  // The last ten readings, missing ones skipped: six values here, which average to 8.
+  assert.equal(ui.smoothedRate(points, 'down_mbps'), 8);
   assert.equal(ui.smoothedRate([], 'down_mbps'), null);
   assert.equal(ui.rateText(47.31), '47');
   assert.equal(ui.rateText(4.26), '4.3');
