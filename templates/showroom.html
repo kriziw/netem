@@ -25,10 +25,33 @@
   <main>
     <section class="stage" id="stage" aria-live="polite" hidden>
       <div class="waiting" id="waiting" hidden>
+        <div class="waiting-media" id="waiting-media" aria-hidden="true"></div>
+        <template id="waiting-default">
+          {% if branding.waiting_video %}
+          <video src="{{ branding_asset_url(branding.waiting_video) }}" autoplay muted loop playsinline></video>
+          {% else %}
+          <svg viewBox="0 0 640 220" focusable="false">
+            <g class="wait-links" fill="none" stroke-width="2">
+              <path d="M120 110 H200"/><path d="M300 110 L350 70"/><path d="M300 110 L350 150"/><path d="M450 70 L520 110"/><path d="M450 150 L520 110"/>
+            </g>
+            <g class="wait-nodes">
+              <rect x="20" y="88" width="100" height="44" rx="8"/><rect x="200" y="88" width="100" height="44" rx="8"/>
+              <rect x="350" y="48" width="100" height="44" rx="8"/><rect x="350" y="128" width="100" height="44" rx="8"/>
+              <rect x="520" y="88" width="100" height="44" rx="8"/>
+            </g>
+            <g font-size="13" text-anchor="middle">
+              <text x="70" y="115">Users</text><text x="250" y="115">Appliance</text>
+              <text x="400" y="75">WAN 1</text><text x="400" y="155">WAN 2</text><text x="570" y="115">Target</text>
+            </g>
+            <circle class="wait-packet" r="5"><animateMotion dur="3.2s" repeatCount="indefinite" path="M120 110 H200"/></circle>
+            <circle class="wait-packet" r="5"><animateMotion dur="3.2s" begin="0.8s" repeatCount="indefinite" path="M300 110 L350 70 L450 70 L520 110"/></circle>
+            <circle class="wait-packet" r="5"><animateMotion dur="3.2s" begin="1.6s" repeatCount="indefinite" path="M300 110 L350 150 L450 150 L520 110"/></circle>
+          </svg>
+          {% endif %}
+        </template>
         <span class="eyebrow">Live SD-WAN demonstration</span>
         <h2>Waiting for the session to start</h2>
-        <div class="waiting-site" id="waiting-site" hidden><span class="eyebrow">Client site</span><strong id="waiting-site-title"></strong><p id="waiting-site-meta"></p></div>
-        <p class="waiting-note">The live view starts as soon as the operator starts the session or a test.</p>
+        <p class="waiting-note">The client, the appliance and the tests appear here once the operator starts the session.</p>
       </div>
       <div class="intro" id="intro" hidden>
         <div class="intro-head">

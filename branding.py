@@ -190,6 +190,9 @@ def load_pack(directory):
     if not isinstance(heading, str) or not FONT_NAME.fullmatch(heading):
         raise ValueError("Invalid heading font family")
     brand["heading_font_family"] = heading
+    if data.get("waiting_video") is not None:
+        # An optional animation for the showcase's waiting screen. A brand supplies its own, in its private pack.
+        brand["waiting_video"] = _asset(root, data["waiting_video"], {".mp4", ".webm"})
     brand["fonts"] = []
     fonts = data.get("fonts", [])
     if not isinstance(fonts, list) or len(fonts) > 12:

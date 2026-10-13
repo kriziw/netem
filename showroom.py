@@ -2,11 +2,11 @@
 import re
 from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, send_from_directory
+from flask import send_file, Flask, abort, jsonify, render_template, send_from_directory
 import branding
 
 
-def create_showroom_app(snapshot, branding_source=None):
+def create_showroom_app(snapshot, branding_source=None, video_file=None):
     """`branding_source` is the operator's BrandStore (so brand switches show here too) or a pack directory."""
     root = Path(__file__).resolve().parent
     viewer = Flask("netem_showroom", static_folder=None,
@@ -24,7 +24,7 @@ def create_showroom_app(snapshot, branding_source=None):
         response.headers["Cache-Control"] = "no-store"
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "default-src 'self'; script-src 'self'; style-src 'self'; frame-src https://www.youtube-nocookie.com https://player.vimeo.com; "
             "img-src 'self' https:; font-src 'self' https:; connect-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'"
         )
         return response
@@ -49,6 +49,14 @@ def create_showroom_app(snapshot, branding_source=None):
     @viewer.get("/assets/showroom.js")
     def javascript():
         return send_from_directory(root / "static", "showroom.js")
+
+    @viewer.get("/assets/showcase-video")
+    def showcase_video():
+        # The operator's uploaded video; the waiting screen plays it, with range requests so it can seek.
+        path = video_file() if video_file else None
+        if path is None:
+            abort(404)
+        return send_file(path, conditional=True)
 
     @viewer.get("/assets/time-format.js")
     def time_format_script():

@@ -51,7 +51,8 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   // No session and no test: the waiting screen covers the dashboard, which still renders underneath.
   assert.equal(win.document.body.dataset.mode, 'waiting');
   assert.equal(win.document.getElementById('waiting').hidden, false);
-  assert.equal(win.document.getElementById('waiting-site').hidden, true);
+  // Nothing about the client is shown while waiting: the screen has no client details to hide or show.
+  assert.equal(win.document.getElementById('waiting-site'), null);
   assert.equal(win.document.querySelectorAll('.path').length, 2);
   assert.equal(win.document.querySelector('.path h3').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(win.document.querySelectorAll('.path img').length, 0);
@@ -319,4 +320,18 @@ test('the report and the showroom clock follow the chosen time format', () => {
   context.window.NetEmTime.setFormat('12h');
   assert.match(ui.reportView(summary).meta, /finished 2:05 PM$/);
   context.window.NetEmTime.setFormat('24h');
+});
+
+test('the showcase video loops whether it is an embed or an uploaded file', () => {
+  const youtube = ui.waitingMedia({kind: 'embed', src: 'https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ'});
+  assert.equal(youtube.tag, 'iframe');
+  assert.match(youtube.src, /loop=1/);
+  assert.match(youtube.src, /playlist=dQw4w9WgXcQ/);
+  const vimeo = ui.waitingMedia({kind: 'embed', src: 'https://player.vimeo.com/video/76979871'});
+  assert.match(vimeo.src, /loop=1/);
+  assert.match(vimeo.src, /muted=1/);
+  assert.equal(ui.waitingMedia({kind: 'file', src: '/assets/showcase-video'}).tag, 'video');
+  assert.equal(ui.waitingMedia({kind: 'file', src: '/assets/showcase-video', media: 'image'}).tag, 'img');
+  assert.equal(ui.waitingMedia({kind: 'embed', src: 'https://evil.example/embed/abc'}), null);
+  assert.equal(ui.waitingMedia(null), null);
 });

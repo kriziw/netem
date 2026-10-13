@@ -21,6 +21,7 @@ import sys
 import subprocess
 import threading
 import time
+import urllib.parse
 import uuid
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -98,7 +99,7 @@ def protect_integration_forms():
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
         "branding_activate", "branding_save", "branding_delete", "branding_import", "appliance_save",
-        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save",
+        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save", "showcase_video_save",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -130,7 +131,14 @@ ACTIVE_SESSION = {
     "name": None,
     "started_at": None,
     "site": None,
+    # Captured when the session starts and fixed until it ends.
+    "deadline": None,
+    "appliance": None,
+    "wan": None,
+    "tests": {},
 }
+# A session ends by itself this long after it starts, unless the operator completes it sooner.
+SESSION_MAX_S = 6 * 3600
 CONFIG_LOCK = threading.RLock()
 SCENARIO_STOP = threading.Event()
 # Set while an operator holds the running test in its current phase.
@@ -2211,6 +2219,118 @@ def session_rows():
     return rows
 
 
+
+def session_appliance_snapshot():
+    """The SD-WAN appliance under test, as a session keeps it: captured once, at start."""
+    try:
+        appliance = appliance_under_test() or {}
+    except Exception:
+        appliance = {}
+    return {key: appliance.get(key) for key in ("vendor", "vendor_name", "product", "model", "name", "source")
+            if appliance.get(key) is not None}
+
+
+def session_wan_roles(cfg, primary=None, backup=None):
+    """The WANs a session's primary and backup site-test roles use. Two configured WANs are chosen by default. A lab
+    with fewer, and no explicit choice, has no roles: the session still starts, and its site tests say why they cannot."""
+    ids = [link.get("id") for link in cfg.get("wan_links", [])]
+    if len(ids) < 2:
+        return None
+    primary = primary or (ids[0] if ids else "")
+    backup = backup or (ids[1] if len(ids) > 1 else "")
+    if not get_link(cfg, primary):
+        raise ValueError("Choose the primary WAN for this session's site tests.")
+    if not get_link(cfg, backup):
+        raise ValueError("Choose the backup WAN for this session's site tests.")
+    if primary == backup:
+        raise ValueError("Primary and backup must be different WANs.")
+    labels = {link.get("id"): link.get("name") or link.get("id") for link in cfg.get("wan_links", [])}
+    return {"primary": {"link_id": primary, "label": labels[primary]},
+            "backup": {"link_id": backup, "label": labels[backup]}}
+
+
+def end_session(reason):
+    """End the lab session. Running site tests stop and restore their WAN, the session report is built and the
+    record is closed. reason is "completed" when the operator stops it, "timed_out" once six hours have passed."""
+    with RUNTIME_LOCK:
+        if not ACTIVE_SESSION["active"]:
+            return None
+        session_id = ACTIVE_SESSION["id"]
+        session_name = ACTIVE_SESSION["name"]
+        plan_running = bool(SITE_PLAN_STATE.get("active"))
+        scenario_running = bool(SCENARIO_STATE.get("active"))
+    if plan_running:
+        SITE_PLAN_STOP.set()
+    if plan_running or scenario_running:
+        SCENARIO_STOP.set()
+    log_event("session", f"Lab session {'reached its six-hour limit' if reason == 'timed_out' else 'completed'}: {session_name}",
+              session_id=session_id, reason=reason)
+    ended_at = time.time()
+    with RUNTIME_LOCK:
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["ended_at"] = ended_at
+                item["status"] = reason
+                break
+
+    report = build_session_report(session_id, end_time=ended_at)
+
+    with RUNTIME_LOCK:
+        for item in reversed(LAB_SESSIONS):
+            if item.get("id") == session_id:
+                item["report"] = report
+                break
+        ACTIVE_SESSION.update({"active": False, "id": None, "name": None, "started_at": None, "deadline": None,
+                               "site": None, "appliance": None, "wan": None, "tests": {}})
+        save_session_history()
+    return {"name": session_name, "report": report, "reason": reason}
+
+
+def expire_session_if_due(now=None):
+    """End the session once its six-hour limit has passed, whoever is watching. Returns True when it ended."""
+    with RUNTIME_LOCK:
+        deadline = ACTIVE_SESSION.get("deadline") if ACTIVE_SESSION.get("active") else None
+    if deadline is None or (now if now is not None else time.time()) < deadline:
+        return False
+    return end_session("timed_out") is not None
+
+
+def set_session_test(test, status, summary=None):
+    """Record a site test's latest state in the running session, for the Command Centre and the session summary."""
+    with RUNTIME_LOCK:
+        if not ACTIVE_SESSION.get("active"):
+            return
+        tests = ACTIVE_SESSION.setdefault("tests", {})
+        record = tests.get(test["id"]) or {}
+        record.update(name=test["name"], role=test["role"], status=status,
+                      finished_at=None if status == "running" else time.time())
+        if summary is not None:
+            record["summary"] = summary
+        tests[test["id"]] = record
+        for item in LAB_SESSIONS:
+            if item.get("id") == ACTIVE_SESSION.get("id"):
+                item["tests"] = {key: {field: value.get(field) for field in ("name", "status", "finished_at")}
+                                 for key, value in tests.items()}
+                break
+    if status != "running":
+        save_session_history()
+
+
+def session_site_tests():
+    """The active session's site tests, each with the state it has in this session, for the Command Centre."""
+    session = session_snapshot()
+    if not session.get("active") or not session.get("site"):
+        return []
+    plan = active_site_plan({"site_profile": {key: session["site"][key] for key in SITE_FIELDS}})
+    if not plan:
+        return []
+    recorded = session.get("tests") or {}
+    return [{"id": test["id"], "name": test["name"], "role": test["role"],
+             "description": test.get("description") or "",
+             "status": (recorded.get(test["id"]) or {}).get("status") or "pending"}
+            for test in plan["tests"]]
+
+
 load_session_history()
 
 
@@ -3319,6 +3439,7 @@ def diagnosis_worker():
     # Keeps findings (and their Detected/Cleared events) current without an open browser.
     while not BACKGROUND_STOP.is_set():
         try:
+            expire_session_if_due()
             record_test_sample(current_diagnosis(max_age=0))
         except Exception as exc:
             with DIAGNOSIS_LOCK:
@@ -5303,6 +5424,126 @@ def clock_label(timestamp, fmt):
     return time.strftime("%H:%M", moment)
 
 
+# ---------- Showcase video ----------
+#
+# An operator's video for the showcase's waiting screen: a YouTube or Vimeo link, embedded, or an uploaded MP4 or
+# WebM file kept in runtime/ and served by the showcase. The showcase embeds only those two hosts.
+
+SHOWCASE_VIDEO_DIR = RUNTIME_DIR / "showcase"
+SHOWCASE_VIDEO_TYPES = {".mp4", ".webm"}
+SHOWCASE_IMAGE_TYPES = {".gif"}  # an animated GIF loops by itself, with no player
+SHOWCASE_MEDIA_TYPES = SHOWCASE_VIDEO_TYPES | SHOWCASE_IMAGE_TYPES
+SHOWCASE_VIDEO_MAX_BYTES = 16 * 1024 * 1024
+SHOWCASE_EMBED = re.compile(
+    r"https://(www\.youtube-nocookie\.com/embed/[A-Za-z0-9_-]{6,20}|player\.vimeo\.com/video/[0-9]{6,})")
+
+
+def parse_video_link(raw):
+    """A YouTube or Vimeo link as its embeddable address. Any other host is refused."""
+    text = (raw or "").strip()
+    if not text or len(text) > 300:
+        raise ValueError("Enter a YouTube or Vimeo link.")
+    parsed = urllib.parse.urlsplit(text if "://" in text else "https://" + text)
+    host = (parsed.hostname or "").lower()
+    if host.startswith("www."):
+        host = host[4:]
+    parts = [part for part in parsed.path.split("/") if part]
+    video_id = None
+    if host in ("youtube.com", "m.youtube.com", "youtube-nocookie.com"):
+        query = urllib.parse.parse_qs(parsed.query)
+        if parts[:1] == ["watch"] and query.get("v"):
+            video_id = query["v"][0]
+        elif len(parts) >= 2 and parts[0] in ("embed", "shorts", "live"):
+            video_id = parts[1]
+    elif host == "youtu.be" and parts:
+        video_id = parts[0]
+    if host in ("youtube.com", "m.youtube.com", "youtube-nocookie.com", "youtu.be"):
+        if video_id and re.fullmatch(r"[A-Za-z0-9_-]{6,20}", video_id):
+            return {"provider": "youtube", "id": video_id, "src": f"https://www.youtube-nocookie.com/embed/{video_id}"}
+    elif host in ("vimeo.com", "player.vimeo.com"):
+        numbers = [part for part in parts if part.isdigit()]
+        if numbers and len(numbers[-1]) >= 6:
+            return {"provider": "vimeo", "id": numbers[-1], "src": f"https://player.vimeo.com/video/{numbers[-1]}"}
+    raise ValueError("Use a YouTube or Vimeo link, or upload an MP4 or WebM file.")
+
+
+def check_video_upload(filename, data):
+    """The suffix of an uploaded animation, once its name, size and contents show an MP4, WebM or animated GIF."""
+    suffix = Path(filename or "").suffix.lower()
+    if suffix not in SHOWCASE_MEDIA_TYPES:
+        raise ValueError("Upload an MP4 or WebM video or an animated GIF, or paste a YouTube or Vimeo link.")
+    if len(data) > SHOWCASE_VIDEO_MAX_BYTES:
+        raise ValueError("The file is larger than 16 MB. Use a YouTube or Vimeo link for longer videos.")
+    is_mp4 = suffix == ".mp4" and data[4:8] == b"ftyp"
+    is_webm = suffix == ".webm" and data[:4] == b"\x1aE\xdf\xa3"
+    is_gif = suffix == ".gif" and data[:6] in (b"GIF87a", b"GIF89a")
+    if not (is_mp4 or is_webm or is_gif):
+        raise ValueError("The file is not an MP4, WebM or animated GIF.")
+    return suffix
+
+
+def remove_showcase_video_files():
+    for suffix in SHOWCASE_MEDIA_TYPES:
+        (SHOWCASE_VIDEO_DIR / f"video{suffix}").unlink(missing_ok=True)
+
+
+def showcase_video_file():
+    """The uploaded showcase video's path, when one is stored."""
+    video = load_config().get("showcase_video")
+    if not isinstance(video, dict) or video.get("kind") != "file":
+        return None
+    path = SHOWCASE_VIDEO_DIR / str(video.get("name") or "")
+    return path if path.suffix in SHOWCASE_MEDIA_TYPES and path.is_file() else None
+
+
+def showcase_video_public(cfg=None):
+    """The showcase video as the showcase may publish it: an embed address, or the route that serves the file."""
+    video = (cfg if cfg is not None else load_config()).get("showcase_video")
+    if not isinstance(video, dict):
+        return None
+    if video.get("kind") == "embed" and SHOWCASE_EMBED.fullmatch(str(video.get("src") or "")):
+        return {"kind": "embed", "provider": video.get("provider"), "src": video["src"]}
+    path = showcase_video_file() if video.get("kind") == "file" else None
+    if path:
+        return {"kind": "file", "src": "/assets/showcase-video", "media": "image" if path.suffix in SHOWCASE_IMAGE_TYPES else "video"}
+    return None
+
+
+@app.route("/settings/showcase-video", methods=["POST"])
+def showcase_video_save():
+    cfg = load_config()
+    back = url_for("settings", section="appearance")
+    if request.form.get("remove") == "1":
+        remove_showcase_video_files()
+        cfg.pop("showcase_video", None)
+        save_config(cfg)
+        log_event("settings", "Showcase video removed")
+        flash("The showcase video is removed. The waiting screen shows its animation again.", "success")
+        return redirect(back)
+    upload = request.files.get("video_file")
+    try:
+        if upload and upload.filename:
+            data = upload.read()
+            suffix = check_video_upload(upload.filename, data)
+            remove_showcase_video_files()
+            SHOWCASE_VIDEO_DIR.mkdir(parents=True, exist_ok=True)
+            (SHOWCASE_VIDEO_DIR / f"video{suffix}").write_bytes(data)
+            cfg["showcase_video"] = {"kind": "file", "name": f"video{suffix}", "title": Path(upload.filename).name[:120]}
+            message = "Showcase animation or video uploaded."
+        else:
+            link = parse_video_link(request.form.get("video_link"))
+            remove_showcase_video_files()
+            cfg["showcase_video"] = {"kind": "embed", **link}
+            message = "Showcase video linked."
+    except (ValueError, OSError) as exc:
+        flash(str(exc), "error")
+        return redirect(back)
+    save_config(cfg)
+    log_event("settings", message)
+    flash(message, "success")
+    return redirect(back)
+
+
 @app.route("/settings/time-format", methods=["POST"])
 def time_format_save():
     value = request.form.get("time_format", "")
@@ -5565,6 +5806,8 @@ def overview():
         appliance=appliance_under_test(),
         site_plan=active_site_plan(cfg),
         site_state=site_plan_snapshot(),
+        session_tests=session_site_tests(),
+        session_wan=(session_snapshot().get("wan") or {}),
     )
 
 
@@ -5655,6 +5898,7 @@ def sessions():
         sessions=session_rows(),
         site_options=site_catalog.catalog(),
         site_selection=site_profile if isinstance(site_profile, dict) else None,
+        wan_links=load_config().get("wan_links", []),
     )
 
 
@@ -5671,10 +5915,15 @@ def session_start():
             selection = site_catalog.validate_selection(cfg["site_profile"])
         else:
             raise ValueError("Choose the industry, sub-industry, site function, size and criticality this session validates.")
+        wan = session_wan_roles(cfg, request.form.get("primary_link"), request.form.get("backup_link"))
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect_after("sessions")
     site = dict(selection, label=site_catalog.site_label(selection))
+    # Captured once, here: the session keeps the appliance it started with, whatever is selected later.
+    appliance = session_appliance_snapshot()
+    now = time.time()
+    deadline = now + SESSION_MAX_S
     with RUNTIME_LOCK:
         if ACTIVE_SESSION["active"]:
             flash("A lab session is already active.", "error")
@@ -5686,18 +5935,26 @@ def session_start():
                 "active": True,
                 "id": session_id,
                 "name": name or "Lab session",
-                "started_at": time.time(),
+                "started_at": now,
                 "site": site,
+                "deadline": deadline,
+                "appliance": appliance,
+                "wan": wan,
+                "tests": {},
             }
         )
         LAB_SESSIONS.append(
             {
                 "id": session_id,
                 "name": ACTIVE_SESSION["name"],
-                "started_at": ACTIVE_SESSION["started_at"],
+                "started_at": now,
+                "deadline": deadline,
                 "ended_at": None,
                 "status": "active",
                 "site": site,
+                "appliance": appliance,
+                "wan": wan,
+                "tests": {},
             }
         )
         del LAB_SESSIONS[:-100]
@@ -5708,59 +5965,25 @@ def session_start():
         cfg["site_profile"] = selection
         save_config(cfg)
         log_event("site", f"Active site: {site['label']}", selection=selection, sla_applied=False)
-    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]} · {site["label"]}', site=site)
+    log_event("session", f'Lab session started: {ACTIVE_SESSION["name"]} · {site["label"]}', site=site,
+              appliance=appliance, wan=wan, ends_by=deadline)
     flash(f'Lab session "{ACTIVE_SESSION["name"]}" started.', "success")
     return redirect_after("sessions")
 
 
 @app.route("/sessions/stop", methods=["POST"])
 def session_stop():
-    with RUNTIME_LOCK:
-        if not ACTIVE_SESSION["active"]:
-            flash("No lab session is active.", "info")
-            return redirect_after("sessions")
-        session_id = ACTIVE_SESSION["id"]
-        session_name = ACTIVE_SESSION["name"]
-
-    log_event("session", f"Lab session completed: {session_name}")
-
-    ended_at = time.time()
-    with RUNTIME_LOCK:
-        for item in reversed(LAB_SESSIONS):
-            if item.get("id") == session_id:
-                item["ended_at"] = ended_at
-                item["status"] = "completed"
-                break
-
-    report = build_session_report(session_id, end_time=ended_at)
-
-    with RUNTIME_LOCK:
-        for item in reversed(LAB_SESSIONS):
-            if item.get("id") == session_id:
-                item["report"] = report
-                break
-        ACTIVE_SESSION.update(
-            {
-                "active": False,
-                "id": None,
-                "name": None,
-                "started_at": None,
-                "site": None,
-            }
-        )
-        save_session_history()
-
+    ended = end_session("completed")
+    if not ended:
+        flash("No lab session is active.", "info")
+        return redirect_after("sessions")
+    report = ended["report"]
     flash(
-        f'Lab session "{session_name}" completed'
-        + (
-            f' · result {report["result"].upper()}.'
-            if report
-            else "."
-        ),
+        f'Lab session "{ended["name"]}" completed'
+        + (f' · result {report["result"].upper()}.' if report else "."),
         "success",
     )
     return redirect_after("sessions")
-
 
 @app.route("/sessions/<session_id>/report")
 def session_report(session_id):
@@ -6188,6 +6411,7 @@ def settings():
         active_brand=BRAND_STORE.active_id(),
         appliance=appliance_under_test(),
         appliance_setting=cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {},
+        showcase_video=cfg.get("showcase_video"),
         vendors=SDWAN_VENDORS,
     )
 
@@ -6654,12 +6878,22 @@ def summarize_plan(label, targets, tests, summaries, result, started_at, ended_a
 
 
 def finish_plan_summary(plan, summaries, result):
-    """Keep the finished plan's summary, on disk too, for the showroom, the Tests page and the event log."""
+    """Keep the summary of the site tests: the whole session's while one runs, otherwise this run's."""
     global SITE_PLAN_SUMMARY
     with RUNTIME_LOCK:
         state = copy.deepcopy(SITE_PLAN_STATE)
-    summary = summarize_plan(plan.get("label"), plan.get("targets") or {}, state.get("tests") or [], summaries, result,
-                             state.get("started_at"), state.get("finished_at") or time.time())
+        session = copy.deepcopy(ACTIVE_SESSION) if ACTIVE_SESSION.get("active") else None
+    if session:
+        recorded = session.get("tests") or {}
+        tests = [{"id": test["id"], "name": test["name"], "role": test["role"],
+                  "status": (recorded.get(test["id"]) or {}).get("status", "pending")}
+                 for test in plan.get("tests") or []]
+        summaries = {test_id: record.get("summary") for test_id, record in recorded.items()}
+        started = session.get("started_at")
+    else:
+        tests, started = state.get("tests") or [], state.get("started_at")
+    summary = summarize_plan(plan.get("label"), plan.get("targets") or {}, tests, summaries, result,
+                             started, state.get("finished_at") or time.time())
     SITE_PLAN_SUMMARY = summary
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -6695,6 +6929,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                 "step_count": len(scenario["steps"]),
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
             })
+        set_session_test(test, "running")
         before = LAST_TEST_SUMMARY
         try:
             run_scenario(link_id, scenario, TEST_INTRO_S)
@@ -6713,6 +6948,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                     item.update(status=result, error=finished.get("error"))
         log_event("site-test", f"{test['name']} — {result.upper()}", test_id=test["id"], link_id=link_id,
                   result=result, error=finished.get("error"), site=plan["label"])
+        set_session_test(test, result, summaries.get(test["id"]))
         results.append(result)
         if result == "stopped":
             break
@@ -6742,6 +6978,9 @@ def api_site_plan():
 
 @app.route("/site/save", methods=["POST"])
 def site_save():
+    if session_snapshot().get("active"):
+        flash("A lab session is running with its site fixed. Complete the session to change the site.", "error")
+        return redirect_after("tests")
     if site_plan_snapshot().get("active") or scenario_snapshot().get("active"):
         flash("Stop the site plan before changing its profile.", "error")
         return redirect_after("tests")
@@ -6801,8 +7040,15 @@ def site_apply_wan():
 
 @app.route("/site/run", methods=["POST"])
 def site_run():
+    session = session_snapshot()
+    if not session.get("active") or not session.get("site"):
+        flash("Start a lab session before running site tests. The session fixes the client, the appliance and the WAN roles.", "error")
+        return redirect_after("tests")
+    if not session.get("wan"):
+        flash("This session has no primary and backup WAN, so its site tests cannot run. Start the session with two WANs.", "error")
+        return redirect_after("tests")
     cfg = load_config()
-    plan = active_site_plan(cfg, simulator_catalog(max_age=0))
+    plan = active_site_plan({"site_profile": {key: session["site"][key] for key in SITE_FIELDS}}, simulator_catalog(max_age=0))
     if not plan:
         flash("Save a site first.", "error")
         return redirect_after("tests")
@@ -6829,7 +7075,8 @@ def site_run():
         plan["tests"] = [dict(test, steps=scale_scenario_steps(test["steps"], length_s)) for test in plan["tests"]]
     test_id = request.form.get("test_id") or "all"
     tests = [test for test in plan["tests"] if test_id in ("all", test["id"])]
-    links = {role: request.form.get(f"{role}_link") or "" for role in ("primary", "backup")}
+    links = {role: request.form.get(f"{role}_link") or (session.get("wan") or {}).get(role, {}).get("link_id", "")
+             for role in ("primary", "backup")}
     if not tests or any(not get_link(cfg, links[role]) for role in ("primary", "backup")):
         flash("Choose the site test and existing WANs for its primary/backup roles.", "error")
         return redirect_after("tests")
@@ -7898,6 +8145,35 @@ def clear():
 
 
 def showroom_snapshot():
+    """What the showcase may show. Before a session starts it shows nothing about the client, the appliance or the lab."""
+    expire_session_if_due()
+    if not session_snapshot().get("active"):
+        return showroom_idle_snapshot()
+    return showroom_session_snapshot()
+
+
+def showroom_idle_snapshot():
+    """The showcase between sessions: the waiting screen, with no measurements, names or configuration."""
+    outcome = showroom_outcome({}, None)
+    return {
+        "timestamp": time.time(), "links": [], "story": showroom_story({}, [], outcome), "time_format": time_format(),
+        "showcase_video": showcase_video_public(),
+        "appliance": {}, "scenario": {"active": False}, "last_test": None,
+        "session": {"active": False, "name": None, "site": None, "wan": None},
+        "site": None, "plan": {"active": False, "label": None, "result": None, "tests": []},
+        "plan_summary": None,
+        **outcome,
+    }
+
+
+def summary_belongs_to_session(summary, session):
+    """Whether a finished test or plan summary happened within the running session."""
+    ended = (summary or {}).get("ended_at")
+    started = session.get("started_at")
+    return bool(summary and isinstance(ended, (int, float)) and isinstance(started, (int, float)) and ended >= started)
+
+
+def showroom_session_snapshot():
     """Publish only presentation data, never configuration, addresses or secrets."""
     now = time.time()
     cfg = load_config()
@@ -7955,7 +8231,8 @@ def showroom_snapshot():
     story = showroom_story(diagnosis, links, outcome)
     return {
         "timestamp": now, "links": links, "story": story, "time_format": time_format(cfg),
-        "appliance": {key: value for key, value in appliance_under_test().items() if key in ("vendor", "vendor_name", "product", "model")},
+        "showcase_video": showcase_video_public(cfg),
+        "appliance": {key: value for key, value in (lab_session.get("appliance") or {}).items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
             "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s", "preparing_workload")},
@@ -7966,12 +8243,13 @@ def showroom_snapshot():
             description=showroom_text(scenario.get("description")) or None,
             checks=[showroom_text(check, 120) for check in (scenario.get("checks") or [])[:6]]),
         # Once a test ends, its summary stays on screen until the next one starts.
-        "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") else None,
+        "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") and summary_belongs_to_session(LAST_TEST_SUMMARY, lab_session) else None,
         # After a run sequence, the whole plan's results and insights.
         "plan_summary": (showroom_plan_summary(SITE_PLAN_SUMMARY, now, lab_session)
                          if not scenario.get("active") and not plan.get("active") else None),
         "session": {"active": bool(lab_session.get("active")), "name": lab_session.get("name"),
-                    "site": (session_site or {}).get("label")},
+                    "site": (session_site or {}).get("label"),
+                    "wan": {role: item.get("label") for role, item in (lab_session.get("wan") or {}).items()} or None},
         "site": showroom_site(site_plan),
         "plan": {"active": plan.get("active"), "label": plan.get("label"), "result": plan.get("result"),
                  "tests": [{"name": test.get("name"), "role": test.get("role"), "status": test.get("status")}
@@ -8005,7 +8283,7 @@ def showroom_plan_summary(summary, now, session):
     ended = (summary or {}).get("ended_at")
     if not isinstance(ended, (int, float)) or not 0 <= now - ended < SHOWROOM_PLAN_SUMMARY_S:
         return None
-    if session.get("active") and (session.get("started_at") or 0) > ended:
+    if not session.get("active") or (session.get("started_at") or 0) > ended:
         return None
     return {
         "label": showroom_text(summary.get("label")), "result": summary.get("result"),
@@ -8306,7 +8584,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
 
 
 APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
-showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE)
+showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE, showcase_video_file)
 
 
 def showroom_listener():

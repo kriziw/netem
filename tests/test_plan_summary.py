@@ -150,7 +150,8 @@ class ShowroomTests(unittest.TestCase):
         self.assertIsNone(netem.showroom_plan_summary(self.summary, 2295 + netem.SHOWROOM_PLAN_SUMMARY_S, {"active": False}))
         self.assertIsNone(netem.showroom_plan_summary(self.summary, 2400, {"active": True, "started_at": 2350}))
         self.assertIsNone(netem.showroom_plan_summary(None, 2400, {"active": False}))
-        self.assertIsNotNone(netem.showroom_plan_summary(self.summary, 2400, {"active": False}))
+        self.assertIsNone(netem.showroom_plan_summary(self.summary, 2400, {"active": False}))
+        self.assertIsNotNone(netem.showroom_plan_summary(self.summary, 2400, {"active": True, "started_at": 1000}))
 
 
 if __name__ == "__main__":

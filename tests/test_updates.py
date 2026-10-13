@@ -131,6 +131,7 @@ class TelemetryReadTests(unittest.TestCase):
              patch.object(netem, "build_link_states", return_value=[state]), \
              patch.object(netem, "latest_telemetry_sample", return_value=sample), \
              patch.object(netem, "current_diagnosis", return_value={}), \
+             patch.object(netem, "session_snapshot", return_value={"active": True, "started_at": 0}), \
              patch.object(netem.time, "time", side_effect=lambda: next(clock, 102.0)):
             link = netem.showroom_snapshot()["links"][0]
         self.assertTrue(link["traffic_available"])
