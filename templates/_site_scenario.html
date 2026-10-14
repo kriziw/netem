@@ -30,6 +30,7 @@
         <div><label for="site-users">Simulated users</label><input id="site-users" name="users" type="number" min="1" max="5000" required></div>
       </div>
       <p class="field-help">WAN lines apply to the selected roles. Each test restores the WAN to its saved configuration. User count can be adjusted before running.</p>
+      {% include "_live_window_field.html" %}
       <div class="actions">
         <button class="btn" type="submit" formaction="{{ url_for('site_apply_wan') }}" data-site-action disabled>Apply WAN lines</button>
         <button class="btn btn-primary" type="submit" name="test_id" value="all" data-site-run disabled>Run all</button>

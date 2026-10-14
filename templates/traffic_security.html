@@ -55,7 +55,7 @@
           {% for link in links %}<option value="{{ link.id }}">{{ link.label }} · {{ link.preset_name }}</option>{% endfor %}
         </select>
         <button class="btn btn-warning" type="submit" {% if global_runtime.scenario.active %}disabled{% endif %}>Run availability stress</button>
-      </form>
+      {% include "_live_window_field.html" %}</form>
     </div>
   </section>
 </div>

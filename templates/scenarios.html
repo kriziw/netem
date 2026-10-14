@@ -68,7 +68,7 @@
           </select>
           <button class="btn btn-primary" type="submit" {% if scenario_state.active %}disabled{% endif %}>Run</button>
         </div>
-      </form>
+      {% include "_live_window_field.html" %}</form>
 
       {% if scenario.id.startswith('custom_') %}
       <form method="post" action="{{ url_for('lab_scenario_delete') }}" style="margin-top:8px" onsubmit="return confirm('Delete this custom scenario?');">

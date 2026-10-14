@@ -170,7 +170,7 @@
       </div>
       <div class="field-help" style="margin-bottom:10px">Patterns other than Steady set their own activity at each stage.{% for key,item in (catalog.media_modes or {}).items() %} <strong>{{ item.label }}:</strong> {{ item.description }}{% endfor %}</div>
       <button class="btn btn-primary" type="submit">Start corporate simulation</button>
-    </form>
+    {% include "_live_window_field.html" %}</form>
     {% endif %}
 
     <div class="field-help" style="margin-top:12px">Endpoint experience is calculated by the Traffic Simulator from the transactions seen by individual synthetic users. NetEm receives the result through the authenticated DEM API; it is not inferred from WAN utilization.</div>
@@ -240,7 +240,7 @@
       <form method="post" action="{{ url_for('lab_scenario_start') }}" style="margin-top:12px;display:flex;gap:8px">
         <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
         {% include "_appliance_override.html" %}
-        <input type="hidden" name="scenario_id" value="{{ scenario.id }}">
+        <input type="hidden" name="scenario_id" value="{{ scenario.id }}">{% include "_live_window_field.html" %}
         <input type="hidden" name="return_to" value="tests">
         <select name="link_id" required>{% for link in links %}<option value="{{ link.id }}">{{ link.label }}</option>{% endfor %}</select>
         <label class="length-field" title="Phases stretch or shrink proportionally">Minutes<input type="number" name="length_min" min="1" max="60" step="0.5" value="{{ '%.1f'|format(scenario.planned_s / 60) }}"></label>
@@ -272,7 +272,7 @@
   {"after": 0, "action": "wait", "condition": {"type": "sla", "state": "pass"}, "timeout": 10, "label": "Wait for expected SLA recovery", "phase": "Recovery"},
   {"after": 60, "action": "phase", "label": "Recovered", "phase": "Recovery"}
 ]</textarea>
-      <div class="field-help">Actions: quality, fault, mtu, traffic_generator, wait, assert, phase · conditions: expected SLA, active probe, measured traffic, DEM or steering · max 30 stages · timeout up to 600 seconds. Name a <code>phase</code> on each stage to show phases on the running test, the showroom and the test summary; a <code>phase</code> action only marks time. Aim for 3–5 minutes, so SD-WAN health checks and the 60 s experience window can react.</div>
+      <div class="field-help">Actions: quality, fault, mtu, traffic_generator, wait, assert, phase · conditions: expected SLA, active probe, measured traffic, DEM or steering · max 30 stages · timeout up to 600 seconds. Name a <code>phase</code> on each stage to show phases on the running test, the showroom and the test summary; a <code>phase</code> action only marks time. Aim for 3–5 minutes, so SD-WAN health checks and the configured live experience window can react.</div>
       <div class="docs-note"><strong>Conditional examples:</strong> <code>{"type":"probe","probe_id":"probe-wan1-internet","field":"success","op":"==","value":false}</code> waits/asserts on reachability. Traffic conditions support <code>down_mbps</code>, <code>up_mbps</code>, <code>down_pps</code> and <code>up_pps</code>. DEM conditions (<code>{"type":"dem","field":"experience_score","op":"&gt;=","value":80,"window":60}</code>) support <code>experience_score</code>, <code>availability_pct</code>, <code>p50_ms</code>, <code>p95_ms</code>, <code>interactive_p95_ms</code>, <code>realtime_availability_pct</code>, <code>interactive_availability_pct</code>, <code>requests_per_second</code>, <code>failures_per_second</code> and <code>active_users</code>. Steering conditions (class <code>realtime</code>, <code>interactive</code> or <code>bulk</code>) pass once that traffic is off impaired WANs. Failed assertions are included in the active Lab Session report.</div>
       <button class="btn btn-primary" type="submit" style="margin-top:10px">Save custom test</button>
     </form>
