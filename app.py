@@ -1289,6 +1289,20 @@ def validate_scenario_steps(raw_steps):
                         cleaned[key] = weights
 
             if operation == "start":
+                if "experience_policy" in value:
+                    policy = value["experience_policy"]
+                    if not isinstance(policy, dict) or len(policy) > 30:
+                        raise ValueError(f"Step {index}: experience_policy must be an application target object.")
+                    try:
+                        if len(json.dumps(policy, allow_nan=False)) > 32000:
+                            raise ValueError()
+                    except (TypeError, ValueError):
+                        raise ValueError(f"Step {index}: invalid experience policy.") from None
+                    cleaned["experience_policy"] = copy.deepcopy(policy)
+                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed", "rate_down_mbps", "rate_up_mbps", "media_pattern", "media_session_s", "completion_grace_s"):
+                    if field in value:
+                        cleaned[field] = value[field]
+            if operation == "start":
                 cleaned.setdefault("profile", "office")
                 cleaned.setdefault("users", 50)
                 cleaned.setdefault("spawn_rate", 5.0)
@@ -2558,13 +2572,21 @@ def qdisc_rates(current, previous, dt):
 
 # ---------- Persistent telemetry / active measurement ----------
 
+from contextlib import contextmanager
+
+
+@contextmanager
 def telemetry_connect():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
-    return conn
+    try:
+        with conn:
+            yield conn
+    finally:
+        conn.close()
 
 
 def init_telemetry_db():
@@ -3561,6 +3583,8 @@ def configured_egress(cfg: dict):
 
 def resolve_egress(address: str, cfg: dict):
     """Map an appliance egress address to its WAN: entered addresses first, then learned ones."""
+    if cfg.get("_direct_wan_id"):
+        return {"link_id": cfg["_direct_wan_id"], "source": "declared_direct_path"}
     try:
         ip = ipaddress.ip_address(address)
     except ValueError:
@@ -3699,7 +3723,7 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
 
         per_link, unattributed = {}, 0
         for address, value in (symptom.get("by_egress") or {}).items():
-            mapped = resolve_egress(address, cfg) if address != "unknown" else None
+            mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
             if mapped and mapped.get("link_id") in by_link:
                 per_link[mapped["link_id"]] = per_link.get(mapped["link_id"], 0) + _egress_count(value)
             else:
@@ -3752,7 +3776,7 @@ def wan_experience(dem_diagnosis, signals: list, cfg: dict):
     totals = {item["link_id"]: {"requests": 0, "failures": 0, "apps": {}} for item in signals}
     unattributed = {"requests": 0, "failures": 0}
     for address, item in ((dem_diagnosis or {}).get("egress") or {}).items():
-        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
         bucket = totals.get((mapped or {}).get("link_id"))
         if bucket is None:
             unattributed["requests"] += item.get("requests") or 0
@@ -3853,7 +3877,8 @@ def track_link_health(signals: list, now: float):
     for item in signals:
         current = links.get(item["link_id"])
         if not current or current["health"] != item["health"]:
-            links[item["link_id"]] = {"health": item["health"], "since": now}
+            applied = RUNTIME_EFFECTIVE.get(item["link_id"], {}).get("updated_monotonic")
+            links[item["link_id"]] = {"health": item["health"], "since": min(now, applied) if applied is not None else now}
     active = {(item["link_id"], links[item["link_id"]]["since"]) for item in signals}
     for key in [key for key in STEERING_STATE["classes"] if (key[1], key[2]) not in active]:
         STEERING_STATE["classes"].pop(key, None)
@@ -3905,7 +3930,7 @@ def assess_steering(dem: dict, signals: list, cfg: dict, now=None):
         return (applications.get(app) or {}).get("class") or DEFAULT_APP_CLASSES.get(app, "interactive")
 
     def link_of(address):
-        mapped = resolve_egress(address, cfg) if address != "unknown" else None
+        mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
         return (mapped or {}).get("link_id")
 
     classes = []
@@ -4024,11 +4049,40 @@ def build_diagnosis():
     dem = (status or {}).get("dem") or {}
     traffic_path = ((status or {}).get("run") or {}).get("traffic_path") or {}
     traffic_mode = traffic_path.get("mode", "appliance")
+    if traffic_mode == "direct_netem" and traffic_path.get("wan_id"):
+        cfg = dict(cfg, _direct_wan_id=traffic_path["wan_id"])
     dem_diagnosis = dem.get("diagnosis") if isinstance(dem.get("diagnosis"), dict) else None
+    identity = (((status or {}).get("run") or {}).get("run_id"), traffic_mode, traffic_path.get("wan_id"),
+                tuple(sorted((key, value.get("generation", 0)) for key, value in RUNTIME_EFFECTIVE.items())))
+    with DIAGNOSIS_LOCK:
+        if STEERING_STATE.get("identity") != identity:
+            previous_identity = STEERING_STATE.get("identity")
+            baseline = STEERING_STATE.get("baseline", {}) if previous_identity and previous_identity[:3] == identity[:3] else {}
+            STEERING_STATE.update(identity=identity, links={}, classes={}, baseline=baseline)
     signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
     findings = correlate_findings(dem_diagnosis, signals, cfg)
     steering = assess_steering(dem, signals, cfg) if traffic_mode == "appliance" else None
     findings.extend(steering_findings(steering))
+    for finding in findings:
+        finding["observation"] = {"since": dem.get("since"), "until": dem.get("until"),
+                                  "run_id": dem.get("run_id"), "path": traffic_path,
+                                  "impairment_epochs": {key: value.get("generation", 0) for key, value in RUNTIME_EFFECTIVE.items()}}
+        finding["confidence"] = "observed" if finding.get("source") == "experience" else "hypothesis"
+        finding["causality"] = "not independently verified"
+    if steering:
+        steering["packet_observations"] = []
+        for observed in dem.get("packet_egress_transitions", []):
+            before, after = resolve_egress(observed.get("from"), cfg), resolve_egress(observed.get("to"), cfg)
+            if not before or not after or before.get("link_id") == after.get("link_id"):
+                continue
+            applied = RUNTIME_EFFECTIVE.get(before["link_id"], {}).get("updated_at")
+            observation = dict(observed, from_wan=before["link_id"], to_wan=after["link_id"])
+            if applied is not None and observed["latest_at"] >= applied:
+                observation["reaction_interval_seconds"] = [max(0, observed["earliest_at"] - applied), observed["latest_at"] - applied]
+            steering["packet_observations"].append(observation)
+        steering["timing_basis"] = "completion-window assessment with separate packet-observation bounds"
+        steering["uncertainty_seconds"] = 10
+        steering["impairment_epochs"] = {key: value.get("generation", 0) for key, value in RUNTIME_EFFECTIVE.items()}
     findings.sort(key=lambda finding: (SEVERITY_ORDER.get(finding["severity"], 9), finding["source"] != "experience"))
     experience, unattributed = wan_experience(dem_diagnosis, signals, cfg)
     if traffic_mode == "direct_baseline":
@@ -5117,6 +5171,15 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
         field = condition.get("field", "experience_score")
         if field != "active_users" and payload.get("truncated"):
             return False, None, "DEM transaction window exceeded the sample limit"
+        if field != "active_users":
+            if payload.get("scoring_complete") is not True or payload.get("evidence_issues"):
+                return False, None, "DEM evidence is incomplete; a complete measurement is required"
+            stamp = payload.get("timestamp")
+            if not isinstance(stamp, (int, float)) or not 0 <= time.time() - stamp <= 10:
+                return False, None, "DEM evidence is stale or future-dated"
+            expected_run = SCENARIO_STATE.get("workload_run_id")
+            if expected_run and payload.get("run_id") != expected_run:
+                return False, None, "DEM belongs to a different workload"
         experience = payload.get("endpoint_experience") or {}
         if field in ("realtime_availability_pct", "interactive_availability_pct"):
             actual = class_availability(payload.get("applications") or {}, field.split("_", 1)[0])
@@ -5242,7 +5305,7 @@ def recorder_start(scenario: dict, link_id: str, phases: list):
         TEST_RECORDER.clear()
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
                              started_at=time.time(), phases=[phase["name"] for phase in phases],
-                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[])
+                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[])
 
 
 def recorder_note(kind: str, item: dict):
@@ -5255,20 +5318,30 @@ def recorder_note(kind: str, item: dict):
 MIN_PHASE_REQUESTS = 20
 
 
-def phase_window_dem(seconds):
+def phase_window_dem(seconds, since=None, until=None, run_id=None, intervals=None):
     """The Traffic Simulator's DEM over exactly the seconds one phase ran: what that phase's own transactions scored."""
-    window = int(min(3600, max(10, seconds)))
+    until = time.time() if until is None else until
+    since = until - seconds if since is None else since
+    run_id = run_id or SCENARIO_STATE.get("workload_run_id")
+    if not run_id:
+        return {"error": "Phase workload identity is unavailable", "scoring_complete": False}
+    from urllib.parse import urlencode
+    query = urlencode(dict(run_id=run_id, since=since, until=until, **({"intervals": json.dumps(intervals)} if intervals is not None else {})))
     try:
-        dem = traffic_generator_request(f"/api/v1/dem/summary?window={window}", timeout=5.0)
+        dem = traffic_generator_request(f"/api/v1/dem/summary?{query}", timeout=7.0)
     except RuntimeError as exc:
         return {"error": str(exc)[:200]}
     applications = {key: {"class": item.get("class"), "requests": item.get("requests") or 0,
                           "success": item.get("availability_pct"), "p95_ms": item.get("p95_ms"),
-                          "experience": item.get("experience_score")}
+                          "experience": item.get("experience_score"), "weight": item.get("weight"),
+                          "scoring_complete": item.get("scoring_complete"),
+                          **{field: item.get(field) for field in ("criticality", "criticality_weight", "experience_targets",
+                              "quality", "score_components", "target_violations", "missing_measurements")}}
                     for key, item in (dem.get("applications") or {}).items()}
     return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
             "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
-            "p95_ms": dem.get("p95_ms"), "applications": applications}
+            "p95_ms": dem.get("p95_ms"), "applications": applications,
+            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions", "business_acceptance", "coverage_pct", "score_range", "score_status") }}
 
 
 def recorder_close_phase():
@@ -5278,7 +5351,27 @@ def recorder_close_phase():
     if not marks:
         return
     last = marks[-1]
-    recorder_note("phase_ends", {"name": last["name"], "dem": phase_window_dem(time.time() - last["at"])})
+    with TEST_RECORDER_LOCK:
+        if any(item.get("started_at") == last["at"] for item in TEST_RECORDER.get("phase_ends", [])):
+            return
+    end = time.time()
+    with TEST_RECORDER_LOCK:
+        pauses = list(TEST_RECORDER.get("pauses") or [])
+    intervals, cursor = [], last["at"]
+    for pause in sorted(pauses, key=lambda item: item["start"]):
+        left, right = max(last["at"], pause["start"]), min(end, pause.get("end") or end)
+        if left >= end or right <= cursor:
+            continue
+        if left > cursor:
+            intervals.append([cursor, left])
+        cursor = max(cursor, right)
+    if cursor < end:
+        intervals.append([cursor, end])
+    options = {"intervals": intervals} if pauses else {}
+    dem = (phase_window_dem(end - last["at"], since=last["at"], until=end, **options)
+           if intervals else {"scoring_complete": False, "error": "No active phase interval"})
+    recorder_note("phase_ends", {"name": last["name"], "started_at": last["at"], "ended_at": end,
+                                "dem": dem})
 
 
 def record_test_sample(payload: dict):
@@ -5328,11 +5421,11 @@ APPLICATION_LABELS = {
 def _phase_application(key, item):
     """One application's figures in one phase; too few of its own transactions means no score for it."""
     requests = item.get("requests") or 0
-    scored = requests >= MIN_PHASE_REQUESTS
+    scored = item.get("scoring_complete") is True
     return {"key": key, "class": item.get("class"), "requests": requests,
             "experience": item.get("experience") if scored else None,
             "success": item.get("success") if scored else None,
-            "p95_ms": item.get("p95_ms") if scored else None}
+            "p95_ms": item.get("p95_ms") if scored else None, "weight": item.get("weight"), "scoring_complete": scored}
 
 
 def _figures_text(experience, success, p95_ms, requests):
@@ -5364,8 +5457,10 @@ def application_matrix(phases):
             success = sum(item["success"] * item["requests"] for item in pooled) / weight if weight else None
             p95s = [item["p95_ms"] for item in scored if item["p95_ms"] is not None]
             if scored:
-                cells[phase["name"]] = _figures_text(min(item["experience"] for item in scored), success,
-                                                     max(p95s, default=None), sum(item["requests"] for item in scored))
+                weights = [item.get("weight") if item.get("weight") is not None else 1 for item in scored]
+                group_score = sum(item["experience"] * weight for item, weight in zip(scored, weights)) / sum(weights) if sum(weights) else None
+                cells[phase["name"]] = _figures_text(group_score, success,
+                                                     max(p95s, default=None), sum(item["requests"] for item in scored)) + " [worst app P95]"
             else:
                 cells[phase["name"]] = _figures_text(None, None, None, sum(item["requests"] for item in present))
             for row in apps:
@@ -5399,14 +5494,14 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                        if item.get("name") == name and "error" not in (item.get("dem") or {})), None)
         if window is not None:
             transactions = window.get("requests") or 0
-            scored = transactions >= MIN_PHASE_REQUESTS
+            scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and (bool(window.get("intervals")) or not any(row.get("paused") for row in rows))
             experience = window.get("experience") if scored else None
             success = window.get("success") if scored else None
             p95 = window.get("interactive_p95_ms") if scored else None
-            note = None if scored else f"Too few transactions to score this phase ({transactions} in its window)."
+            note = None if scored else f"Incomplete phase evidence ({transactions} transactions); no target verdict."
         else:
-            experience, success, p95 = last.get("experience"), last.get("success"), last.get("interactive_p95_ms")
-            transactions, note = None, None
+            experience, success, p95 = None, None, None
+            transactions, note = None, "Exact phase evidence unavailable; rolling measurements were not substituted."
         applications = {key: _phase_application(key, item)
                         for key, item in ((window or {}).get("applications") or {}).items()}
         phases.append({
@@ -5414,6 +5509,8 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             "duration_s": round((following["at"] if following else ended_at) - mark["at"]) if mark else None,
             "experience_score": experience, "success_pct": success,
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
+            "critical_alerts": (window or {}).get("critical_alerts", []),
+            **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "score_range", "score_status")},
             "worst_success_pct": success,
             "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
                       "health": item["health"]} for item in links.values()],
@@ -5425,7 +5522,28 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     remediation = [dict(item, within_target=None if steering_target is None else item["seconds"] <= steering_target)
                    for item in record.get("reactions") or []]
 
-    conclusion = [f"{record.get('name') or 'Test'} {result}" +
+    evaluated = [phase for phase in phases if phase["reached"]]
+    def phase_verdict(phase):
+        if confirmed_critical_failure(phase):
+            return "fail"
+        if phase["note"] or not targets:
+            return "unknown"
+        if phase.get("experience_score") is not None and targets.get("experience_min") is not None and phase["experience_score"] < targets["experience_min"]:
+            return "fail"
+        if phase.get("business_acceptance") == "unknown":
+            return "unknown"
+        if phase.get("business_acceptance") == "pass":
+            value, target = phase.get("experience_score"), targets.get("experience_min")
+            return "unknown" if value is None or target is None else "pass" if value >= target else "fail"
+        checks = [(phase["experience_score"], targets.get("experience_min"), True),
+                  (phase["success_pct"], targets.get("success_min_pct"), True),
+                  (phase["interactive_p95_ms"], targets.get("interactive_p95_max_ms"), False)]
+        if any(actual is None or target is None for actual, target, _ in checks):
+            return "unknown"
+        return "pass" if all(actual >= target if higher else actual <= target for actual, target, higher in checks) else "fail"
+    verdicts = [phase_verdict(phase) for phase in evaluated]
+    experience_result = "fail" if "fail" in verdicts else "pass" if verdicts and all(value == "pass" for value in verdicts) else "unknown"
+    conclusion = [f"{record.get('name') or 'Test'} {'execution completed' if result == 'passed' and not assertions else result}" +
                   (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
     if error and result != "passed":
         conclusion.append(str(error)[:200])
@@ -5466,7 +5584,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     application_groups = application_matrix(phases)
     return {
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
-        "site": site_label, "result": result, "started_at": record.get("started_at"), "ended_at": ended_at,
+        "site": site_label, "result": result, "execution_result": result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
         "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
         "phases": phases, "remediation": remediation, "steering_target_s": steering_target,
         "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
@@ -5867,6 +5985,8 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                         payload['controller_lease_seconds'] = 30
                 elif operation == 'stop' and supervised and scenario_workload_id:
                     payload['run_id'] = scenario_workload_id
+                if operation == "stop":
+                    recorder_close_phase()
                 result = traffic_generator_request(
                     f"/api/v1/workloads/{operation}", method="POST",
                     payload=payload, timeout=5.0,
@@ -5944,6 +6064,10 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
         scenario_error = str(exc)[:240]
 
     finally:
+        try:
+            recorder_close_phase()
+        except Exception as exc:
+            log_event("scenario", "Final phase evidence unavailable", error=str(exc)[:200])
         if scenario_workload_id:
             try:
                 stop_test_owned_workload(scenario_workload_id)
@@ -7941,6 +8065,9 @@ def lab_scenario_pause():
             SCENARIO_PAUSE.set()
             SCENARIO_STATE.update(paused=True, paused_at=time.time(), paused_clock=time.monotonic())
             name, phase = SCENARIO_STATE["scenario_name"], SCENARIO_STATE.get("phase")
+            with TEST_RECORDER_LOCK:
+                if TEST_RECORDER.get("active"):
+                    TEST_RECORDER.setdefault("pauses", []).append({"start": SCENARIO_STATE["paused_at"], "end": None})
     if active:
         log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
         flash("Test paused. It stays in its current phase until you resume it.", "info")
@@ -7959,6 +8086,9 @@ def lab_scenario_resume():
             SCENARIO_STATE.update(paused=False, paused_at=None, paused_clock=None,
                                   paused_total_s=SCENARIO_STATE["paused_total_s"] + held)
             SCENARIO_PAUSE.clear()
+            with TEST_RECORDER_LOCK:
+                if TEST_RECORDER.get("pauses") and TEST_RECORDER["pauses"][-1]["end"] is None:
+                    TEST_RECORDER["pauses"][-1]["end"] = time.time()
             name = SCENARIO_STATE["scenario_name"]
     if active:
         log_event("scenario", f"{name}: resumed after {round(held)} s", paused_seconds=round(held))
@@ -9123,6 +9253,16 @@ def showroom_verdict(value, target, higher_is_better=True):
     return "pass" if (value >= target if higher_is_better else value <= target) else "fail"
 
 
+def confirmed_critical_failure(dem):
+    # Missing/overdue observations cannot erase an independently measured failure.
+    # Corrupt or mixed windows cannot establish one either.
+    invalid = {"row_limit", "clock_discontinuity", "configuration_changed_in_window", "dropped_transactions", "persistence_unhealthy"}
+    if dem.get("truncated") or invalid.intersection(dem.get("evidence_issues") or []):
+        return False
+    return dem.get("business_acceptance") == "fail" or any(
+        item.get("severity", "violation") in ("violation", "outage") for item in dem.get("critical_alerts") or [])
+
+
 def showroom_outcome(diagnosis, site_plan):
     """What the simulated users get: traffic running, result against targets, where and why."""
     generator = diagnosis.get("traffic_generator") or {}
@@ -9142,8 +9282,19 @@ def showroom_outcome(diagnosis, site_plan):
     }
     if "fail" in verdicts.values():
         verdicts["experience"] = "fail"
-    elif "unknown" in verdicts.values() or dem.get("scoring_complete") is False:
+    elif "unknown" in verdicts.values() or dem.get("scoring_complete") is not True:
         verdicts["experience"] = "unknown"
+    if dem.get("truncated") or dem.get("evidence_issues") or dem.get("scoring_complete") is not True:
+        verdicts = {key: "unknown" for key in verdicts}
+    confirmed_failure = confirmed_critical_failure(dem)
+    utility_failure = (dem.get("scoring_complete") is True and not dem.get("truncated") and not dem.get("evidence_issues")
+                       and showroom_verdict(score, targets.get("experience_min")) == "fail")
+    if confirmed_failure or utility_failure:
+        verdicts["experience"] = "fail"
+    elif dem.get("business_acceptance") == "unknown":
+        verdicts["experience"] = "unknown"
+    elif dem.get("business_acceptance") == "pass" and dem.get("scoring_complete") is True:
+        verdicts["experience"] = showroom_verdict(score, targets.get("experience_min"))
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -9160,6 +9311,11 @@ def showroom_outcome(diagnosis, site_plan):
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
             "verdicts": verdicts,
+            **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
+                                            "critical_alerts", "limiting_application", "missing_measurements", "coverage_pct", "score_range",
+                                            "score_status", "at_risk", "at_risk_reason", "legacy_score")},
+            "application_acceptance": dem.get("business_acceptance"),
+            "business_acceptance": verdicts["experience"],
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
         },
@@ -9200,7 +9356,7 @@ SHOWROOM_STATE = {"values": {}, "impacts": {}}
 STORY_LOCK = threading.Lock()
 CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business apps", "bulk": "File transfers"}
 CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
-IMPACT_VERBS = {"media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
+IMPACT_VERBS = {"target_violation": "missing a configured application target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
                 "connection_errors": "cannot connect", "slow_wait": "responding slowly",
                 "bandwidth_bound": "slowed by a full line", "http_errors": "getting errors"}
 HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "degraded": "Degraded", "failed": "Down"}

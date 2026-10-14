@@ -1,6 +1,6 @@
 """Experience sub-scores for each traffic group, shown under the overall score.
 
-The overall score is the worst business-critical application. A group's sub-score is the worst application in that group,
+The overall and group scores use configured workload and criticality weights,
 so a poor group shows even when another group sets the overall score. Each group also gets one short sentence: how it is
 performing and, when it is not, what limits it, from the evidence the simulator scored.
 """
@@ -62,16 +62,22 @@ def group_summary(key, label, members, label_for):
         return {**summary, "score": None, "tone": "unknown", "text": "No traffic in this group in the window."}
     scored = {name: item for name, item in members.items() if item.get("experience_score") is not None}
     unscored = len(members) - len(scored)
+    incomplete = any(item.get("scoring_complete") is False for item in members.values())
     if not scored:
         return {**summary, "score": None, "tone": "unknown",
                 "text": f"Too few transactions to score yet: {requests} in the window."}
     worst = min(scored, key=lambda name: scored[name]["experience_score"])
-    score = round(scored[worst]["experience_score"])
+    weights = {name: item.get("weight") if item.get("weight") is not None else 1 for name, item in scored.items()}
+    total_weight = sum(weights.values())
+    score = round(sum(weights[name] * item["experience_score"] for name, item in scored.items()) / total_weight) if total_weight else None
+    if incomplete or unscored:
+        return {**summary, "score": score, "tone": "unknown", "scoring_complete": False,
+                "text": "Incomplete application evidence; this group cannot yet be judged."}
     tone = tone_for(score)
     if tone == "good":
         text = "Performing well."
     else:
-        text = f"Limited by {label_for(worst)} ({score}/100): {limit_reason(scored[worst])}."
+        text = f"Limited by {label_for(worst)} ({scored[worst]['experience_score']:.0f}/100): {limit_reason(scored[worst])}."
         if len(scored) > 1:
             healthy = sum(1 for item in scored.values() if item["experience_score"] >= GOOD_SCORE)
             text += f" {healthy} of {len(scored)} scored applications are performing well."

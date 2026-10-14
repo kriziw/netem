@@ -52,6 +52,13 @@ class PreviewTests(unittest.TestCase):
 
 class AnnouncementTests(unittest.TestCase):
     def setUp(self):
+        from tempfile import TemporaryDirectory
+        from appliance_inventory import Store
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        isolated = patch.object(netem.app.extensions["appliance_platform"], "store", Store(directory.name))
+        isolated.start()
+        self.addCleanup(isolated.stop)
         self.mocks = {}
         for name, value in (("load_config", CONFIG), ("apply_selected_profile", (True, "OK", {})),
                             ("apply_runtime_fault", (True, "OK")), ("apply_mtu_limit", (True, "OK")),

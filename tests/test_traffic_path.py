@@ -15,6 +15,13 @@ BROKEN = {"ready": False, "repairable": True, "saved_route": True, "message": "e
 
 class ReadinessTests(unittest.TestCase):
     def setUp(self):
+        from tempfile import TemporaryDirectory
+        from appliance_inventory import Store
+        directory = TemporaryDirectory()
+        self.addCleanup(directory.cleanup)
+        isolated = patch.object(netem.app.extensions["appliance_platform"], "store", Store(directory.name))
+        isolated.start()
+        self.addCleanup(isolated.stop)
         for target, value in (("TRAFFIC_PATH_CACHE", {"checked": None, "payload": None}),):
             mock = patch.object(netem, target, value)
             mock.start()

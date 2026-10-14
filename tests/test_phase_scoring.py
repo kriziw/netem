@@ -14,7 +14,7 @@ def record(phase_ends, samples=()):
 
 
 def window(experience, success, requests, p95=50.0):
-    return {"experience": experience, "success": success, "requests": requests, "interactive_p95_ms": p95}
+    return {"experience": experience, "success": success, "requests": requests, "interactive_p95_ms": p95, "scoring_complete": requests >= 20}
 
 
 class PhaseWindowTests(unittest.TestCase):
@@ -34,19 +34,20 @@ class PhaseWindowTests(unittest.TestCase):
         summary = netem.summarize_test(record(ends), "passed", None)
         phase = next(item for item in summary["phases"] if item["name"] == "Severe brownout")
         self.assertIsNone(phase["experience_score"])
-        self.assertIn("Too few transactions to score this phase (6 in its window)", phase["note"])
+        self.assertIn("Incomplete phase evidence (6 transactions)", phase["note"])
 
-    def test_without_a_window_the_last_sample_is_still_used(self):
+    def test_without_an_exact_window_rolling_samples_are_not_substituted(self):
         samples = [{"t": 30.0, "phase": "Baseline", "experience": 92, "success": 99.0, "interactive_p95_ms": 55}]
         summary = netem.summarize_test(record([], samples), "passed", None)
         baseline = next(item for item in summary["phases"] if item["name"] == "Baseline")
-        self.assertEqual(baseline["experience_score"], 92)
+        self.assertIsNone(baseline["experience_score"])
+        self.assertIn("unavailable", baseline["note"])
 
 
 class PhaseCloseTests(unittest.TestCase):
     def test_closing_a_phase_records_the_window_of_its_duration(self):
         state = {"active": True, "phase_marks": [{"name": "Baseline", "at": 1000.0}], "phase_ends": []}
-        with patch.dict(netem.TEST_RECORDER, state, clear=True), \
+        with patch.dict(netem.SCENARIO_STATE, {"workload_run_id": "run-test"}), patch.dict(netem.TEST_RECORDER, state, clear=True), \
              patch.object(netem.time, "time", return_value=1060.0), \
              patch.object(netem, "traffic_generator_request", return_value={"experience_score": 100,
                                                                              "availability_pct": 100.0,
@@ -55,7 +56,7 @@ class PhaseCloseTests(unittest.TestCase):
             netem.recorder_close_phase()
             self.assertEqual(netem.TEST_RECORDER["phase_ends"][0]["name"], "Baseline")
             self.assertEqual(netem.TEST_RECORDER["phase_ends"][0]["dem"]["requests"], 310)
-        dem.assert_called_once_with("/api/v1/dem/summary?window=60", timeout=5.0)
+        dem.assert_called_once_with("/api/v1/dem/summary?run_id=run-test&since=1000.0&until=1060.0", timeout=7.0)
 
     def test_nothing_is_closed_when_no_test_is_recording(self):
         with patch.dict(netem.TEST_RECORDER, {"active": False, "phase_marks": [], "phase_ends": []}, clear=True), \
@@ -72,10 +73,10 @@ def window_with_apps(applications, experience=100, success=100.0, requests=300):
 
 class ApplicationGroupTests(unittest.TestCase):
     def applications(self):
-        return {"ot_telemetry": {"class": "realtime", "requests": 40, "success": 100.0, "p95_ms": 52.0, "experience": 98},
-                "erp": {"class": "interactive", "requests": 30, "success": 90.0, "p95_ms": 900.0, "experience": 60},
-                "mes": {"class": "interactive", "requests": 60, "success": 100.0, "p95_ms": 120.0, "experience": 100},
-                "plm_cad": {"class": "bulk", "requests": 5, "success": 100.0, "p95_ms": 8000.0, "experience": 100}}
+        return {"ot_telemetry": {"class": "realtime", "requests": 40, "scoring_complete": True, "success": 100.0, "p95_ms": 52.0, "experience": 98},
+                "erp": {"class": "interactive", "requests": 30, "scoring_complete": True, "success": 90.0, "p95_ms": 900.0, "experience": 60},
+                "mes": {"class": "interactive", "requests": 60, "scoring_complete": True, "success": 100.0, "p95_ms": 120.0, "experience": 100},
+                "plm_cad": {"class": "bulk", "requests": 5, "scoring_complete": False, "success": 100.0, "p95_ms": 8000.0, "experience": 100}}
 
     def groups(self):
         ends = [{"name": "Baseline", "dem": window_with_apps(self.applications())}]
@@ -93,7 +94,7 @@ class ApplicationGroupTests(unittest.TestCase):
 
     def test_a_group_pools_its_scored_applications(self):
         web = self.groups()["Web, collaboration & DNS"]
-        self.assertEqual(web["cells"]["Baseline"], "60 · 96.7% · 900 ms (90 tx)")
+        self.assertEqual(web["cells"]["Baseline"], "80 · 96.7% · 900 ms (90 tx) [worst app P95]")
         erp = next(app for app in web["apps"] if app["key"] == "erp")
         self.assertEqual(erp["cells"]["Baseline"], "60 · 90.0% · 900 ms (30 tx)")
 

@@ -1,0 +1,323 @@
+site,industry,sub_industry,function,application,share_pct,equal_weights_outage_score,approved_1_2_4_outage_score,comparison_1_2_8_outage_score,business_acceptance
+Automotive · Headquarters / campus · Medium · Business-critical,manufacturing,automotive,headquarters,mes,0.21,99.79,99.43,98.89,fail
+Automotive · Headquarters / campus · Medium · Business-critical,manufacturing,automotive,headquarters,ot_telemetry,0.408,99.59,98.9,97.85,fail
+Automotive · Headquarters / campus · Medium · Business-critical,manufacturing,automotive,headquarters,plm_cad,0.166,99.83,99.55,99.13,fail
+Automotive · Regional office · Medium · Business-critical,manufacturing,automotive,regional_office,mes,0.845,99.16,97.8,95.93,fail
+Automotive · Regional office · Medium · Business-critical,manufacturing,automotive,regional_office,ot_telemetry,1.639,98.36,95.72,92.1,fail
+Automotive · Regional office · Medium · Business-critical,manufacturing,automotive,regional_office,plm_cad,0.667,99.33,98.26,96.79,fail
+Automotive · Branch office · Medium · Business-critical,manufacturing,automotive,branch_office,mes,3.221,96.78,92.49,88.27,fail
+Automotive · Branch office · Medium · Business-critical,manufacturing,automotive,branch_office,ot_telemetry,6.25,93.75,85.44,77.25,fail
+Automotive · Branch office · Medium · Business-critical,manufacturing,automotive,branch_office,plm_cad,2.542,97.46,94.08,90.74,fail
+Automotive · Manufacturing plant · Medium · Business-critical,manufacturing,automotive,plant,mes,16.906,83.09,76.07,72.4,fail
+Automotive · Manufacturing plant · Medium · Business-critical,manufacturing,automotive,plant,plm_cad,2.929,97.07,95.85,95.22,fail
+Automotive · Manufacturing plant · Medium · Business-critical,manufacturing,automotive,plant,ot_telemetry,32.0,68.0,54.71,47.75,fail
+Automotive · R&D / engineering center · Medium · Business-critical,manufacturing,automotive,rnd_center,plm_cad,14.955,85.04,68.87,54.14,fail
+Automotive · R&D / engineering center · Medium · Business-critical,manufacturing,automotive,rnd_center,mes,0.758,99.24,98.42,97.68,fail
+Automotive · R&D / engineering center · Medium · Business-critical,manufacturing,automotive,rnd_center,ot_telemetry,1.471,98.53,96.94,95.49,fail
+Automotive · Warehouse / distribution center · Medium · Business-critical,manufacturing,automotive,warehouse,ot_telemetry,17.241,82.76,64.68,48.62,fail
+Automotive · Warehouse / distribution center · Medium · Business-critical,manufacturing,automotive,warehouse,mes,0.592,99.41,98.79,98.23,fail
+Automotive · Warehouse / distribution center · Medium · Business-critical,manufacturing,automotive,warehouse,plm_cad,0.468,99.53,99.04,98.61,fail
+Pharma & life sciences · Headquarters / campus · Medium · Business-critical,manufacturing,pharma,headquarters,erp,0.138,99.86,99.63,99.27,fail
+Pharma & life sciences · Headquarters / campus · Medium · Business-critical,manufacturing,pharma,headquarters,mes,0.199,99.8,99.47,98.95,fail
+Pharma & life sciences · Headquarters / campus · Medium · Business-critical,manufacturing,pharma,headquarters,ot_telemetry,0.408,99.59,98.9,97.85,fail
+Pharma & life sciences · Regional office · Medium · Business-critical,manufacturing,pharma,regional_office,erp,0.556,99.44,98.55,97.31,fail
+Pharma & life sciences · Regional office · Medium · Business-critical,manufacturing,pharma,regional_office,mes,0.798,99.2,97.92,96.14,fail
+Pharma & life sciences · Regional office · Medium · Business-critical,manufacturing,pharma,regional_office,ot_telemetry,1.639,98.36,95.72,92.06,fail
+Pharma & life sciences · Branch office · Medium · Business-critical,manufacturing,pharma,branch_office,erp,2.118,97.88,95.05,92.18,fail
+Pharma & life sciences · Branch office · Medium · Business-critical,manufacturing,pharma,branch_office,mes,3.041,96.96,92.89,88.77,fail
+Pharma & life sciences · Branch office · Medium · Business-critical,manufacturing,pharma,branch_office,ot_telemetry,6.25,93.75,85.38,76.92,fail
+Pharma & life sciences · Manufacturing plant · Medium · Business-critical,manufacturing,pharma,plant,mes,15.957,84.04,77.31,73.98,fail
+Pharma & life sciences · Manufacturing plant · Medium · Business-critical,manufacturing,pharma,plant,erp,4.393,95.61,93.75,92.84,fail
+Pharma & life sciences · Manufacturing plant · Medium · Business-critical,manufacturing,pharma,plant,ot_telemetry,32.0,68.0,54.49,47.82,fail
+Pharma & life sciences · R&D / engineering center · Medium · Business-critical,manufacturing,pharma,rnd_center,erp,4.484,95.52,88.74,80.7,fail
+Pharma & life sciences · R&D / engineering center · Medium · Business-critical,manufacturing,pharma,rnd_center,mes,0.715,99.28,98.2,96.92,fail
+Pharma & life sciences · R&D / engineering center · Medium · Business-critical,manufacturing,pharma,rnd_center,ot_telemetry,1.471,98.53,96.31,93.67,fail
+Pharma & life sciences · Warehouse / distribution center · Medium · Business-critical,manufacturing,pharma,warehouse,erp,8.082,91.92,84.65,79.42,fail
+Pharma & life sciences · Warehouse / distribution center · Medium · Business-critical,manufacturing,pharma,warehouse,ot_telemetry,17.241,82.76,67.26,56.1,fail
+Pharma & life sciences · Warehouse / distribution center · Medium · Business-critical,manufacturing,pharma,warehouse,mes,0.559,99.44,98.94,98.58,fail
+Food & beverage · Headquarters / campus · Medium · Business-critical,manufacturing,food_beverage,headquarters,erp,0.081,99.92,99.78,99.57,fail
+Food & beverage · Headquarters / campus · Medium · Business-critical,manufacturing,food_beverage,headquarters,wms_scan,0.242,99.76,99.35,98.72,fail
+Food & beverage · Headquarters / campus · Medium · Business-critical,manufacturing,food_beverage,headquarters,ot_telemetry,0.408,99.59,98.9,97.84,fail
+Food & beverage · Regional office · Medium · Business-critical,manufacturing,food_beverage,regional_office,erp,0.327,99.67,99.15,98.41,fail
+Food & beverage · Regional office · Medium · Business-critical,manufacturing,food_beverage,regional_office,wms_scan,0.973,99.03,97.45,95.27,fail
+Food & beverage · Regional office · Medium · Business-critical,manufacturing,food_beverage,regional_office,ot_telemetry,1.639,98.36,95.71,92.03,fail
+Food & beverage · Branch office · Medium · Business-critical,manufacturing,food_beverage,branch_office,erp,1.245,98.76,97.06,95.35,fail
+Food & beverage · Branch office · Medium · Business-critical,manufacturing,food_beverage,branch_office,wms_scan,3.709,96.29,91.25,86.16,fail
+Food & beverage · Branch office · Medium · Business-critical,manufacturing,food_beverage,branch_office,ot_telemetry,6.25,93.75,85.25,76.67,fail
+Food & beverage · Manufacturing plant · Medium · Business-critical,manufacturing,food_beverage,plant,erp,4.65,95.35,92.67,90.9,fail
+Food & beverage · Manufacturing plant · Medium · Business-critical,manufacturing,food_beverage,plant,wms_scan,2.06,97.94,96.75,95.97,fail
+Food & beverage · Manufacturing plant · Medium · Business-critical,manufacturing,food_beverage,plant,ot_telemetry,32.0,68.0,49.56,37.35,fail
+Food & beverage · R&D / engineering center · Medium · Business-critical,manufacturing,food_beverage,rnd_center,erp,4.618,95.38,88.44,80.31,fail
+Food & beverage · R&D / engineering center · Medium · Business-critical,manufacturing,food_beverage,rnd_center,ot_telemetry,1.471,98.53,96.32,93.73,fail
+Food & beverage · R&D / engineering center · Medium · Business-critical,manufacturing,food_beverage,rnd_center,wms_scan,0.873,99.13,97.82,96.28,fail
+Food & beverage · Warehouse / distribution center · Medium · Business-critical,manufacturing,food_beverage,warehouse,erp,7.097,92.9,88.66,86.86,fail
+Food & beverage · Warehouse / distribution center · Medium · Business-critical,manufacturing,food_beverage,warehouse,wms_scan,21.143,78.86,66.21,60.87,fail
+Food & beverage · Warehouse / distribution center · Medium · Business-critical,manufacturing,food_beverage,warehouse,ot_telemetry,17.241,82.76,72.45,68.09,fail
+Electronics & semiconductors · Headquarters / campus · Medium · Business-critical,manufacturing,electronics,headquarters,mes,0.21,99.79,99.43,98.89,fail
+Electronics & semiconductors · Headquarters / campus · Medium · Business-critical,manufacturing,electronics,headquarters,ot_telemetry,0.408,99.59,98.9,97.85,fail
+Electronics & semiconductors · Headquarters / campus · Medium · Business-critical,manufacturing,electronics,headquarters,plm_cad,0.16,99.84,99.57,99.16,fail
+Electronics & semiconductors · Regional office · Medium · Business-critical,manufacturing,electronics,regional_office,mes,0.845,99.16,97.8,95.92,fail
+Electronics & semiconductors · Regional office · Medium · Business-critical,manufacturing,electronics,regional_office,ot_telemetry,1.639,98.36,95.72,92.09,fail
+Electronics & semiconductors · Regional office · Medium · Business-critical,manufacturing,electronics,regional_office,plm_cad,0.641,99.36,98.33,96.9,fail
+Electronics & semiconductors · Branch office · Medium · Business-critical,manufacturing,electronics,branch_office,mes,3.221,96.78,92.48,88.24,fail
+Electronics & semiconductors · Branch office · Medium · Business-critical,manufacturing,electronics,branch_office,ot_telemetry,6.25,93.75,85.42,77.18,fail
+Electronics & semiconductors · Branch office · Medium · Business-critical,manufacturing,electronics,branch_office,plm_cad,2.446,97.55,94.29,91.07,fail
+Electronics & semiconductors · Manufacturing plant · Medium · Business-critical,manufacturing,electronics,plant,mes,16.906,83.09,76.05,72.36,fail
+Electronics & semiconductors · Manufacturing plant · Medium · Business-critical,manufacturing,electronics,plant,plm_cad,2.817,97.18,96.01,95.39,fail
+Electronics & semiconductors · Manufacturing plant · Medium · Business-critical,manufacturing,electronics,plant,ot_telemetry,32.0,68.0,54.67,47.67,fail
+Electronics & semiconductors · R&D / engineering center · Medium · Business-critical,manufacturing,electronics,rnd_center,plm_cad,14.386,85.61,69.85,55.27,fail
+Electronics & semiconductors · R&D / engineering center · Medium · Business-critical,manufacturing,electronics,rnd_center,mes,0.758,99.24,98.41,97.64,fail
+Electronics & semiconductors · R&D / engineering center · Medium · Business-critical,manufacturing,electronics,rnd_center,ot_telemetry,1.471,98.53,96.92,95.43,fail
+Electronics & semiconductors · Warehouse / distribution center · Medium · Business-critical,manufacturing,electronics,warehouse,ot_telemetry,17.241,82.76,64.67,48.6,fail
+Electronics & semiconductors · Warehouse / distribution center · Medium · Business-critical,manufacturing,electronics,warehouse,mes,0.592,99.41,98.79,98.23,fail
+Electronics & semiconductors · Warehouse / distribution center · Medium · Business-critical,manufacturing,electronics,warehouse,plm_cad,0.45,99.55,99.08,98.66,fail
+Chemicals · Headquarters / campus · Medium · Business-critical,manufacturing,chemicals,headquarters,erp,0.088,99.91,99.76,99.53,fail
+Chemicals · Headquarters / campus · Medium · Business-critical,manufacturing,chemicals,headquarters,ot_telemetry,0.408,99.59,98.9,97.82,fail
+Chemicals · Regional office · Medium · Business-critical,manufacturing,chemicals,regional_office,erp,0.354,99.65,99.06,98.22,fail
+Chemicals · Regional office · Medium · Business-critical,manufacturing,chemicals,regional_office,ot_telemetry,1.639,98.36,95.65,91.74,fail
+Chemicals · Branch office · Medium · Business-critical,manufacturing,chemicals,branch_office,erp,1.348,98.65,96.68,94.4,fail
+Chemicals · Branch office · Medium · Business-critical,manufacturing,chemicals,branch_office,ot_telemetry,6.25,93.75,84.59,74.04,fail
+Chemicals · Manufacturing plant · Medium · Business-critical,manufacturing,chemicals,plant,erp,4.356,95.64,93.0,91.16,fail
+Chemicals · Manufacturing plant · Medium · Business-critical,manufacturing,chemicals,plant,ot_telemetry,32.0,68.0,48.58,35.08,fail
+Chemicals · R&D / engineering center · Medium · Business-critical,manufacturing,chemicals,rnd_center,erp,4.164,95.84,89.35,81.38,fail
+Chemicals · R&D / engineering center · Medium · Business-critical,manufacturing,chemicals,rnd_center,ot_telemetry,1.471,98.53,96.24,93.42,fail
+Chemicals · Warehouse / distribution center · Medium · Business-critical,manufacturing,chemicals,warehouse,erp,7.685,92.31,85.27,80.06,fail
+Chemicals · Warehouse / distribution center · Medium · Business-critical,manufacturing,chemicals,warehouse,ot_telemetry,17.241,82.76,66.95,55.27,fail
+Industrial machinery · Headquarters / campus · Medium · Business-critical,manufacturing,machinery,headquarters,erp,0.137,99.86,99.63,99.26,fail
+Industrial machinery · Headquarters / campus · Medium · Business-critical,manufacturing,machinery,headquarters,plm_cad,0.15,99.85,99.59,99.19,fail
+Industrial machinery · Regional office · Medium · Business-critical,manufacturing,machinery,regional_office,erp,0.551,99.45,98.52,97.13,fail
+Industrial machinery · Regional office · Medium · Business-critical,manufacturing,machinery,regional_office,plm_cad,0.604,99.4,98.38,96.85,fail
+Industrial machinery · Branch office · Medium · Business-critical,manufacturing,machinery,branch_office,erp,2.1,97.9,94.57,90.24,fail
+Industrial machinery · Branch office · Medium · Business-critical,manufacturing,machinery,branch_office,plm_cad,2.303,97.7,94.04,89.3,fail
+Industrial machinery · Manufacturing plant · Medium · Business-critical,manufacturing,machinery,plant,erp,4.617,95.38,88.54,80.58,fail
+Industrial machinery · Manufacturing plant · Medium · Business-critical,manufacturing,machinery,plant,plm_cad,2.653,97.35,93.41,88.84,fail
+Industrial machinery · R&D / engineering center · Medium · Business-critical,manufacturing,machinery,rnd_center,erp,4.18,95.82,91.41,87.61,fail
+Industrial machinery · R&D / engineering center · Medium · Business-critical,manufacturing,machinery,rnd_center,plm_cad,14.628,85.37,69.95,56.65,fail
+Industrial machinery · Warehouse / distribution center · Medium · Business-critical,manufacturing,machinery,warehouse,erp,8.079,91.92,79.62,66.43,fail
+Industrial machinery · Warehouse / distribution center · Medium · Business-critical,manufacturing,machinery,warehouse,plm_cad,0.423,99.58,98.93,98.24,fail
+Grocery · Headquarters / campus · Medium · Business-critical,retail,grocery,headquarters,pos,0.234,99.77,99.37,98.74,fail
+Grocery · Headquarters / campus · Medium · Business-critical,retail,grocery,headquarters,wms_scan,0.04,99.96,99.89,99.78,fail
+Grocery · Regional office · Medium · Business-critical,retail,grocery,regional_office,pos,0.941,99.06,97.47,95.08,fail
+Grocery · Regional office · Medium · Business-critical,retail,grocery,regional_office,wms_scan,0.161,99.84,99.57,99.16,fail
+Grocery · Branch office · Medium · Business-critical,retail,grocery,branch_office,pos,3.586,96.41,90.67,83.18,fail
+Grocery · Branch office · Medium · Business-critical,retail,grocery,branch_office,wms_scan,0.615,99.39,98.4,97.12,fail
+Grocery · Warehouse / distribution center · Medium · Business-critical,retail,grocery,warehouse,wms_scan,20.616,79.38,55.28,38.8,fail
+Grocery · Warehouse / distribution center · Medium · Business-critical,retail,grocery,warehouse,pos,0.66,99.34,98.57,98.04,fail
+Grocery · Retail store · Medium · Business-critical,retail,grocery,retail_store,pos,13.343,86.66,66.92,52.32,fail
+Grocery · Retail store · Medium · Business-critical,retail,grocery,retail_store,wms_scan,2.287,97.71,94.33,91.83,fail
+Fashion & apparel · Headquarters / campus · Medium · Business-critical,retail,fashion,headquarters,video,12.587,87.41,75.15,63.78,fail
+Fashion & apparel · Headquarters / campus · Medium · Business-critical,retail,fashion,headquarters,guest_internet,6.039,93.96,88.08,82.62,fail
+Fashion & apparel · Headquarters / campus · Medium · Business-critical,retail,fashion,headquarters,pos,0.223,99.78,99.56,99.36,fail
+Fashion & apparel · Regional office · Medium · Business-critical,retail,fashion,regional_office,video,12.153,87.85,75.96,65.11,fail
+Fashion & apparel · Regional office · Medium · Business-critical,retail,fashion,regional_office,guest_internet,6.064,93.94,88.0,82.59,fail
+Fashion & apparel · Regional office · Medium · Business-critical,retail,fashion,regional_office,pos,0.894,99.11,98.23,97.43,fail
+Fashion & apparel · Branch office · Medium · Business-critical,retail,fashion,branch_office,video,9.268,90.73,80.43,71.33,fail
+Fashion & apparel · Branch office · Medium · Business-critical,retail,fashion,branch_office,guest_internet,4.624,95.38,90.23,85.7,fail
+Fashion & apparel · Branch office · Medium · Business-critical,retail,fashion,branch_office,pos,3.409,96.59,92.8,89.45,fail
+Fashion & apparel · Warehouse / distribution center · Medium · Business-critical,retail,fashion,warehouse,video,1.573,98.43,95.78,92.2,fail
+Fashion & apparel · Warehouse / distribution center · Medium · Business-critical,retail,fashion,warehouse,guest_internet,0.85,99.15,97.72,95.78,fail
+Fashion & apparel · Warehouse / distribution center · Medium · Business-critical,retail,fashion,warehouse,pos,0.627,99.37,98.32,96.89,fail
+Fashion & apparel · Retail store · Medium · Business-critical,retail,fashion,retail_store,pos,12.685,87.32,82.12,79.99,fail
+Fashion & apparel · Retail store · Medium · Business-critical,retail,fashion,retail_store,video,8.725,91.27,87.7,86.23,fail
+Fashion & apparel · Retail store · Medium · Business-critical,retail,fashion,retail_store,guest_internet,34.411,65.59,51.49,45.71,fail
+Consumer electronics · Headquarters / campus · Medium · Business-critical,retail,consumer_electronics,headquarters,guest_internet,6.25,93.75,84.94,73.94,fail
+Consumer electronics · Headquarters / campus · Medium · Business-critical,retail,consumer_electronics,headquarters,pos,0.223,99.78,99.46,99.07,fail
+Consumer electronics · Regional office · Medium · Business-critical,retail,consumer_electronics,regional_office,guest_internet,6.276,93.72,84.96,74.33,fail
+Consumer electronics · Regional office · Medium · Business-critical,retail,consumer_electronics,regional_office,pos,0.894,99.11,97.86,96.34,fail
+Consumer electronics · Branch office · Medium · Business-critical,retail,consumer_electronics,branch_office,guest_internet,4.785,95.21,88.22,80.39,fail
+Consumer electronics · Branch office · Medium · Business-critical,retail,consumer_electronics,branch_office,pos,3.409,96.59,91.61,86.03,fail
+Consumer electronics · Warehouse / distribution center · Medium · Business-critical,retail,consumer_electronics,warehouse,guest_internet,0.88,99.12,97.56,95.32,fail
+Consumer electronics · Warehouse / distribution center · Medium · Business-critical,retail,consumer_electronics,warehouse,pos,0.627,99.37,98.26,96.67,fail
+Consumer electronics · Retail store · Medium · Business-critical,retail,consumer_electronics,retail_store,pos,12.685,87.32,80.56,77.66,fail
+Consumer electronics · Retail store · Medium · Business-critical,retail,consumer_electronics,retail_store,guest_internet,35.61,64.39,45.44,37.29,fail
+Home improvement · Headquarters / campus · Medium · Business-critical,retail,home_improvement,headquarters,pos,0.215,99.79,99.42,98.84,fail
+Home improvement · Headquarters / campus · Medium · Business-critical,retail,home_improvement,headquarters,wms_scan,0.05,99.95,99.86,99.73,fail
+Home improvement · Regional office · Medium · Business-critical,retail,home_improvement,regional_office,pos,0.863,99.14,97.68,95.48,fail
+Home improvement · Regional office · Medium · Business-critical,retail,home_improvement,regional_office,wms_scan,0.201,99.8,99.46,98.95,fail
+Home improvement · Branch office · Medium · Business-critical,retail,home_improvement,branch_office,pos,3.289,96.71,91.42,84.49,fail
+Home improvement · Branch office · Medium · Business-critical,retail,home_improvement,branch_office,wms_scan,0.768,99.23,98.0,96.38,fail
+Home improvement · Warehouse / distribution center · Medium · Business-critical,retail,home_improvement,warehouse,wms_scan,21.905,78.1,53.18,36.78,fail
+Home improvement · Warehouse / distribution center · Medium · Business-critical,retail,home_improvement,warehouse,pos,0.605,99.4,98.71,98.25,fail
+Home improvement · Retail store · Medium · Business-critical,retail,home_improvement,retail_store,pos,12.24,87.76,69.43,55.6,fail
+Home improvement · Retail store · Medium · Business-critical,retail,home_improvement,retail_store,wms_scan,2.856,97.14,92.87,89.64,fail
+Hospital network · Headquarters / campus · Medium · Business-critical,healthcare,hospital_network,headquarters,voice,6.183,93.82,85.06,74.15,fail
+Hospital network · Headquarters / campus · Medium · Business-critical,healthcare,hospital_network,headquarters,emr,0.195,99.8,99.53,99.18,fail
+Hospital network · Headquarters / campus · Medium · Business-critical,healthcare,hospital_network,headquarters,pacs_imaging,0.07,99.93,99.83,99.71,fail
+Hospital network · Regional office · Medium · Business-critical,healthcare,hospital_network,regional_office,voice,6.179,93.82,85.16,74.72,fail
+Hospital network · Regional office · Medium · Business-critical,healthcare,hospital_network,regional_office,emr,0.784,99.22,98.12,96.79,fail
+Hospital network · Regional office · Medium · Business-critical,healthcare,hospital_network,regional_office,pacs_imaging,0.281,99.72,99.32,98.85,fail
+Hospital network · Branch office · Medium · Business-critical,healthcare,hospital_network,branch_office,voice,6.496,93.5,84.91,75.76,fail
+Hospital network · Branch office · Medium · Business-critical,healthcare,hospital_network,branch_office,emr,2.99,97.01,93.05,88.84,fail
+Hospital network · Branch office · Medium · Business-critical,healthcare,hospital_network,branch_office,pacs_imaging,1.073,98.93,97.51,96.0,fail
+Hospital network · R&D / engineering center · Medium · Business-critical,healthcare,hospital_network,rnd_center,voice,2.855,97.14,92.63,86.58,fail
+Hospital network · R&D / engineering center · Medium · Business-critical,healthcare,hospital_network,rnd_center,emr,0.703,99.3,98.18,96.69,fail
+Hospital network · R&D / engineering center · Medium · Business-critical,healthcare,hospital_network,rnd_center,pacs_imaging,0.253,99.75,99.35,98.81,fail
+Hospital network · Hospital · Medium · Business-critical,healthcare,hospital_network,hospital,voice,6.903,93.1,87.17,83.69,fail
+Hospital network · Hospital · Medium · Business-critical,healthcare,hospital_network,hospital,emr,17.611,82.39,67.26,58.38,fail
+Hospital network · Hospital · Medium · Business-critical,healthcare,hospital_network,hospital,pacs_imaging,6.322,93.68,88.25,85.06,fail
+Hospital network · Clinic · Medium · Business-critical,healthcare,hospital_network,clinic,voice,4.493,95.51,90.71,87.63,fail
+Hospital network · Clinic · Medium · Business-critical,healthcare,hospital_network,clinic,emr,14.558,85.44,69.91,59.93,fail
+Hospital network · Clinic · Medium · Business-critical,healthcare,hospital_network,clinic,pacs_imaging,5.226,94.77,89.2,85.61,fail
+Hospital network · Laboratory · Medium · Business-critical,healthcare,hospital_network,laboratory,voice,2.565,97.43,93.49,90.25,fail
+Hospital network · Laboratory · Medium · Business-critical,healthcare,hospital_network,laboratory,emr,7.842,92.16,80.09,70.19,fail
+Hospital network · Laboratory · Medium · Business-critical,healthcare,hospital_network,laboratory,pacs_imaging,2.815,97.19,92.85,89.3,fail
+Outpatient clinics · Headquarters / campus · Medium · Business-critical,healthcare,outpatient,headquarters,video,13.798,86.2,70.59,54.7,fail
+Outpatient clinics · Headquarters / campus · Medium · Business-critical,healthcare,outpatient,headquarters,emr,0.21,99.79,99.55,99.31,fail
+Outpatient clinics · Regional office · Medium · Business-critical,healthcare,outpatient,regional_office,video,13.336,86.66,71.45,56.19,fail
+Outpatient clinics · Regional office · Medium · Business-critical,healthcare,outpatient,regional_office,emr,0.845,99.16,98.19,97.22,fail
+Outpatient clinics · Branch office · Medium · Business-critical,healthcare,outpatient,branch_office,video,9.307,90.69,79.06,67.33,fail
+Outpatient clinics · Branch office · Medium · Business-critical,healthcare,outpatient,branch_office,emr,3.221,96.78,92.75,88.69,fail
+Outpatient clinics · R&D / engineering center · Medium · Business-critical,healthcare,outpatient,rnd_center,video,11.449,88.55,74.47,59.87,fail
+Outpatient clinics · R&D / engineering center · Medium · Business-critical,healthcare,outpatient,rnd_center,emr,0.758,99.24,98.31,97.34,fail
+Outpatient clinics · Hospital · Medium · Business-critical,healthcare,outpatient,hospital,emr,18.977,81.02,61.78,49.27,fail
+Outpatient clinics · Hospital · Medium · Business-critical,healthcare,outpatient,hospital,video,6.193,93.81,87.53,83.45,fail
+Outpatient clinics · Clinic · Medium · Business-critical,healthcare,outpatient,clinic,emr,15.687,84.31,67.95,57.54,fail
+Outpatient clinics · Clinic · Medium · Business-critical,healthcare,outpatient,clinic,video,9.259,90.74,81.08,74.94,fail
+Outpatient clinics · Laboratory · Medium · Business-critical,healthcare,outpatient,laboratory,emr,8.449,91.55,77.62,65.36,fail
+Outpatient clinics · Laboratory · Medium · Business-critical,healthcare,outpatient,laboratory,video,2.579,97.42,93.17,89.43,fail
+Diagnostics & labs · Headquarters / campus · Medium · Business-critical,healthcare,diagnostics,headquarters,ot_telemetry,0.408,99.59,98.9,97.82,fail
+Diagnostics & labs · Headquarters / campus · Medium · Business-critical,healthcare,diagnostics,headquarters,pacs_imaging,0.09,99.91,99.76,99.52,fail
+Diagnostics & labs · Regional office · Medium · Business-critical,healthcare,diagnostics,regional_office,ot_telemetry,1.639,98.36,95.65,91.74,fail
+Diagnostics & labs · Regional office · Medium · Business-critical,healthcare,diagnostics,regional_office,pacs_imaging,0.361,99.64,99.04,98.18,fail
+Diagnostics & labs · Branch office · Medium · Business-critical,healthcare,diagnostics,branch_office,ot_telemetry,6.25,93.75,84.57,74.04,fail
+Diagnostics & labs · Branch office · Medium · Business-critical,healthcare,diagnostics,branch_office,pacs_imaging,1.376,98.62,96.6,94.28,fail
+Diagnostics & labs · R&D / engineering center · Medium · Business-critical,healthcare,diagnostics,rnd_center,ot_telemetry,1.471,98.53,96.05,92.47,fail
+Diagnostics & labs · R&D / engineering center · Medium · Business-critical,healthcare,diagnostics,rnd_center,pacs_imaging,0.324,99.68,99.13,98.34,fail
+Diagnostics & labs · Hospital · Medium · Business-critical,healthcare,diagnostics,hospital,pacs_imaging,8.107,91.89,84.12,77.73,fail
+Diagnostics & labs · Hospital · Medium · Business-critical,healthcare,diagnostics,hospital,ot_telemetry,13.636,86.36,73.29,62.53,fail
+Diagnostics & labs · Clinic · Medium · Business-critical,healthcare,diagnostics,clinic,pacs_imaging,5.744,94.26,85.78,77.24,fail
+Diagnostics & labs · Clinic · Medium · Business-critical,healthcare,diagnostics,clinic,ot_telemetry,4.348,95.65,89.23,82.77,fail
+Diagnostics & labs · Laboratory · Medium · Business-critical,healthcare,diagnostics,laboratory,pacs_imaging,3.61,96.39,94.91,94.16,fail
+Diagnostics & labs · Laboratory · Medium · Business-critical,healthcare,diagnostics,laboratory,ot_telemetry,49.18,50.82,30.6,20.46,fail
+Retail banking · Headquarters / campus · Medium · Business-critical,financial_services,retail_banking,headquarters,video,12.924,87.08,72.16,56.62,fail
+Retail banking · Headquarters / campus · Medium · Business-critical,financial_services,retail_banking,headquarters,core_banking,0.236,99.76,99.49,99.21,fail
+Retail banking · Regional office · Medium · Business-critical,financial_services,retail_banking,regional_office,video,12.604,87.4,72.84,57.96,fail
+Retail banking · Regional office · Medium · Business-critical,financial_services,retail_banking,regional_office,core_banking,0.948,99.05,97.96,96.84,fail
+Retail banking · Branch office · Medium · Business-critical,financial_services,retail_banking,branch_office,video,9.264,90.74,79.4,67.97,fail
+Retail banking · Branch office · Medium · Business-critical,financial_services,retail_banking,branch_office,core_banking,3.616,96.38,91.96,87.5,fail
+Retail banking · Bank branch · Medium · Business-critical,financial_services,retail_banking,bank_branch,video,8.101,91.9,82.35,76.33,fail
+Retail banking · Bank branch · Medium · Business-critical,financial_services,retail_banking,bank_branch,core_banking,14.463,85.54,68.49,57.75,fail
+Insurance · Headquarters / campus · Medium · Business-critical,financial_services,insurance,headquarters,web_saas,27.491,72.51,53.88,44.39,fail
+Insurance · Headquarters / campus · Medium · Business-critical,financial_services,insurance,headquarters,file_sync,11.685,88.32,80.4,76.36,fail
+Insurance · Headquarters / campus · Medium · Business-critical,financial_services,insurance,headquarters,erp,0.088,99.91,99.85,99.82,fail
+Insurance · Regional office · Medium · Business-critical,financial_services,insurance,regional_office,web_saas,26.263,73.74,54.78,44.83,fail
+Insurance · Regional office · Medium · Business-critical,financial_services,insurance,regional_office,file_sync,10.509,89.49,81.91,77.92,fail
+Insurance · Regional office · Medium · Business-critical,financial_services,insurance,regional_office,erp,0.354,99.65,99.39,99.26,fail
+Insurance · Branch office · Medium · Business-critical,financial_services,insurance,branch_office,web_saas,22.069,77.93,59.22,48.31,fail
+Insurance · Branch office · Medium · Business-critical,financial_services,insurance,branch_office,file_sync,7.846,92.15,85.5,81.62,fail
+Insurance · Branch office · Medium · Business-critical,financial_services,insurance,branch_office,erp,1.348,98.65,97.51,96.84,fail
+Insurance · Bank branch · Medium · Business-critical,financial_services,insurance,bank_branch,web_saas,10.214,89.79,74.05,60.71,fail
+Insurance · Bank branch · Medium · Business-critical,financial_services,insurance,bank_branch,file_sync,1.336,98.66,96.61,94.86,fail
+Insurance · Bank branch · Medium · Business-critical,financial_services,insurance,bank_branch,erp,1.078,98.92,97.26,95.85,fail
+Capital markets · Headquarters / campus · Medium · Business-critical,financial_services,capital_markets,headquarters,voice,6.239,93.76,87.81,82.45,fail
+Capital markets · Headquarters / campus · Medium · Business-critical,financial_services,capital_markets,headquarters,video,13.45,86.55,73.72,62.16,fail
+Capital markets · Headquarters / campus · Medium · Business-critical,financial_services,capital_markets,headquarters,core_banking,0.219,99.78,99.57,99.38,fail
+Capital markets · Regional office · Medium · Business-critical,financial_services,capital_markets,regional_office,voice,6.066,93.93,88.11,82.93,fail
+Capital markets · Regional office · Medium · Business-critical,financial_services,capital_markets,regional_office,video,13.133,86.87,74.25,63.05,fail
+Capital markets · Regional office · Medium · Business-critical,financial_services,capital_markets,regional_office,core_banking,0.878,99.12,98.28,97.53,fail
+Capital markets · Branch office · Medium · Business-critical,financial_services,capital_markets,branch_office,voice,5.742,94.26,88.31,83.07,fail
+Capital markets · Branch office · Medium · Business-critical,financial_services,capital_markets,branch_office,video,9.616,90.38,80.42,71.64,fail
+Capital markets · Branch office · Medium · Business-critical,financial_services,capital_markets,branch_office,core_banking,3.348,96.65,93.18,90.13,fail
+Capital markets · Bank branch · Medium · Business-critical,financial_services,capital_markets,bank_branch,video,8.917,91.08,80.59,73.92,fail
+Capital markets · Bank branch · Medium · Business-critical,financial_services,capital_markets,bank_branch,core_banking,13.393,86.61,70.85,60.83,fail
+Capital markets · Bank branch · Medium · Business-critical,financial_services,capital_markets,bank_branch,voice,0.127,99.87,99.72,99.63,fail
+Third-party logistics · Headquarters / campus · Medium · Business-critical,logistics,third_party_logistics,headquarters,erp,0.074,99.93,99.8,99.6,fail
+Third-party logistics · Headquarters / campus · Medium · Business-critical,logistics,third_party_logistics,headquarters,wms_scan,0.256,99.74,99.31,98.62,fail
+Third-party logistics · Regional office · Medium · Business-critical,logistics,third_party_logistics,regional_office,erp,0.299,99.7,99.2,98.45,fail
+Third-party logistics · Regional office · Medium · Business-critical,logistics,third_party_logistics,regional_office,wms_scan,1.028,98.97,97.24,94.67,fail
+Third-party logistics · Branch office · Medium · Business-critical,logistics,third_party_logistics,branch_office,erp,1.141,98.86,97.07,94.81,fail
+Third-party logistics · Branch office · Medium · Business-critical,logistics,third_party_logistics,branch_office,wms_scan,3.921,96.08,89.92,82.15,fail
+Third-party logistics · Warehouse / distribution center · Medium · Business-critical,logistics,third_party_logistics,warehouse,erp,6.503,93.5,87.0,83.51,fail
+Third-party logistics · Warehouse / distribution center · Medium · Business-critical,logistics,third_party_logistics,warehouse,wms_scan,22.355,77.65,55.3,43.32,fail
+Third-party logistics · Field / remote site · Medium · Business-critical,logistics,third_party_logistics,field_site,erp,0.25,99.75,99.04,98.12,fail
+Third-party logistics · Field / remote site · Medium · Business-critical,logistics,third_party_logistics,field_site,wms_scan,0.156,99.84,99.4,98.82,fail
+Parcel & courier · Headquarters / campus · Medium · Business-critical,logistics,parcel,headquarters,voice,5.756,94.24,86.02,75.63,fail
+Parcel & courier · Headquarters / campus · Medium · Business-critical,logistics,parcel,headquarters,erp,0.072,99.93,99.83,99.7,fail
+Parcel & courier · Headquarters / campus · Medium · Business-critical,logistics,parcel,headquarters,wms_scan,0.251,99.75,99.39,98.94,fail
+Parcel & courier · Regional office · Medium · Business-critical,logistics,parcel,regional_office,voice,5.702,94.3,86.25,76.47,fail
+Parcel & courier · Regional office · Medium · Business-critical,logistics,parcel,regional_office,erp,0.289,99.71,99.3,98.81,fail
+Parcel & courier · Regional office · Medium · Business-critical,logistics,parcel,regional_office,wms_scan,1.01,98.99,97.57,95.83,fail
+Parcel & courier · Branch office · Medium · Business-critical,logistics,parcel,branch_office,voice,5.813,94.19,86.51,78.42,fail
+Parcel & courier · Branch office · Medium · Business-critical,logistics,parcel,branch_office,erp,1.1,98.9,97.45,95.92,fail
+Parcel & courier · Branch office · Medium · Business-critical,logistics,parcel,branch_office,wms_scan,3.85,96.15,91.07,85.71,fail
+Parcel & courier · Warehouse / distribution center · Medium · Business-critical,logistics,parcel,warehouse,voice,3.857,96.14,92.65,90.88,fail
+Parcel & courier · Warehouse / distribution center · Medium · Business-critical,logistics,parcel,warehouse,erp,6.271,93.73,88.05,85.17,fail
+Parcel & courier · Warehouse / distribution center · Medium · Business-critical,logistics,parcel,warehouse,wms_scan,21.949,78.05,58.17,48.08,fail
+Parcel & courier · Field / remote site · Medium · Business-critical,logistics,parcel,field_site,voice,0.278,99.72,98.94,97.94,fail
+Parcel & courier · Field / remote site · Medium · Business-critical,logistics,parcel,field_site,erp,0.23,99.77,99.12,98.29,fail
+Parcel & courier · Field / remote site · Medium · Business-critical,logistics,parcel,field_site,wms_scan,0.146,99.85,99.44,98.91,fail
+Power generation & grid · Headquarters / campus · Medium · Business-critical,energy_utilities,power,headquarters,ot_telemetry,0.408,99.59,98.9,97.82,fail
+Power generation & grid · Regional office · Medium · Business-critical,energy_utilities,power,regional_office,ot_telemetry,1.639,98.36,95.62,91.62,fail
+Power generation & grid · Branch office · Medium · Business-critical,energy_utilities,power,branch_office,ot_telemetry,6.25,93.75,84.21,72.73,fail
+Power generation & grid · Manufacturing plant · Medium · Business-critical,energy_utilities,power,plant,ot_telemetry,32.0,68.0,46.7,30.46,fail
+Power generation & grid · Field / remote site · Medium · Business-critical,energy_utilities,power,field_site,ot_telemetry,86.957,13.04,4.55,2.33,fail
+Water & wastewater · Headquarters / campus · Medium · Business-critical,energy_utilities,water,headquarters,ot_telemetry,0.408,99.59,98.9,97.82,fail
+Water & wastewater · Regional office · Medium · Business-critical,energy_utilities,water,regional_office,ot_telemetry,1.639,98.36,95.62,91.62,fail
+Water & wastewater · Branch office · Medium · Business-critical,energy_utilities,water,branch_office,ot_telemetry,6.25,93.75,84.21,72.73,fail
+Water & wastewater · Manufacturing plant · Medium · Business-critical,energy_utilities,water,plant,ot_telemetry,32.0,68.0,46.7,30.46,fail
+Water & wastewater · Field / remote site · Medium · Business-critical,energy_utilities,water,field_site,ot_telemetry,86.957,13.04,4.55,2.33,fail
+Oil & gas · Headquarters / campus · Medium · Business-critical,energy_utilities,oil_gas,headquarters,cctv_backhaul,10.204,89.8,77.13,63.05,fail
+Oil & gas · Headquarters / campus · Medium · Business-critical,energy_utilities,oil_gas,headquarters,ot_telemetry,0.408,99.59,99.09,98.52,fail
+Oil & gas · Regional office · Medium · Business-critical,energy_utilities,oil_gas,regional_office,cctv_backhaul,13.115,86.89,72.28,57.73,fail
+Oil & gas · Regional office · Medium · Business-critical,energy_utilities,oil_gas,regional_office,ot_telemetry,1.639,98.36,96.53,94.72,fail
+Oil & gas · Branch office · Medium · Business-critical,energy_utilities,oil_gas,branch_office,cctv_backhaul,25.0,75.0,57.15,44.19,fail
+Oil & gas · Branch office · Medium · Business-critical,energy_utilities,oil_gas,branch_office,ot_telemetry,6.25,93.75,89.29,86.05,fail
+Oil & gas · Manufacturing plant · Medium · Business-critical,energy_utilities,oil_gas,plant,ot_telemetry,32.0,68.0,51.54,39.64,fail
+Oil & gas · Manufacturing plant · Medium · Business-critical,energy_utilities,oil_gas,plant,cctv_backhaul,8.0,92.0,87.89,84.91,fail
+Oil & gas · Field / remote site · Medium · Business-critical,energy_utilities,oil_gas,field_site,ot_telemetry,86.957,13.04,10.92,10.02,fail
+Oil & gas · Field / remote site · Medium · Business-critical,energy_utilities,oil_gas,field_site,cctv_backhaul,8.696,91.3,91.09,91.0,fail
+Government agency · Headquarters / campus · Medium · Business-critical,public_education,government,headquarters,web_saas,26.29,73.71,55.78,46.56,fail
+Government agency · Headquarters / campus · Medium · Business-critical,public_education,government,headquarters,video,12.65,87.35,78.72,74.29,fail
+Government agency · Regional office · Medium · Business-critical,public_education,government,regional_office,web_saas,25.66,74.34,56.28,46.92,fail
+Government agency · Regional office · Medium · Business-critical,public_education,government,regional_office,video,12.328,87.67,79.0,74.5,fail
+Government agency · Branch office · Medium · Business-critical,public_education,government,branch_office,web_saas,23.727,76.27,56.65,45.75,fail
+Government agency · Branch office · Medium · Business-critical,public_education,government,branch_office,video,9.021,90.98,83.52,79.37,fail
+Government agency · School / campus · Medium · Business-critical,public_education,government,school,web_saas,18.513,81.49,66.0,58.59,fail
+Government agency · School / campus · Medium · Business-critical,public_education,government,school,video,16.44,83.56,69.81,63.23,fail
+Education · Headquarters / campus · Medium · Business-critical,public_education,education,headquarters,video,14.221,85.78,72.39,60.39,fail
+Education · Headquarters / campus · Medium · Business-critical,public_education,education,headquarters,guest_internet,6.079,93.92,88.2,83.07,fail
+Education · Regional office · Medium · Business-critical,public_education,education,regional_office,video,13.855,86.15,72.87,60.98,fail
+Education · Regional office · Medium · Business-critical,public_education,education,regional_office,guest_internet,6.104,93.9,88.05,82.81,fail
+Education · Branch office · Medium · Business-critical,public_education,education,branch_office,video,11.049,88.95,76.23,64.46,fail
+Education · Branch office · Medium · Business-critical,public_education,education,branch_office,guest_internet,4.654,95.35,89.99,85.03,fail
+Education · School / campus · Medium · Business-critical,public_education,education,school,video,16.314,83.69,76.26,72.21,fail
+Education · School / campus · Medium · Business-critical,public_education,education,school,guest_internet,32.377,67.62,52.89,44.85,fail
+Consulting · Headquarters / campus · Medium · Business-critical,professional_services,consulting,headquarters,collaboration,16.739,83.26,69.92,61.34,fail
+Consulting · Headquarters / campus · Medium · Business-critical,professional_services,consulting,headquarters,video,14.207,85.79,74.47,67.19,fail
+Consulting · Regional office · Medium · Business-critical,professional_services,consulting,regional_office,collaboration,16.167,83.83,70.55,61.92,fail
+Consulting · Regional office · Medium · Business-critical,professional_services,consulting,regional_office,video,13.852,86.15,74.76,67.37,fail
+Consulting · Branch office · Medium · Business-critical,professional_services,consulting,branch_office,collaboration,15.409,84.59,69.9,59.8,fail
+Consulting · Branch office · Medium · Business-critical,professional_services,consulting,branch_office,video,10.065,89.94,80.34,73.74,fail
+Consulting · R&D / engineering center · Medium · Business-critical,professional_services,consulting,rnd_center,collaboration,14.888,85.11,71.62,62.51,fail
+Consulting · R&D / engineering center · Medium · Business-critical,professional_services,consulting,rnd_center,video,12.065,87.94,77.0,69.62,fail
+Legal · Headquarters / campus · Medium · Business-critical,professional_services,legal,headquarters,web_saas,25.5,74.5,57.23,48.45,fail
+Legal · Headquarters / campus · Medium · Business-critical,professional_services,legal,headquarters,file_sync,13.808,86.19,76.84,72.09,fail
+Legal · Regional office · Medium · Business-critical,professional_services,legal,regional_office,web_saas,24.929,75.07,57.23,48.0,fail
+Legal · Regional office · Medium · Business-critical,professional_services,legal,regional_office,file_sync,12.662,87.34,78.28,73.59,fail
+Legal · Branch office · Medium · Business-critical,professional_services,legal,branch_office,web_saas,23.088,76.91,58.15,47.91,fail
+Legal · Branch office · Medium · Business-critical,professional_services,legal,branch_office,file_sync,10.388,89.61,81.17,76.56,fail
+Legal · R&D / engineering center · Medium · Business-critical,professional_services,legal,rnd_center,web_saas,21.302,78.7,62.13,52.93,fail
+Legal · R&D / engineering center · Medium · Business-critical,professional_services,legal,rnd_center,file_sync,12.96,87.04,76.96,71.37,fail
+Engineering & architecture · Headquarters / campus · Medium · Business-critical,professional_services,engineering_firm,headquarters,file_sync,13.321,86.68,71.35,55.57,fail
+Engineering & architecture · Headquarters / campus · Medium · Business-critical,professional_services,engineering_firm,headquarters,plm_cad,0.151,99.85,99.68,99.5,fail
+Engineering & architecture · Regional office · Medium · Business-critical,professional_services,engineering_firm,regional_office,file_sync,12.116,87.88,73.47,58.5,fail
+Engineering & architecture · Regional office · Medium · Business-critical,professional_services,engineering_firm,regional_office,plm_cad,0.606,99.39,98.67,97.92,fail
+Engineering & architecture · Branch office · Medium · Business-critical,professional_services,engineering_firm,branch_office,file_sync,9.528,90.47,78.45,66.0,fail
+Engineering & architecture · Branch office · Medium · Business-critical,professional_services,engineering_firm,branch_office,plm_cad,2.311,97.69,94.77,91.76,fail
+Engineering & architecture · R&D / engineering center · Medium · Business-critical,professional_services,engineering_firm,rnd_center,file_sync,12.035,87.96,78.24,70.66,fail
+Engineering & architecture · R&D / engineering center · Medium · Business-critical,professional_services,engineering_firm,rnd_center,plm_cad,14.68,85.32,73.46,64.21,fail
+Hotels & resorts · Headquarters / campus · Medium · Business-critical,hospitality,hotels,headquarters,guest_internet,6.439,93.56,84.53,73.32,fail
+Hotels & resorts · Headquarters / campus · Medium · Business-critical,hospitality,hotels,headquarters,pos,0.214,99.79,99.49,99.11,fail
+Hotels & resorts · Regional office · Medium · Business-critical,hospitality,hotels,regional_office,guest_internet,6.465,93.53,84.54,73.69,fail
+Hotels & resorts · Regional office · Medium · Business-critical,hospitality,hotels,regional_office,pos,0.859,99.14,97.95,96.51,fail
+Hotels & resorts · Branch office · Medium · Business-critical,hospitality,hotels,branch_office,guest_internet,4.93,95.07,87.87,79.81,fail
+Hotels & resorts · Branch office · Medium · Business-critical,hospitality,hotels,branch_office,pos,3.274,96.73,91.94,86.59,fail
+Hotels & resorts · Restaurant · Medium · Business-critical,hospitality,hotels,restaurant,pos,8.333,91.67,88.9,87.85,fail
+Hotels & resorts · Restaurant · Medium · Business-critical,hospitality,hotels,restaurant,guest_internet,53.777,46.22,28.37,21.6,fail
+Hotels & resorts · Hotel · Medium · Business-critical,hospitality,hotels,hotel,pos,2.926,97.07,95.82,95.35,fail
+Hotels & resorts · Hotel · Medium · Business-critical,hospitality,hotels,hotel,guest_internet,52.876,47.12,24.5,15.96,fail
+Restaurants · Headquarters / campus · Medium · Business-critical,hospitality,restaurants,headquarters,pos,0.245,99.76,99.34,98.68,fail
+Restaurants · Regional office · Medium · Business-critical,hospitality,restaurants,regional_office,pos,0.984,99.02,97.35,94.84,fail
+Restaurants · Branch office · Medium · Business-critical,hospitality,restaurants,branch_office,pos,3.75,96.25,90.19,82.13,fail
+Restaurants · Restaurant · Medium · Business-critical,hospitality,restaurants,restaurant,pos,9.545,90.45,73.42,58.0,fail
+Restaurants · Hotel · Medium · Business-critical,hospitality,restaurants,hotel,pos,3.352,96.65,89.22,80.54,fail
