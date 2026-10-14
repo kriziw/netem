@@ -15,11 +15,12 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      # Scoring is already on main; test the current PR directly.
+      # Scoring is merged into main. Exercise the checked-out PR directly;
+      # remerging its old pre-squash feature commit can conflict with new fixes.
       - uses: actions/checkout@v4
         with:
           repository: kriziw/netem-traffic-simulator
-          ref: 5f949de3b3c27d5467292bff0a978fe11f9f53cf
+          ref: 0693f2b95204db176d49e9d669b968458ae6db9e
           path: _simulator
       - uses: actions/checkout@v4
         with:
@@ -33,6 +34,8 @@ jobs:
           pip install -r _simulator/requirements.txt
           sudo apt-get update -qq
           sudo apt-get install -y iproute2 curl
+      - name: Verify live-window controller and simulator contract
+        run: SIMULATOR_SOURCE="$PWD/_simulator" python tests/live_window_acceptance.py
       - name: Verify actual old and new consumer compatibility
         run: SIMULATOR_SOURCE="$PWD/_simulator" python tests/engine_compatibility.py
       - name: Exercise real packets and application engines in isolated namespaces
@@ -42,6 +45,7 @@ jobs:
         with:
           name: engine-acceptance-evidence
           path: |
+            live-window-acceptance-results.json
             engine-acceptance-results.json
             engine-compatibility-results.json
           if-no-files-found: warn
