@@ -1879,10 +1879,27 @@ def clear_qdisc(ifname: str):
 
 # Resource guards are generous and independent of the emulated line rate. CoDel
 # controls persistent queue delay; memory exhaustion must not model WAN quality.
-SHAPER_QUEUE_MEMORY_BYTES = 64 * 1024 * 1024
-SHAPER_QUEUE_PACKETS = 65536
+SHAPER_QUEUE_BUDGET_MS = 1000
+SHAPER_MEMORY_HEADROOM = 4
+SHAPER_QUEUE_MIN_MEMORY = 8 * 1024 * 1024
+SHAPER_QUEUE_MAX_MEMORY = 512 * 1024 * 1024
+SHAPER_QUEUE_MIN_PACKETS = 8192
+SHAPER_QUEUE_MAX_PACKETS = 1048576
 SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
+
+
+def shaper_queue_limits(rate_mbit: float):
+    """One second of line-rate traffic, with allocation headroom and resource guards.
+
+    Packet capacity uses a conservative 256-byte reference packet. Memory
+    allocation varies by kernel and offloads; this is not a queue-delay guarantee.
+    """
+    rate = rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT
+    wire_bytes = rate * 125 * SHAPER_QUEUE_BUDGET_MS
+    packets = min(SHAPER_QUEUE_MAX_PACKETS, max(SHAPER_QUEUE_MIN_PACKETS, math.ceil(wire_bytes / 256)))
+    memory = min(SHAPER_QUEUE_MAX_MEMORY, max(SHAPER_QUEUE_MIN_MEMORY, math.ceil(wire_bytes * SHAPER_MEMORY_HEADROOM)))
+    return packets, memory
 
 
 def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
@@ -1894,9 +1911,10 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
     """
     bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
     hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
-    netem_limit = max(SHAPER_QUEUE_PACKETS, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
+    packets, memory = shaper_queue_limits(rate_mbit)
+    netem_limit = max(packets, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
     burst = max(3200, int(bytes_per_ms * SHAPER_BURST_MS))
-    return netem_limit, burst, SHAPER_QUEUE_MEMORY_BYTES
+    return netem_limit, burst, memory
 
 
 def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
@@ -1998,7 +2016,7 @@ def _apply_netem(
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
         fq_cmd = (
             f"{TC} qdisc {verb} dev {ifname} parent 10:1 handle 20: fq_codel "
-            f"limit {SHAPER_QUEUE_PACKETS} memory_limit {limit_bytes} target 5ms interval 100ms"
+            f"limit {shaper_queue_limits(rate_mbit)[0]} memory_limit {limit_bytes} target 5ms interval 100ms"
         )
         rc3, out3, err3 = run_cmd(fq_cmd)
         if rc3 != 0:

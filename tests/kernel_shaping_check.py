@@ -18,7 +18,7 @@ def check_inside():
     assert "100Mbit" in output and "delay 5ms" in output, output
     structured = json.loads(subprocess.check_output(["tc", "-j", "qdisc", "show", "dev", "engine-test"], text=True))
     fair = next(row for row in structured if row['kind'] == 'fq_codel')['options']
-    assert fair['limit'] == 65536 and fair['memory_limit'] == 67108864, structured
+    assert fair['limit'] == 48829 and fair['memory_limit'] == 50000000, structured
     # A verified no-op must not call the destructive application function.
     original = app._apply_netem
     def forbidden(*args):
@@ -43,6 +43,9 @@ def check_inside():
         app.clear_qdisc = original_clear
     output = subprocess.check_output(["tc", "qdisc", "show", "dev", "engine-test"], text=True)
     assert "18Mbit" in output and "delay 40ms" in output, output
+    shaped = json.loads(subprocess.check_output(["tc", "-j", "qdisc", "show", "dev", "engine-test"], text=True))
+    resized = next(row for row in shaped if row['kind'] == 'fq_codel')['options']
+    assert resized['limit'] == 8790 and resized['memory_limit'] == 9000000, shaped
     print("PASS: real Linux shaping, verified no-op and validation-before-mutation")
     check_queue_bursts(app)
 

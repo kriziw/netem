@@ -7,21 +7,21 @@ import app as netem
 
 class ShaperSizingTests(unittest.TestCase):
     def test_queues_scale_with_rate_and_delay(self):
-        self.assertEqual(netem.shaper_queue_sizes(300, 15, 0), (65536, 375000, 67108864))
-        self.assertEqual(netem.shaper_queue_sizes(100, 5, 0), (65536, 125000, 67108864))
+        self.assertEqual(netem.shaper_queue_sizes(300, 15, 0), (146485, 375000, 150000000))
+        self.assertEqual(netem.shaper_queue_sizes(100, 5, 0), (48829, 125000, 50000000))
         # The generous floor holds ordinary bursts and long-delay in-flight packets.
-        self.assertEqual(netem.shaper_queue_sizes(100, 300, 0)[0], 65536)
-        self.assertEqual(netem.shaper_queue_sizes(1, 0, 0), (65536, 3200, 67108864))
+        self.assertEqual(netem.shaper_queue_sizes(100, 300, 0)[0], 48829)
+        self.assertEqual(netem.shaper_queue_sizes(1, 0, 0), (8192, 3200, 8388608))
         # Unshaped links also receive the generous packet guard.
-        self.assertEqual(netem.shaper_queue_sizes(0, 20, 5)[0], 65536)
+        self.assertEqual(netem.shaper_queue_sizes(0, 20, 5)[0], 488282)
 
     def test_applied_commands_use_the_sizes(self):
         commands = []
         with patch.object(netem, "run_cmd", side_effect=lambda cmd: commands.append(cmd) or (0, "", "")):
             self.assertEqual(netem.apply_netem("eth1", 15, 0, 0.1, 300), (True, "OK"))
-        self.assertIn("netem limit 65536 delay 15.0ms loss 0.100%", commands[1])
-        self.assertIn("tbf rate 300mbit buffer 375000 limit 134217728", commands[2])
-        self.assertIn("parent 10:1 handle 20: fq_codel limit 65536 memory_limit 67108864 target 5ms interval 100ms", commands[3])
+        self.assertIn("netem limit 146485 delay 15.0ms loss 0.100%", commands[1])
+        self.assertIn("tbf rate 300mbit buffer 375000 limit 300000000", commands[2])
+        self.assertIn("parent 10:1 handle 20: fq_codel limit 146485 memory_limit 150000000 target 5ms interval 100ms", commands[3])
         self.assertEqual(len(commands), 5)
         self.assertIn("qdisc show dev eth1", commands[-1])
 
@@ -56,9 +56,19 @@ class QueueResourceTests(unittest.TestCase):
     def test_low_rate_guards_are_generous_and_independent_of_wire_bytes(self):
         for rate in (1, 18, 42, 100, 300):
             packets, burst, memory = netem.shaper_queue_sizes(rate, 40, 5)
-            self.assertGreaterEqual(packets, 65536)
-            self.assertEqual(memory, 64 * 1024 * 1024)
+            self.assertGreaterEqual(packets, 8192)
+            self.assertGreaterEqual(memory, 8 * 1024 * 1024)
             self.assertGreaterEqual(burst, 3200)
+
+    def test_queue_resource_budget_scales_per_direction_with_bounded_guards(self):
+        down_packets, down_memory = netem.shaper_queue_limits(42)
+        up_packets, up_memory = netem.shaper_queue_limits(18)
+        self.assertEqual((down_packets, down_memory), (20508, 21000000))
+        self.assertEqual((up_packets, up_memory), (8790, 9000000))
+        self.assertGreater(down_packets, up_packets)
+        self.assertGreater(down_memory, up_memory)
+        self.assertEqual(netem.shaper_queue_limits(100000)[1], 512 * 1024 * 1024)
+        self.assertEqual(netem.shaper_queue_limits(100000)[0], 1048576)
 
     def test_drop_reasons_do_not_double_count_memory_as_packet_limit(self):
         def counter(packets, total, limit, memory):
