@@ -51,7 +51,7 @@ def check_inside():
 
 
 def check_queue_bursts(app):
-    # Both veths live only in this disposable namespace. Raw Ethernet crosses the
+    # All veths live only in this disposable namespace. Raw Ethernet crosses the
     # egress qdiscs without routing shortcuts, socket pacing, or a production target.
     subprocess.run(['ip', 'link', 'add', 'queue-source', 'type', 'veth', 'peer', 'name', 'queue-sink'], check=True)
     subprocess.run(['ip', 'link', 'add', 'ingress-source', 'type', 'veth', 'peer', 'name', 'ingress-sink'], check=True)

@@ -1877,8 +1877,8 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
-# Resource guards are generous and independent of the emulated line rate. CoDel
-# controls persistent queue delay; memory exhaustion must not model WAN quality.
+# Resource guards scale generously with configured line rate, separately from pacing.
+# CoDel controls persistent queue delay; memory exhaustion must not model WAN quality.
 SHAPER_QUEUE_BUDGET_MS = 1000
 SHAPER_MEMORY_HEADROOM = 4
 SHAPER_QUEUE_MIN_MEMORY = 8 * 1024 * 1024
