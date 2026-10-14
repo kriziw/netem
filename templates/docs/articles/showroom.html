@@ -66,7 +66,9 @@
 <p>The showroom is a separate web application with only the dashboard, its two assets and a presentation snapshot. It never publishes configuration, secrets, interface names or addresses; addresses in diagnosis texts are replaced with "[address]". It accepts only GET and HEAD and has no controls, so pausing or stopping a test is done from the operator interface. The showroom has no login: anyone who can reach its port can watch it.</p>
 
 <h2 id="offline">Connection loss</h2>
-<p>The page polls every two seconds during a test and every second otherwise. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>
+<p>The page polls every second. If the appliance stops answering, the badge shows <em>Connection lost</em>, live rates are blanked, the last known state is labelled as such, and charts show a gap instead of zero traffic. It reconnects on its own.</p>
 
 <h2 id="branding">Branding</h2>
 <p>The showroom uses the appliance brand: name, logo, favicon, font and colours. See <a href="{{ url_for('documentation_page', slug='branding') }}">Appliance branding</a>.</p>
+
+<p>Live application experience defaults to the most recent 15 seconds within the current phase. Select 5–120 seconds at test start. New phases collect their own evidence; a shorter window does not lower sample or statistical confirmation requirements. Final phase reports use the entire phase, excluding pauses, rather than averaging the live snapshots.</p>
