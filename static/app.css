@@ -929,7 +929,7 @@ pre {
 .steer-bar { display:flex; height:18px; margin:7px 0 5px; border-radius:6px; overflow:hidden; background:var(--surface-3); }
 .steer-seg { display:flex; align-items:center; justify-content:center; min-width:0; overflow:hidden; white-space:nowrap; font-size:10px; font-weight:650; color:var(--color-06121f); transition:width .4s ease; }
 .steer-seg.healthy { background:var(--success); }
-.steer-seg.congested { background:var(--warning); }
+.steer-seg.congested, .steer-seg.queue_pressure { background:var(--warning); }
 .steer-seg.degraded { background:var(--color-ff9f6b); }
 .steer-seg.failed { background:var(--danger); }
 .steer-seg.empty { background:transparent; color:var(--text-soft); }
