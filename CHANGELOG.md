@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.0.0](https://github.com/kriziw/netem/compare/v0.32.0...v1.0.0) (2026-10-14)
+
+
+### ⚠ BREAKING CHANGES
+
+* enforce evidence-aware application experience acceptance ([#117](https://github.com/kriziw/netem/issues/117))
+
+### Features
+
+* enforce evidence-aware application experience acceptance ([#117](https://github.com/kriziw/netem/issues/117)) ([b887581](https://github.com/kriziw/netem/commit/b887581368b3598553909e74d8c0d89a644bf851))
+
+
+### Bug Fixes
+
+* name the only WAN carrying traffic when no reply address maps to a WAN ([#115](https://github.com/kriziw/netem/issues/115)) ([6ba3161](https://github.com/kriziw/netem/commit/6ba3161237a7db6d7ec89d4797939276de7bcedf))
+* verify shaping transitions and calibration evidence ([#118](https://github.com/kriziw/netem/issues/118)) ([a9c097a](https://github.com/kriziw/netem/commit/a9c097a789c84707f13615c37d3dc4bdbb31b6f1))
+
 ## [0.32.0](https://github.com/kriziw/netem/compare/v0.31.0...v0.32.0) (2026-10-13)
 
 
