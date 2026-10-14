@@ -19,11 +19,11 @@ jobs:
         run: |
           git config user.name engine-ci
           git config user.email engine-ci@example.invalid
-          git merge --no-commit --no-ff 07f22f9ca5539210dd6b2b917f1c502dc8ffaf6e
+          git merge --no-commit --no-ff f5a2a47736986549e6771c6f5e3eb36f4cf3d199
       - uses: actions/checkout@v4
         with:
           repository: kriziw/netem-traffic-simulator
-          ref: bab91972bfd1c777d0403f4846df32c42bfdaf6b
+          ref: d3634b7051ed39923d19779d70e862a9a0ac4640
           path: _simulator
       - uses: actions/checkout@v4
         with:
