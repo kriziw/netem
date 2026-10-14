@@ -5805,6 +5805,7 @@ def recorder_finish(result: str, error):
     summary["link"] = (link or {}).get("name") or record.get("link_id")
     if record.get('test_id'):
         summary['test_id'] = record['test_id']
+        summary['record_complete'] = False  # Crash during collection must remain explicitly partial.
         try:
             test_records.write(RUNTIME_DIR, record['test_id'], 'record.json', record)
             test_records.write(RUNTIME_DIR, record['test_id'], 'summary.json', summary)

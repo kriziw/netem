@@ -35,6 +35,8 @@ retroactively. Existing operator/proxy access restrictions apply.
 
 The ZIP contains:
 
+- A bundle manifest identifying partial/unfinished records and SHA-256 hashes of
+  its evidence files. Record completeness is separate from test acceptance.
 - A readable overview, execution/experience summary and original configuration.
 - A journal of events and live measurements, including per-application evidence,
   workload settings, target identity/version, shaping/queue observations and steering.

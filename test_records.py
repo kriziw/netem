@@ -1,5 +1,6 @@
 """Durable per-test troubleshooting records, separate from the last-test summary."""
 import json
+import hashlib
 import re
 import threading
 import time
@@ -67,6 +68,16 @@ def archive(root, test_id):
     target = folder / 'record.zip'
     temporary = folder / 'record.zip.tmp'
     with _LOCK:
+        try:
+            summary = json.loads((folder / 'summary.json').read_text(encoding='utf-8'))
+        except (OSError, ValueError):
+            summary = {}
+        files = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in folder.iterdir()
+                 if path.suffix in ('.json', '.jsonl', '.txt') and path.name != 'bundle-manifest.json'}
+        write(root, test_id, 'bundle-manifest.json', {'schema_version': 1, 'test_id': test_id,
+              'complete': summary.get('record_complete') is True,
+              'status': 'complete' if summary.get('record_complete') is True else 'partial_or_unfinished',
+              'sha256': files})
         with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as bundle:
             for path in sorted(folder.iterdir()):
                 if path.suffix in ('.json', '.jsonl', '.txt'):

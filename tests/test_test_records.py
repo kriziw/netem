@@ -27,6 +27,7 @@ class TestRecordTests(unittest.TestCase):
                 self.assertNotIn('hidden', contents)
                 self.assertNotIn('user:pass', contents)
                 self.assertIn('98', contents)
+                self.assertFalse(json.loads(bundle.read('bundle-manifest.json'))['complete'])
             response.close()
             self.assertEqual(test_records.history(root)[0]['result'], 'unfinished')
             self.assertEqual(netem.app.test_client().get('/tests/records/not-an-id/download').status_code, 404)
