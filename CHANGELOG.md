@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.2.0](https://github.com/kriziw/netem/compare/v1.1.0...v1.2.0) (2026-10-14)
+
+
+### Features
+
+* expose small-site measurements and downloadable test records ([#123](https://github.com/kriziw/netem/issues/123)) ([28cc559](https://github.com/kriziw/netem/commit/28cc5592bbff98eae4846b72e56dae129af3ac7b))
+* show session results between tests and brief each test for 30 seconds ([#124](https://github.com/kriziw/netem/issues/124)) ([e429ae2](https://github.com/kriziw/netem/commit/e429ae249f138a149d228a3147023894af09a1f6))
+
 ## [1.1.0](https://github.com/kriziw/netem/compare/v1.0.0...v1.1.0) (2026-10-14)
 
 
