@@ -45,6 +45,14 @@ class EvidenceTests(unittest.TestCase):
         dem.update(business_acceptance="unknown", critical_alerts=[{"application": "erp", "severity": "observation"}])
         self.assertEqual(netem.showroom_outcome(diagnosis, None)["experience"]["verdicts"]["experience"], "unknown")
 
+    def test_complete_low_utility_fails_even_without_a_critical_application(self):
+        dem = {"requests": 100, "experience_score": 0, "scoring_complete": True,
+               "business_acceptance": "unknown", "critical_alerts": []}
+        state = {"traffic_generator": {"connected": True, "status": {"dem": dem}}}
+        self.assertEqual(netem.showroom_outcome(state, None)["experience"]["verdicts"]["experience"], "fail")
+        dem["scoring_complete"] = False
+        self.assertEqual(netem.showroom_outcome(state, None)["experience"]["verdicts"]["experience"], "unknown")
+
     def test_short_phase_has_exact_boundaries_and_run_identity(self):
         with patch.object(netem, "traffic_generator_request", return_value={"scoring_complete": False}) as request:
             result = netem.phase_window_dem(3.8, since=100, until=103.8, run_id="run-a")

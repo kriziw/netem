@@ -5526,7 +5526,11 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     def phase_verdict(phase):
         if confirmed_critical_failure(phase):
             return "fail"
-        if phase["note"] or not targets or phase.get("business_acceptance") == "unknown":
+        if phase["note"] or not targets:
+            return "unknown"
+        if phase.get("experience_score") is not None and targets.get("experience_min") is not None and phase["experience_score"] < targets["experience_min"]:
+            return "fail"
+        if phase.get("business_acceptance") == "unknown":
             return "unknown"
         if phase.get("business_acceptance") == "pass":
             value, target = phase.get("experience_score"), targets.get("experience_min")
@@ -9283,7 +9287,9 @@ def showroom_outcome(diagnosis, site_plan):
     if dem.get("truncated") or dem.get("evidence_issues") or dem.get("scoring_complete") is not True:
         verdicts = {key: "unknown" for key in verdicts}
     confirmed_failure = confirmed_critical_failure(dem)
-    if confirmed_failure:
+    utility_failure = (dem.get("scoring_complete") is True and not dem.get("truncated") and not dem.get("evidence_issues")
+                       and showroom_verdict(score, targets.get("experience_min")) == "fail")
+    if confirmed_failure or utility_failure:
         verdicts["experience"] = "fail"
     elif dem.get("business_acceptance") == "unknown":
         verdicts["experience"] = "unknown"
