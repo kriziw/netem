@@ -9252,7 +9252,7 @@ def showroom_verdict(value, target, higher_is_better=True):
 def confirmed_critical_failure(dem):
     # Missing/overdue observations cannot erase an independently measured failure.
     # Corrupt or mixed windows cannot establish one either.
-    invalid = {"row_limit", "clock_discontinuity", "configuration_changed_in_window"}
+    invalid = {"row_limit", "clock_discontinuity", "configuration_changed_in_window", "dropped_transactions", "persistence_unhealthy"}
     if dem.get("truncated") or invalid.intersection(dem.get("evidence_issues") or []):
         return False
     return dem.get("business_acceptance") == "fail" or any(

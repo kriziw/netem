@@ -28,8 +28,11 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(result["experience_score"], 91)
         self.assertEqual(result["verdicts"]["experience"], "fail")
         self.assertEqual(result["critical_alerts"], dem["critical_alerts"])
-        dem["truncated"] = True
-        self.assertEqual(netem.showroom_outcome(diagnosis, None)["experience"]["verdicts"]["experience"], "unknown")
+        for invalid in ({"truncated": True}, {"evidence_issues": ["dropped_transactions"]}, {"evidence_issues": ["persistence_unhealthy"]}):
+            with self.subTest(invalid=invalid):
+                damaged = dict(dem, **invalid)
+                state = {"traffic_generator": {"connected": True, "status": {"dem": damaged}}}
+                self.assertEqual(netem.showroom_outcome(state, None)["experience"]["verdicts"]["experience"], "unknown")
 
     def test_partial_coverage_does_not_mask_confirmed_critical_failure(self):
         dem = {"requests": 5, "experience_score": 0, "coverage_pct": 10, "score_status": "provisional",
