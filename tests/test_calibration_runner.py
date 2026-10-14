@@ -25,7 +25,7 @@ class CalibrationRunTests(unittest.TestCase):
             patch.object(netem, "host_headroom", return_value={"status": "ok", "late_seconds": 0}),
             patch.object(netem, "calibration_device", return_value={"down": None, "up": None}),
             patch.object(netem, "qdisc_readings", return_value={}),
-            patch.object(netem, "simulator_state", return_value={"status": "running", "users": 10}),
+            patch.object(netem, "simulator_state", side_effect=self.simulator_state),
             patch.object(netem, "wan_timeline", return_value=[]),
             patch.object(netem, "host_window", return_value=[]),
             patch.object(netem, "calibration_probe", return_value={"skipped": "No ICMP probe is configured for this WAN."}),
@@ -36,6 +36,15 @@ class CalibrationRunTests(unittest.TestCase):
         for mock in patches:
             mock.start()
             self.addCleanup(mock.stop)
+
+    def simulator_state(self):
+        tick = getattr(self, "demand_tick", 0)
+        self.demand_tick = tick + 1
+        target = self.started[-1]
+        counts = {key: (tick % 2) * target * 30 * 1e6 / 8
+                  for key in ("offered_bytes", "admitted_bytes", "started_bytes", "delivered_bytes")}
+        return {"status": "running", "users": 10, "rate_demand": {
+            "timestamp_monotonic": 100 + tick * 30, "directions": {"down": dict(counts, target_mbps=target)}}}
 
     def request(self, path, method="GET", payload=None, timeout=3.0):
         run_id = f"run-{len(self.started) + 1}"
@@ -112,6 +121,8 @@ class CalibrationRunTests(unittest.TestCase):
     def test_latency_is_measured_before_the_active_workload_stops(self):
         self.measurements = [{"achieved_mbps": 10.0}]
         def probe(link_id):
+            if not self.started:  # unloaded baseline
+                return {"success": True, "latency_ms": 1, "target": "lab"}
             self.assertEqual(len(self.started), 1)
             self.assertEqual(self.stopped, [])
             return {"success": True, "latency_ms": 5}

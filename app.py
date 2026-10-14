@@ -1302,7 +1302,7 @@ def validate_scenario_steps(raw_steps):
                     except (TypeError, ValueError):
                         raise ValueError(f"Step {index}: invalid experience policy.") from None
                     cleaned["experience_policy"] = copy.deepcopy(policy)
-                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed"):
+                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed", "rate_down_mbps", "rate_up_mbps", "media_pattern", "media_session_s", "completion_grace_s"):
                     if field in value:
                         cleaned[field] = value[field]
             if operation == "start":
@@ -1711,6 +1711,7 @@ def _apply_selected_profile(link: dict, presets: dict):
             "quality": int(link.get("quality", 100)),
             "mode": link.get("mode", "quality"),
             "updated_at": time.time(), "apply_status": "applied", "desired": dict(effective),
+            "updated_monotonic": time.monotonic(),
             "generation": previous.get("generation", 0) + (previous.get("effective") != effective),
         }
         return True, "OK", effective
@@ -1913,11 +1914,14 @@ def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
         return False, "Reordering requires a positive delay"
     with PROFILE_APPLY_LOCK:
         previous = APPLIED_QDISCS.get(ifname)
-        if previous and previous["values"] == values:
+        observed = None
+        if previous:
             rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
-            if rc == 0 and observed.strip() and observed == previous["observed"]:
+            if rc == 0 and observed.strip() and observed == previous["observed"] and previous["values"] == values:
                 return True, "OK"
-        result = _apply_netem(ifname, *values)
+        in_place = bool(previous and observed == previous["observed"] and
+                        bool(previous["values"][3]) == bool(rate_mbit))
+        result = _apply_netem(ifname, *values, change=in_place) if in_place else _apply_netem(ifname, *values)
         APPLIED_QDISCS.pop(ifname, None)
         if result[0]:
             rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
@@ -1936,6 +1940,7 @@ def _apply_netem(
     duplicate_pct: float = 0.0,
     corrupt_pct: float = 0.0,
     reorder_pct: float = 0.0,
+    change: bool = False,
 ):
     """
     Apply netem + optional tbf on interface.
@@ -1943,8 +1948,10 @@ def _apply_netem(
     Advanced impairment controls are intentionally bounded to tc/netem
     primitives and operate only on configured lab interfaces.
     """
-    # Always start clean
-    clear_qdisc(ifname)
+    # Preserve backlog and counters when the verified hierarchy is unchanged.
+    verb = "change" if change else "add"
+    if not change:
+        clear_qdisc(ifname)
 
     netem_limit, burst_bytes, limit_bytes = shaper_queue_sizes(rate_mbit, delay_ms, jitter_ms)
     parts = ["netem", f"limit {netem_limit}"]
@@ -1971,7 +1978,12 @@ def _apply_netem(
     if reorder_pct and reorder_pct > 0:
         parts.append(f"reorder {min(100.0, reorder_pct):.3f}%")
 
-    netem_cmd = f"{TC} qdisc add dev {ifname} root handle 1:0 " + " ".join(parts)
+    if change:
+        parts = ["netem", f"limit {netem_limit}", f"delay {delay_ms:.1f}ms {jitter_ms:.1f}ms",
+                 f"loss {loss_pct:.3f}% {min(100.0, loss_correlation_pct):.3f}%",
+                 f"duplicate {min(100.0, duplicate_pct):.3f}%", f"corrupt {min(100.0, corrupt_pct):.3f}%",
+                 f"reorder {min(100.0, reorder_pct):.3f}%"]
+    netem_cmd = f"{TC} qdisc {verb} dev {ifname} root handle 1:0 " + " ".join(parts)
     rc, out, err = run_cmd(netem_cmd)
     if rc != 0:
         return False, f"Failed to apply netem: {err or out or 'unknown error'}"
@@ -1984,14 +1996,14 @@ def _apply_netem(
         # behind a bulk transfer. The fair queue's memory is the same 25 ms budget as before, so the longest queue
         # is unchanged. The rate limiter's own limit is doubled so that it never drops before the fair queue does.
         tbf_cmd = (
-            f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
+            f"{TC} qdisc {verb} dev {ifname} parent 1:1 handle 10: tbf "
             f"rate {rate_str} buffer {burst_bytes} limit {2 * limit_bytes}"
         )
         rc2, out2, err2 = run_cmd(tbf_cmd)
         if rc2 != 0:
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
         fq_cmd = (
-            f"{TC} qdisc add dev {ifname} parent 10:1 handle 20: fq_codel "
+            f"{TC} qdisc {verb} dev {ifname} parent 10:1 handle 20: fq_codel "
             f"memory_limit {limit_bytes} target 5ms interval 100ms"
         )
         rc3, out3, err3 = run_cmd(fq_cmd)
@@ -2566,6 +2578,10 @@ def parse_qdisc_stats(raw: str):
         if backlog:
             current.update(backlog_bytes=int(float(backlog.group(1)) * scale[backlog.group(2).lower()]),
                            backlog_packets=int(backlog.group(3)))
+        for key in ("drop_overlimit", "drop_overmemory", "ecn_mark", "ce_mark", "memory_used"):
+            match = re.search(r"\b" + key + r"\s+(\d+)", line)
+            if match:
+                current[key] = int(match.group(1))
     return qdiscs
 
 
@@ -2588,6 +2604,9 @@ def qdisc_counters(ifname: str):
     # to estimate additional serialization delay, excluding intentional delay backlog.
     backlog = (fq or tbf or {}).get("backlog_bytes") or 0
     return {
+        "queues": {"intentional_delay": netem, "rate_limiter": tbf, "fair_queue": fq},
+        "queue_accounting": {"backlog_basis": "rate queue only", "backlog_unit": "bytes",
+                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate"},
         "kind": root["kind"],
         "generation": QDISC_GENERATIONS.get(ifname, 0),
         "packets": root["packets"],
@@ -3086,6 +3105,7 @@ def simulator_state():
     dem = status.get("dem") or {}
     return {"status": status.get("status"), "users": status.get("users"),
             "run_id": (status.get("run") or {}).get("run_id"),
+            "rate_demand": (status.get("run") or {}).get("rate_demand"),
             "dropped_transactions": status.get("dropped_transactions"),
             "persistence_error": status.get("persistence_error"),
             "requests_per_second": dem.get("requests_per_second"),
@@ -3270,6 +3290,7 @@ def run_bandwidth_calibration(link_id, unshaped=False):
             lift_started = True
             lift_download_shaping(link_id)
             shaped = None
+        unloaded_probe = calibration_probe(link_id)
         for target in calibration.LADDER_MBPS:
             users = max(10, min(500, int(target / 5)))
             CALIBRATION_STATE["target_mbps"] = target
@@ -3298,7 +3319,13 @@ def run_bandwidth_calibration(link_id, unshaped=False):
             sim_before, sim_before_ms = _timed(simulator_state)
             start = time.time()
             time.sleep(calibration.MEASURE_S / 2)
-            probe = calibration_probe(link_id)
+            probe = dict(calibration_probe(link_id))
+            probe["unloaded_baseline"] = unloaded_probe
+            if (probe.get("success") and unloaded_probe.get("success") and
+                    probe.get("target") == unloaded_probe.get("target") and
+                    probe.get("latency_ms") is not None and unloaded_probe.get("latency_ms") is not None):
+                probe["additional_latency_ms"] = probe["latency_ms"] - unloaded_probe["latency_ms"]
+                probe["attribution"] = "additional RTT under load; queueing and endpoint contention are not separated"
             remaining = calibration.MEASURE_S - (time.time() - start)
             if remaining > 0:
                 time.sleep(remaining)
@@ -3317,7 +3344,8 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                                                      (qdisc_after.get("down") or {}).get("raw")))
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
-                                             shaper["drops_ps"])
+                                             shaper["drops_ps"], require_demand=True,
+                                             demand=calibration.demand_window(sim_before.get("rate_demand"), sim_after.get("rate_demand")))
             if sparse_used:
                 sparse_window, dem_ms = _timed(simulator_dem_window, end - start, start, end, run_id)
             else:
@@ -3942,7 +3970,8 @@ def track_link_health(signals: list, now: float):
     for item in signals:
         current = links.get(item["link_id"])
         if not current or current["health"] != item["health"]:
-            links[item["link_id"]] = {"health": item["health"], "since": now}
+            applied = RUNTIME_EFFECTIVE.get(item["link_id"], {}).get("updated_monotonic")
+            links[item["link_id"]] = {"health": item["health"], "since": min(now, applied) if applied is not None else now}
     active = {(item["link_id"], links[item["link_id"]]["since"]) for item in signals}
     for key in [key for key in STEERING_STATE["classes"] if (key[1], key[2]) not in active]:
         STEERING_STATE["classes"].pop(key, None)
@@ -4116,14 +4145,37 @@ def build_diagnosis():
     if traffic_mode == "direct_netem" and traffic_path.get("wan_id"):
         cfg = dict(cfg, _direct_wan_id=traffic_path["wan_id"])
     dem_diagnosis = dem.get("diagnosis") if isinstance(dem.get("diagnosis"), dict) else None
-    identity = (((status or {}).get("run") or {}).get("run_id"), traffic_mode, traffic_path.get("wan_id"))
+    identity = (((status or {}).get("run") or {}).get("run_id"), traffic_mode, traffic_path.get("wan_id"),
+                tuple(sorted((key, value.get("generation", 0)) for key, value in RUNTIME_EFFECTIVE.items())))
     with DIAGNOSIS_LOCK:
         if STEERING_STATE.get("identity") != identity:
-            STEERING_STATE.update(identity=identity, links={}, classes={}, baseline={})
+            previous_identity = STEERING_STATE.get("identity")
+            baseline = STEERING_STATE.get("baseline", {}) if previous_identity and previous_identity[:3] == identity[:3] else {}
+            STEERING_STATE.update(identity=identity, links={}, classes={}, baseline=baseline)
     signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
     findings = correlate_findings(dem_diagnosis, signals, cfg)
     steering = assess_steering(dem, signals, cfg) if traffic_mode == "appliance" else None
     findings.extend(steering_findings(steering))
+    for finding in findings:
+        finding["observation"] = {"since": dem.get("since"), "until": dem.get("until"),
+                                  "run_id": dem.get("run_id"), "path": traffic_path,
+                                  "impairment_epochs": {key: value.get("generation", 0) for key, value in RUNTIME_EFFECTIVE.items()}}
+        finding["confidence"] = "observed" if finding.get("source") == "experience" else "hypothesis"
+        finding["causality"] = "not independently verified"
+    if steering:
+        steering["packet_observations"] = []
+        for observed in dem.get("packet_egress_transitions", []):
+            before, after = resolve_egress(observed.get("from"), cfg), resolve_egress(observed.get("to"), cfg)
+            if not before or not after or before.get("link_id") == after.get("link_id"):
+                continue
+            applied = RUNTIME_EFFECTIVE.get(before["link_id"], {}).get("updated_at")
+            observation = dict(observed, from_wan=before["link_id"], to_wan=after["link_id"])
+            if applied is not None and observed["latest_at"] >= applied:
+                observation["reaction_interval_seconds"] = [max(0, observed["earliest_at"] - applied), observed["latest_at"] - applied]
+            steering["packet_observations"].append(observation)
+        steering["timing_basis"] = "completion-window assessment with separate packet-observation bounds"
+        steering["uncertainty_seconds"] = 10
+        steering["impairment_epochs"] = {key: value.get("generation", 0) for key, value in RUNTIME_EFFECTIVE.items()}
     findings.sort(key=lambda finding: (SEVERITY_ORDER.get(finding["severity"], 9), finding["source"] != "experience"))
     experience, unattributed = wan_experience(dem_diagnosis, signals, cfg)
     if traffic_mode == "direct_baseline":
@@ -5346,7 +5398,7 @@ def recorder_start(scenario: dict, link_id: str, phases: list):
         TEST_RECORDER.clear()
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
                              started_at=time.time(), phases=[phase["name"] for phase in phases],
-                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[])
+                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[])
 
 
 def recorder_note(kind: str, item: dict):
@@ -5359,7 +5411,7 @@ def recorder_note(kind: str, item: dict):
 MIN_PHASE_REQUESTS = 20
 
 
-def phase_window_dem(seconds, since=None, until=None, run_id=None):
+def phase_window_dem(seconds, since=None, until=None, run_id=None, intervals=None):
     """The Traffic Simulator's DEM over exactly the seconds one phase ran: what that phase's own transactions scored."""
     until = time.time() if until is None else until
     since = until - seconds if since is None else since
@@ -5367,7 +5419,7 @@ def phase_window_dem(seconds, since=None, until=None, run_id=None):
     if not run_id:
         return {"error": "Phase workload identity is unavailable", "scoring_complete": False}
     from urllib.parse import urlencode
-    query = urlencode({"run_id": run_id, "since": since, "until": until})
+    query = urlencode(dict(run_id=run_id, since=since, until=until, **({"intervals": json.dumps(intervals)} if intervals is not None else {})))
     try:
         dem = traffic_generator_request(f"/api/v1/dem/summary?{query}", timeout=7.0)
     except RuntimeError as exc:
@@ -5375,12 +5427,14 @@ def phase_window_dem(seconds, since=None, until=None, run_id=None):
     applications = {key: {"class": item.get("class"), "requests": item.get("requests") or 0,
                           "success": item.get("availability_pct"), "p95_ms": item.get("p95_ms"),
                           "experience": item.get("experience_score"), "weight": item.get("weight"),
-                          "scoring_complete": item.get("scoring_complete")}
+                          "scoring_complete": item.get("scoring_complete"),
+                          **{field: item.get(field) for field in ("criticality", "criticality_weight", "experience_targets",
+                              "quality", "score_components", "target_violations", "missing_measurements")}}
                     for key, item in (dem.get("applications") or {}).items()}
     return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
             "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
             "p95_ms": dem.get("p95_ms"), "applications": applications,
-            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts")}}
+            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions")}}
 
 
 def recorder_close_phase():
@@ -5394,8 +5448,23 @@ def recorder_close_phase():
         if any(item.get("started_at") == last["at"] for item in TEST_RECORDER.get("phase_ends", [])):
             return
     end = time.time()
+    with TEST_RECORDER_LOCK:
+        pauses = list(TEST_RECORDER.get("pauses") or [])
+    intervals, cursor = [], last["at"]
+    for pause in sorted(pauses, key=lambda item: item["start"]):
+        left, right = max(last["at"], pause["start"]), min(end, pause.get("end") or end)
+        if left >= end or right <= cursor:
+            continue
+        if left > cursor:
+            intervals.append([cursor, left])
+        cursor = max(cursor, right)
+    if cursor < end:
+        intervals.append([cursor, end])
+    options = {"intervals": intervals} if pauses else {}
+    dem = (phase_window_dem(end - last["at"], since=last["at"], until=end, **options)
+           if intervals else {"scoring_complete": False, "error": "No active phase interval"})
     recorder_note("phase_ends", {"name": last["name"], "started_at": last["at"], "ended_at": end,
-                                "dem": phase_window_dem(end - last["at"], since=last["at"], until=end)})
+                                "dem": dem})
 
 
 def record_test_sample(payload: dict):
@@ -5518,7 +5587,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                        if item.get("name") == name and "error" not in (item.get("dem") or {})), None)
         if window is not None:
             transactions = window.get("requests") or 0
-            scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and not any(row.get("paused") for row in rows)
+            scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and (bool(window.get("intervals")) or not any(row.get("paused") for row in rows))
             experience = window.get("experience") if scored else None
             success = window.get("success") if scored else None
             p95 = window.get("interactive_p95_ms") if scored else None
@@ -8083,6 +8152,9 @@ def lab_scenario_pause():
             SCENARIO_PAUSE.set()
             SCENARIO_STATE.update(paused=True, paused_at=time.time(), paused_clock=time.monotonic())
             name, phase = SCENARIO_STATE["scenario_name"], SCENARIO_STATE.get("phase")
+            with TEST_RECORDER_LOCK:
+                if TEST_RECORDER.get("active"):
+                    TEST_RECORDER.setdefault("pauses", []).append({"start": SCENARIO_STATE["paused_at"], "end": None})
     if active:
         log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
         flash("Test paused. It stays in its current phase until you resume it.", "info")
@@ -8101,6 +8173,9 @@ def lab_scenario_resume():
             SCENARIO_STATE.update(paused=False, paused_at=None, paused_clock=None,
                                   paused_total_s=SCENARIO_STATE["paused_total_s"] + held)
             SCENARIO_PAUSE.clear()
+            with TEST_RECORDER_LOCK:
+                if TEST_RECORDER.get("pauses") and TEST_RECORDER["pauses"][-1]["end"] is None:
+                    TEST_RECORDER["pauses"][-1]["end"] = time.time()
             name = SCENARIO_STATE["scenario_name"]
     if active:
         log_event("scenario", f"{name}: resumed after {round(held)} s", paused_seconds=round(held))

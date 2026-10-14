@@ -25,7 +25,16 @@ def check_inside():
     assert not app.apply_netem("engine-test", 0, 30, 0, 100)[0]
     after = subprocess.check_output(["tc", "qdisc", "show", "dev", "engine-test"], text=True)
     assert after == output
-    assert app.apply_netem("engine-test", 40, 5, 3, 18)[0]
+    original_clear = app.clear_qdisc
+    app.clear_qdisc = lambda *_: (_ for _ in ()).throw(AssertionError("Transition rebuilt the hierarchy"))
+    try:
+        assert app.apply_netem("engine-test", 40, 5, 3, 18)[0]
+        assert app.apply_netem("engine-test", 0, 0, 0, 100)[0]
+        cleared = subprocess.check_output(["tc", "qdisc", "show", "dev", "engine-test"], text=True)
+        assert "delay" not in cleared and "loss" not in cleared, cleared
+        assert app.apply_netem("engine-test", 40, 5, 3, 18)[0]
+    finally:
+        app.clear_qdisc = original_clear
     output = subprocess.check_output(["tc", "qdisc", "show", "dev", "engine-test"], text=True)
     assert "18Mbit" in output and "delay 40ms" in output, output
     print("PASS: real Linux shaping, verified no-op and validation-before-mutation")

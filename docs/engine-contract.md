@@ -14,8 +14,7 @@ Older simulators lacking completeness cannot produce a complete passing verdict.
 
 Phase reports query an explicit run and half-open start/end interval. Failed phase
 queries remain unavailable; rolling scores are never substituted. Final boundaries
-are frozen before stopping/restoring the workload. Paused intervals are conservatively
-incomplete. Group latency is explicitly named worst-application P95, not pooled P95.
+are frozen before stopping/restoring the workload. Paused intervals are excluded through exact disjoint active segments. Group latency is explicitly named worst-application P95, not pooled P95.
 Reports separate execution result from experience acceptance result.
 
 Calibration requires the matching direct NetEm WAN. Appliance steering and clean
@@ -29,8 +28,8 @@ rejected before changes. Reapplying an identical profile preserves queues when i
 observed qdisc configuration still matches. Partial direction failures trigger a
 rollback to the previous profile; failed rollback is exposed as unknown actual
 state rather than stale successful state. Runtime state retains desired/applied
-status and an error. Normal changes still rebuild the hierarchy; uninterrupted
-in-place topology changes require additional kernel-specific validation.
+status and an error. Verified transitions with the same hierarchy use in-place qdisc changes, including
+explicit clearing of removed impairments. A topology change still requires a rebuild.
 
 Backlog used for queue-delay estimation is the rate queue (FQ-CoDel or TBF), not a
 sum with netem's delay/hierarchical backlog. Memory sizing is an allocation budget,
@@ -42,3 +41,28 @@ Steering history resets when run/path identity changes. Direct-path attribution 
 use its declared WAN; appliance-path attribution remains based on observed egress.
 Steering reaction timing still uses completion-window observations, not packet-level
 flow-switch events. Treat inferred single-carrier attribution as correlation.
+
+## Follow-through repairs
+
+Calibration consumes directional offered/admitted/dispatched/delivered counter deltas
+using the generator's monotonic interval. Missing demand or insufficient dispatched
+payload prevents a capacity claim, even if a requested number was configured. A
+matching unloaded probe supplies the baseline for added latency; neither that delta
+nor slow target health proves where the delay originated.
+
+Phase adapters preserve target/component/criticality explanations. Pause/resume marks
+produce disjoint exact query intervals and active-duration throughput. Steering state
+is keyed by run, path and impairment generation, retaining only the same run/path's
+healthy baseline between impairment epochs. Packet-reported source transitions carry
+observation bounds and reaction intervals separately from the completion-window view.
+These are not claims about the appliance's internal decision time.
+
+Diagnostic objects carry observation scope and explicitly mark causal hypotheses.
+Queue evidence separates netem delay, TBF and FQ-CoDel counters, including memory,
+early congestion and overlimit/overmemory counters where the kernel reports them.
+An inferred injected-drop difference remains an estimate.
+
+Outstanding acceptance: the actual four-component lab, asymmetric appliance paths,
+all supported deployed kernels/offload states, mixed packet sizes, queue sojourn time,
+and generator/target/host ceilings with observers on and off. These need an identified
+disposable lab and measured results; CI cannot substitute for deployed capacity.
