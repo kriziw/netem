@@ -79,4 +79,3 @@ class SiteTests(unittest.TestCase):
         start["experience_policy"] = {"erp": {"deadline_ms": 400, "criticality": "critical"}}
         step = netem.validate_scenario_steps([{"action": "traffic_generator", "after": 0, "value": start}])[0]
         self.assertEqual(step["value"]["experience_policy"], start["experience_policy"])
-

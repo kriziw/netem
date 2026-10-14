@@ -11,4 +11,3 @@ class PhaseEvidenceTests(unittest.TestCase):
              patch.object(netem, "phase_window_dem", return_value={"scoring_complete": True}) as query:
             netem.recorder_close_phase()
         self.assertEqual(query.call_args.kwargs["intervals"], [[100, 102], [104, 106]])
-

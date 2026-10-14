@@ -1,6 +1,7 @@
 # Engine evidence and simulator compatibility
 
-Deploy the controlled target, then simulator #70, then this platform update.
+Upgrade the controlled target, simulator #70 and platform together during a
+maintenance window. Resume acceptance only after all components are updated.
 The platform sends per-site application targets and criticality only when the
 simulator advertises workload-utility-v2. Required business applications receive
 an executable staff cohort while device populations are preserved.
