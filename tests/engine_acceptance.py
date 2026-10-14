@@ -83,6 +83,7 @@ def client(server_namespace, output):
                 results["packet_cases"].append(dict(wan=wan, delay_ms=delay, jitter_ms=jitter,
                     loss_pct=loss, payload_bytes=size, received=received, late=evidence["packets_late"],
                     p50_upper_ms=p50, bytes_down=event["response_length"], bytes_up=evidence["bytes_up"]))
+    Path(output).write_text(json.dumps(results, indent=2, default=str))
     # A healthy second WAN stays usable while the first is blackholed. This is
     # explicit routing, not an assertion that a vendor appliance chose to switch.
     shape(1, loss=100)
@@ -131,7 +132,7 @@ def client(server_namespace, output):
                         tolerance = b["target_mbps"] * .05 + after["chunk_bytes"] * 8 / elapsed / 1e6
                         assert abs(directions[direction]["offered_bytes"] - b["target_mbps"]) <= tolerance
                         assert directions[direction]["offered_bytes"] > 0
-                        assert directions[direction]["delivered_bytes"] > 0
+                        assert directions[direction]["delivered_bytes"] > 0, (direction, before, after, controller.telemetry())
                         assert b["target_mbps"] == a["target_mbps"]
                     results["load_cases"].append(dict(observers=observers, users=users, rate_mbps=rate,
                         duration_s=elapsed, generator_cpu_seconds=time.process_time() - cpu,
