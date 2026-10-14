@@ -2560,6 +2560,10 @@ def parse_qdisc_stats(raw: str):
             current = {"kind": head.group(1), "handle": head.group(2), "root": " root " in f" {line} ",
                        "bytes": None, "packets": None, "drops": None, "overlimits": None,
                        "backlog_bytes": None, "backlog_packets": None}
+            # tc prints drop_overmemory only when nonzero. Advertising the
+            # memory_limit option establishes support for this counter.
+            if current["kind"] == "fq_codel" and re.search(r"\bmemory_limit\s", line):
+                current["drop_overmemory"] = 0
             qdiscs.append(current)
             continue
         if current is None:

@@ -51,7 +51,11 @@ def check_queue_bursts(app):
     # Both veths live only in this disposable namespace. Raw Ethernet crosses the
     # egress qdiscs without routing shortcuts, socket pacing, or a production target.
     subprocess.run(['ip', 'link', 'add', 'queue-source', 'type', 'veth', 'peer', 'name', 'queue-sink'], check=True)
-    for name in ('queue-source', 'queue-sink'):
+    subprocess.run(['ip', 'link', 'add', 'ingress-source', 'type', 'veth', 'peer', 'name', 'ingress-sink'], check=True)
+    subprocess.run(['ip', 'link', 'add', 'queue-bridge', 'type', 'bridge'], check=True)
+    for port in ('ingress-sink', 'queue-source'):
+        subprocess.run(['ip', 'link', 'set', port, 'master', 'queue-bridge'], check=True)
+    for name in ('queue-source', 'queue-sink', 'ingress-source', 'ingress-sink', 'queue-bridge'):
         subprocess.run(['ip', 'link', 'set', name, 'up'], check=True)
     results = []
     for rate in (18, 42):
@@ -67,7 +71,7 @@ def check_queue_bursts(app):
                 frame = bytes.fromhex('02000000000202000000000188b5') + bytes(size - 14)
                 began = time.monotonic()
                 with socket.socket(socket.AF_PACKET, socket.SOCK_RAW) as sender:
-                    sender.bind(('queue-source', 0))
+                    sender.bind(('ingress-source', 0))
                     for _ in range(512):
                         sender.send(frame)
                 time.sleep(1)
@@ -82,6 +86,7 @@ def check_queue_bursts(app):
                 if budget == 'generous':
                     assert fair['drop_overmemory'] == 0 and fair['drop_overlimit'] == 0, result
     print('QUEUE_BUDGET_RESULTS ' + json.dumps(results))
+    assert any(row['drop_overmemory'] > 0 for row in results if row['budget'] == 'previous'), results
     print('PASS: generous resource guards avoid memory/packet-limit drops for low-average burst traffic')
 
 
