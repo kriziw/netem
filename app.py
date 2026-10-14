@@ -9598,8 +9598,6 @@ def showroom_story(diagnosis, links, outcome, now=None):
         active = [item for item in impacts if item["state"] == "active"]
         if not experience.get("available"):
             users = "Waiting for simulated users."
-        elif active:
-            users = "Users are affected."
         elif experience.get("business_acceptance") == "fail" or "fail" in (experience.get("verdicts") or {}).values():
             users = "Users are below target."
         elif (not complete or experience.get("business_acceptance") != "pass"
@@ -9609,6 +9607,10 @@ def showroom_story(diagnosis, links, outcome, now=None):
             limit = (experience.get("targets") or {}).get("interactive_p95_max_ms")
             if latency is not None and limit is not None and latency > limit:
                 users += " Observed response time is above target."
+            if active:
+                users += " Some transactions show problems."
+        elif active:
+            users = "Some transactions show problems; overall targets are met."
         else:
             users = "Users are meeting targets."
         unwell = [f"{link['name']} is {HEALTH_WORDS.get(link['display_health'], link['display_health']).lower()}"

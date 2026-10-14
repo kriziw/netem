@@ -271,7 +271,7 @@ class StoryTests(unittest.TestCase):
         settled = netem.showroom_story(self.diagnosis(), self.links("degraded", quality=60), self.outcome, now=109)
         self.assertEqual(settled["impacts"], [{"impact": "Voice and video: breaking up", "cause": "2% packet loss on WAN1",
                                                "wan": "WAN1", "severity": "bad", "state": "active"}])
-        self.assertTrue(settled["status"].startswith("Users are affected."))
+        self.assertTrue(settled["status"].startswith("Some transactions show problems;"))
         resolved = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=115)
         self.assertEqual(resolved["impacts"][0]["state"], "resolved")
         gone = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=150)
