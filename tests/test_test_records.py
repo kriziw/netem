@@ -1,4 +1,5 @@
 import io
+import hashlib
 import json
 import tempfile
 import unittest
@@ -28,6 +29,8 @@ class TestRecordTests(unittest.TestCase):
                 self.assertNotIn('user:pass', contents)
                 self.assertIn('98', contents)
                 self.assertFalse(json.loads(bundle.read('bundle-manifest.json'))['complete'])
+                for name, digest in json.loads(bundle.read('bundle-manifest.json'))['sha256'].items():
+                    self.assertEqual(hashlib.sha256(bundle.read(name)).hexdigest(), digest)
             response.close()
             self.assertEqual(test_records.history(root)[0]['result'], 'unfinished')
             self.assertEqual(netem.app.test_client().get('/tests/records/not-an-id/download').status_code, 404)

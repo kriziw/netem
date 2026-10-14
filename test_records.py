@@ -72,16 +72,22 @@ def archive(root, test_id):
             summary = json.loads((folder / 'summary.json').read_text(encoding='utf-8'))
         except (OSError, ValueError):
             summary = {}
-        files = {path.name: hashlib.sha256(path.read_bytes()).hexdigest() for path in folder.iterdir()
-                 if path.suffix in ('.json', '.jsonl', '.txt') and path.name != 'bundle-manifest.json'}
-        write(root, test_id, 'bundle-manifest.json', {'schema_version': 1, 'test_id': test_id,
-              'complete': summary.get('record_complete') is True,
-              'status': 'complete' if summary.get('record_complete') is True else 'partial_or_unfinished',
-              'sha256': files})
+        hashes = {}
         with zipfile.ZipFile(temporary, 'w', zipfile.ZIP_DEFLATED) as bundle:
             for path in sorted(folder.iterdir()):
-                if path.suffix in ('.json', '.jsonl', '.txt'):
-                    bundle.write(path, path.name)
+                if path.suffix in ('.json', '.jsonl', '.txt') and path.name != 'bundle-manifest.json':
+                    digest = hashlib.sha256()
+                    with path.open('rb') as source, bundle.open(path.name, 'w') as output:
+                        while chunk := source.read(65536):
+                            digest.update(chunk)
+                            output.write(chunk)
+                    hashes[path.name] = digest.hexdigest()
+            manifest = {'schema_version': 1, 'test_id': test_id,
+                        'complete': summary.get('record_complete') is True,
+                        'status': 'complete' if summary.get('record_complete') is True else 'partial_or_unfinished',
+                        'sha256': hashes}
+            write(root, test_id, 'bundle-manifest.json', manifest)
+            bundle.writestr('bundle-manifest.json', json.dumps(manifest, indent=2))
         temporary.replace(target)
     return target
 
