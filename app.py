@@ -199,7 +199,8 @@ TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
 PROCESS_INSTANCE = uuid.uuid4().hex
 BOTTLENECK_COLUMNS = tuple(
     f"{direction}_{name}" for direction in ("down", "up")
-    for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes")
+    for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes",
+                 "queue_memory_drops_ps", "queue_packet_drops_ps", "queue_other_drops_ps")
 )
 NET_SYSFS = Path("/sys/class/net")
 PROBE_RUNTIME = {}
@@ -1876,31 +1877,26 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
-# A burst allowance of 10 ms lets a TCP window's burst through at line rate, so ordinary traffic does not wait for
-# tokens. The nominal payload budget is 25 ms; actual queue delay depends on skb sizes and scheduling.
-SHAPER_QUEUE_MS = 25
+# Resource guards are generous and independent of the emulated line rate. CoDel
+# controls persistent queue delay; memory exhaustion must not model WAN quality.
+SHAPER_QUEUE_MEMORY_BYTES = 64 * 1024 * 1024
+SHAPER_QUEUE_PACKETS = 65536
 SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
 
 
 def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
-    """Queue sizes that scale with the configured rate instead of fixed bytes.
+    """Generous packet/memory guards, with a rate-scaled pacing burst.
 
-    A fixed 32 KB rate-limiter queue held under 3 ms at 100 Mbit/s, so TCP's
-    window bursts overflowed it on an otherwise idle link and every transfer paid
-    for retransmissions. The fix is a burst allowance that covers those windows
-    (10 ms of rate), so an idle or moderately loaded link adds no queueing delay.
-    The nominal payload budget is 25 ms; skb memory accounting and packet sizes
-    mean this is not a bound on measured queue delay.
-    netem also keeps every packet for its delay, so its packet queue must hold
-    rate × (delay + jitter) or it drops on long-delay links.
+    fq_codel memory_limit accounts kernel allocation bytes, not wire bytes.
+    Do not derive that resource guard from a few milliseconds of payload.
+    The intentional-delay queue also needs room for the bandwidth-delay product.
     """
     bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
     hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
-    netem_limit = max(1000, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
+    netem_limit = max(SHAPER_QUEUE_PACKETS, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
     burst = max(3200, int(bytes_per_ms * SHAPER_BURST_MS))
-    limit = max(65536, int(bytes_per_ms * SHAPER_QUEUE_MS))
-    return netem_limit, burst, limit
+    return netem_limit, burst, SHAPER_QUEUE_MEMORY_BYTES
 
 
 def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
@@ -1991,10 +1987,8 @@ def _apply_netem(
     if rate_mbit and rate_mbit > 0:
         rate_value = int(round(rate_mbit))
         rate_str = f"{rate_value}mbit"
-        # The rate limiter only paces. A fair queue behind it holds the backlog, so when it is full the drop falls
-        # on the largest flow, not on whichever packet arrives last: a sparse flow such as telemetry is not lost
-        # behind a bulk transfer. The fair queue's memory is the same 25 ms budget as before, so the longest queue
-        # is unchanged. The rate limiter's own limit is doubled so that it never drops before the fair queue does.
+        # TBF paces; its child fair queue holds the backlog. Keep resource guards
+        # generous at low WAN rates as well. CoDel may still drop to control delay.
         tbf_cmd = (
             f"{TC} qdisc {verb} dev {ifname} parent 1:1 handle 10: tbf "
             f"rate {rate_str} buffer {burst_bytes} limit {2 * limit_bytes}"
@@ -2004,7 +1998,7 @@ def _apply_netem(
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
         fq_cmd = (
             f"{TC} qdisc {verb} dev {ifname} parent 10:1 handle 20: fq_codel "
-            f"memory_limit {limit_bytes} target 5ms interval 100ms"
+            f"limit {SHAPER_QUEUE_PACKETS} memory_limit {limit_bytes} target 5ms interval 100ms"
         )
         rc3, out3, err3 = run_cmd(fq_cmd)
         if rc3 != 0:
@@ -2606,7 +2600,8 @@ def qdisc_counters(ifname: str):
     return {
         "queues": {"intentional_delay": netem, "rate_limiter": tbf, "fair_queue": fq},
         "queue_accounting": {"backlog_basis": "rate queue only", "backlog_unit": "bytes",
-                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate"},
+                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate",
+                              "fair_queue_drops": {key: fq.get(key) for key in ("drops", "drop_overlimit", "drop_overmemory")} if fq else None},
         "kind": root["kind"],
         "generation": QDISC_GENERATIONS.get(ifname, 0),
         "packets": root["packets"],
@@ -2634,12 +2629,23 @@ def qdisc_rates(current, previous, dt):
         return None
     dropped = max(netem_drops, queue_drops)
     offered = sent + dropped
-    return {
+    rates = {
         "queue_drops_ps": queue_drops / dt,
         "injected_drops_ps": max(0, netem_drops - queue_drops) / dt,
         "drop_pct": dropped * 100.0 / offered if offered else 0.0,
         "backlog_bytes": current["backlog_bytes"],
     }
+    before = (previous.get("queue_accounting") or {}).get("fair_queue_drops") or {}
+    after = (current.get("queue_accounting") or {}).get("fair_queue_drops") or {}
+    keys = ("drops", "drop_overlimit", "drop_overmemory")
+    if all(before.get(key) is not None and after.get(key) is not None for key in keys):
+        total, limited, memory = (after[key] - before[key] for key in keys)
+        # Linux's overmemory count is a subset of overlimit, not an extra loss.
+        if 0 <= memory <= limited <= total:
+            rates.update(queue_memory_drops_ps=memory / dt,
+                         queue_packet_drops_ps=(limited - memory) / dt,
+                         queue_other_drops_ps=(total - limited) / dt)
+    return rates
 
 
 # ---------- Persistent telemetry / active measurement ----------

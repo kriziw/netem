@@ -31,3 +31,12 @@ variants, queue sojourn and hardware capacity ceilings remain unverified.
 The user selected a coordinated maintenance-window upgrade. Do not use mixed
 platform/simulator versions for business acceptance. The compatibility test
 records the old platform's inability to enforce the new critical-failure result.
+
+
+## Queue resource guards
+
+Each shaped direction gives fq_codel a 64 MiB kernel-memory guard and a 65,536-packet guard. The intentional-delay queue has at least 65,536 packet slots and grows for larger configured bandwidth-delay products. These are resource ceilings, not preallocated buffers or queue-delay promises. The WAN rate remains enforced by TBF; CoDel retains its 5 ms target and 100 ms interval and may deliberately drop during persistent queueing.
+
+The previous memory guard reused 25 ms of payload bytes as kernel allocation bytes (65,536 bytes at 18 Mbit/s; 131,250 at 42 Mbit/s). This could constrain bursts independently of average link utilization. The namespace regression compares those old memory guards with the generous guards at both rates and at 160/1,500-byte packet sizes.
+
+Telemetry now records fair-queue memory-limit drops, packet-limit drops excluding memory-limit drops, and remaining drops (AQM/other). Linux counts memory-limit drops within its overlimit counter; they are not added twice. Missing kernel counters remain unknown. Remaining drops are not proof of a particular CoDel decision. Injected loss remains a separate counter-difference estimate.
