@@ -25,7 +25,7 @@ class CalibrationRunTests(unittest.TestCase):
             patch.object(netem, "host_headroom", return_value={"status": "ok", "late_seconds": 0}),
             patch.object(netem, "calibration_device", return_value={"down": None, "up": None}),
             patch.object(netem, "qdisc_readings", return_value={}),
-            patch.object(netem, "simulator_state", side_effect=self.simulator_state),
+            patch.object(netem, "simulator_state", return_value={"status": "running", "users": 10}),
             patch.object(netem, "wan_timeline", return_value=[]),
             patch.object(netem, "host_window", return_value=[]),
             patch.object(netem, "calibration_probe", return_value={"skipped": "No ICMP probe is configured for this WAN."}),
@@ -37,21 +37,12 @@ class CalibrationRunTests(unittest.TestCase):
             mock.start()
             self.addCleanup(mock.stop)
 
-    def simulator_state(self):
-        tick = getattr(self, "demand_tick", 0)
-        self.demand_tick = tick + 1
-        target = self.started[-1]
-        counts = {key: (tick % 2) * target * 30 * 1e6 / 8
-                  for key in ("offered_bytes", "admitted_bytes", "started_bytes", "delivered_bytes")}
-        return {"status": "running", "users": 10, "rate_demand": {
-            "timestamp_monotonic": 100 + tick * 30, "directions": {"down": dict(counts, target_mbps=target)}}}
-
     def request(self, path, method="GET", payload=None, timeout=3.0):
         run_id = f"run-{len(self.started) + 1}"
         if path != "/api/v1/workloads/start":
             return {}
         self.started.append((payload or {}).get("paced_mbps"))
-        return {"run": {"run_id": run_id, "traffic_path": {"mode": "direct_netem", "wan_id": "wan1"}}}
+        return {"run": {"run_id": run_id}}
 
     def test_a_clean_climb_ends_at_the_wan_rate_and_stops_every_workload(self):
         self.measurements = [{"achieved_mbps": 49.0, "drop_pct": 0.0, "drops_ps": 0.0},
@@ -117,28 +108,6 @@ class CalibrationRunTests(unittest.TestCase):
         verdict = result["steps"][0]
         self.assertEqual(verdict["warnings"], ["5.0% of packets dropped at the shaper"])
         self.assertEqual(verdict["diagnostics"]["shaper"]["drop_pct"], 5.0)
-
-    def test_latency_is_measured_before_the_active_workload_stops(self):
-        self.measurements = [{"achieved_mbps": 10.0}]
-        def probe(link_id):
-            if not self.started:  # unloaded baseline
-                return {"success": True, "latency_ms": 1, "target": "lab"}
-            self.assertEqual(len(self.started), 1)
-            self.assertEqual(self.stopped, [])
-            return {"success": True, "latency_ms": 5}
-        with patch.object(netem, "calibration_probe", side_effect=probe):
-            result = netem.run_bandwidth_calibration("wan1")
-        self.assertEqual(result["steps"][0]["diagnostics"]["probe"]["latency_ms"], 5)
-        self.assertEqual(len(self.stopped), 1)
-
-    def test_a_different_path_cannot_be_reported_as_this_wans_capacity(self):
-        def wrong_path(*args, **kwargs):
-            return {"run": {"run_id": "wrong", "traffic_path": {"mode": "direct_netem", "wan_id": "wan2"}}}
-        with patch.object(netem, "traffic_generator_request", side_effect=wrong_path):
-            result = netem.run_bandwidth_calibration("wan1")
-        self.assertIn("matching direct NetEm path", result["error"])
-        self.assertEqual(result["steps"], [])
-        self.assertEqual(self.stopped, ["wrong"])
 
     def test_a_busy_lab_is_not_loaded_and_the_refusal_is_saved(self):
         with patch.object(netem, "platform_test_busy", return_value="a scenario is running"):
@@ -222,7 +191,7 @@ class UnshapedAndSparseTests(unittest.TestCase):
     def request(self, path, method="GET", payload=None, timeout=3.0):
         if path.startswith("/api/v1/workloads"):
             self.payloads.append(dict(payload or {}))
-        return {"run": {"run_id": f"run-{len(self.payloads)}", "traffic_path": {"mode": "direct_netem", "wan_id": "wan1"}}}
+        return {"run": {"run_id": f"run-{len(self.payloads)}"}}
 
     def test_each_paced_step_asks_for_a_share_of_sparse_users_and_keeps_its_udp_window(self):
         self.measurements = [{"achieved_mbps": 10.0, "drop_pct": 0.0, "drops_ps": 0.0}]

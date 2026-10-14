@@ -64,16 +64,11 @@ class ShaperAndSparseTests(unittest.TestCase):
 
 
 class LatencyAndGeneratorTests(unittest.TestCase):
-    def test_loaded_latency_is_compared_with_the_unloaded_baseline(self):
-        probe = {"success": True, "latency_ms": 30.0, "configured_delay_ms": 5.0,
-                 "additional_latency_ms": 25.0, "unloaded_baseline": {"latency_ms": 5.0}}
+    def test_probe_latency_beyond_the_configured_delay_is_queueing(self):
+        probe = {"success": True, "latency_ms": 30.0, "configured_delay_ms": 5.0}
         findings = bn.step_findings(step(probe=probe), 300)
         latency = [item for item in findings if item["category"] == "latency"]
         self.assertEqual(latency[0]["severity"], "bad")
-
-    def test_configured_delay_alone_does_not_establish_added_latency(self):
-        findings = bn.step_findings(step(probe={"success": True, "latency_ms": 30, "configured_delay_ms": 5}), 300)
-        self.assertNotIn("latency", categories(findings))
 
     def test_a_shortfall_with_no_host_limit_points_at_the_generator_or_path(self):
         findings = bn.step_findings(step(target=400, achieved=200.0, efficiency=0.6, expected=300), 300)

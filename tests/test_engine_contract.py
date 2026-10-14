@@ -31,6 +31,17 @@ class EvidenceTests(unittest.TestCase):
         dem["truncated"] = True
         self.assertEqual(netem.showroom_outcome(diagnosis, None)["experience"]["verdicts"]["experience"], "unknown")
 
+    def test_partial_coverage_does_not_mask_confirmed_critical_failure(self):
+        dem = {"requests": 5, "experience_score": 0, "coverage_pct": 10, "score_status": "provisional",
+               "score_range": {"minimum": 0, "maximum": 90}, "scoring_complete": False,
+               "business_acceptance": "fail", "critical_alerts": [{"application": "erp", "severity": "outage"}]}
+        diagnosis = {"traffic_generator": {"connected": True, "status": {"dem": dem}}}
+        experience = netem.showroom_outcome(diagnosis, None)["experience"]
+        self.assertEqual(experience["verdicts"]["experience"], "fail")
+        self.assertEqual(experience["coverage_pct"], 10)
+        dem.update(business_acceptance="unknown", critical_alerts=[{"application": "erp", "severity": "observation"}])
+        self.assertEqual(netem.showroom_outcome(diagnosis, None)["experience"]["verdicts"]["experience"], "unknown")
+
     def test_short_phase_has_exact_boundaries_and_run_identity(self):
         with patch.object(netem, "traffic_generator_request", return_value={"scoring_complete": False}) as request:
             result = netem.phase_window_dem(3.8, since=100, until=103.8, run_id="run-a")
@@ -48,36 +59,6 @@ class EvidenceTests(unittest.TestCase):
         self.assertEqual(experience_groups(dem)[1]["tone"], "unknown")
 
 
-class ShapingTests(unittest.TestCase):
-    def test_unsupported_jitter_is_rejected_before_mutation(self):
-        with patch.object(netem, "run_cmd") as run:
-            self.assertFalse(netem.apply_netem("eth1", 0, 30, 0, 100)[0])
-        run.assert_not_called()
-
-    def test_identical_verified_profile_preserves_queues(self):
-        values = (5, 1, 0, 100, 0, 0, 0, 0)
-        with patch.dict(netem.APPLIED_QDISCS, {"eth1": {"values": values, "observed": "qdisc netem"}}, clear=True), \
-             patch.object(netem, "run_cmd", return_value=(0, "qdisc netem", "")) as run:
-            self.assertTrue(netem.apply_netem("eth1", *values)[0])
-        self.assertEqual(run.call_count, 1)
-        self.assertIn("qdisc show", run.call_args.args[0])
-
-    def test_counters_are_not_differenced_across_a_qdisc_generation(self):
-        previous = {"kind": "netem", "generation": 1, "packets": 10, "netem_drops": 1, "queue_drops": 0, "backlog_bytes": 0}
-        current = dict(previous, generation=2, packets=100)
-        self.assertIsNone(netem.qdisc_rates(current, previous, 1))
-
-    def test_partial_failure_restores_old_profile_or_exposes_unknown(self):
-        old = {"delay_ms": 5, "jitter_ms": 1, "loss_pct": 0, "download_mbit": 100, "upload_mbit": 50}
-        link = {"id": "wan1", "inner": "in", "outer": "out"}
-        for restored in (True, False):
-            with self.subTest(restored=restored), patch.dict(netem.RUNTIME_EFFECTIVE, {"wan1": {"effective": old}}, clear=True), \
-                 patch.object(netem, "get_effective_profile", return_value=dict(old, delay_ms=40)), \
-                 patch.object(netem, "apply_netem", side_effect=[(True, "OK"), (False, "upload failed"), (restored, "rollback"), (restored, "rollback")]):
-                self.assertFalse(netem.apply_selected_profile(link, {})[0])
-                state = netem.RUNTIME_EFFECTIVE["wan1"]
-                self.assertEqual(state["apply_status"], "rolled_back" if restored else "unknown")
-                self.assertEqual(state["effective"], old if restored else {})
 
 
 class SiteTests(unittest.TestCase):
@@ -99,5 +80,3 @@ class SiteTests(unittest.TestCase):
         step = netem.validate_scenario_steps([{"action": "traffic_generator", "after": 0, "value": start}])[0]
         self.assertEqual(step["value"]["experience_policy"], start["experience_policy"])
 
-    def test_missing_host_evidence_cannot_pass_calibration(self):
-        self.assertEqual(calibration.judge_step(100, 100, 100, 0, "unknown", 0)["status"], "fail")

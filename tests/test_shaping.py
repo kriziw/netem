@@ -22,8 +22,7 @@ class ShaperSizingTests(unittest.TestCase):
         self.assertIn("netem limit 1000 delay 15.0ms loss 0.100%", commands[1])
         self.assertIn("tbf rate 300mbit buffer 375000 limit 1875000", commands[2])
         self.assertIn("parent 10:1 handle 20: fq_codel memory_limit 937500 target 5ms interval 100ms", commands[3])
-        self.assertEqual(len(commands), 5)
-        self.assertIn("qdisc show dev eth1", commands[-1])
+        self.assertEqual(len(commands), 4)
 
     def test_counters_read_the_fair_queue_behind_the_rate_limiter(self):
         # The fair queue holds the backlog and makes the drops, so its drops are the queue drops and its
@@ -42,7 +41,7 @@ class ShaperSizingTests(unittest.TestCase):
         output = chr(10).join(lines) + chr(10)
         with patch.object(netem, "run_cmd", return_value=(0, output, "")):
             value = netem.qdisc_counters("eth1")
-        self.assertEqual(value, {"kind": "netem", "generation": netem.QDISC_GENERATIONS.get("eth1", 0), "packets": 9000, "netem_drops": 120, "queue_drops": 35,
+        self.assertEqual(value, {"kind": "netem", "packets": 9000, "netem_drops": 120, "queue_drops": 35,
                                  "backlog_bytes": 36 * 1024, "shaped": True})
 
 

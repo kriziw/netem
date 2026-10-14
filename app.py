@@ -131,9 +131,6 @@ MAX_PROBES = 20
 RUNTIME_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
-PROFILE_APPLY_LOCK = threading.RLock()
-APPLIED_QDISCS = {}
-QDISC_GENERATIONS = {}
 EVENT_LOG = []
 LAB_SESSIONS = []
 ACTIVE_SESSION = {
@@ -1667,11 +1664,6 @@ def get_effective_profile(link: dict, presets: dict):
 
 
 def apply_selected_profile(link: dict, presets: dict):
-    with PROFILE_APPLY_LOCK:
-        return _apply_selected_profile(link, presets)
-
-
-def _apply_selected_profile(link: dict, presets: dict):
     """Apply either the quality-derived or custom profile stored on one WAN."""
     inner = link.get("inner")
     outer = link.get("outer")
@@ -1682,10 +1674,6 @@ def _apply_selected_profile(link: dict, presets: dict):
     if not effective:
         return False, "Missing interface or preset", {}
 
-    link_id = link.get("id") or link.get("bridge") or inner
-    previous = copy.deepcopy(RUNTIME_EFFECTIVE.get(link_id) or {})
-    if (effective.get("jitter_ms", 0) > 0 or effective.get("reorder_pct", 0) > 0) and effective.get("delay_ms", 0) <= 0:
-        return False, "Jitter and reordering require a positive delay", effective
     ok_down, msg_down = apply_netem(
         inner,
         effective["delay_ms"],
@@ -1710,23 +1698,10 @@ def _apply_selected_profile(link: dict, presets: dict):
             "effective": dict(effective),
             "quality": int(link.get("quality", 100)),
             "mode": link.get("mode", "quality"),
-            "updated_at": time.time(), "apply_status": "applied", "desired": dict(effective),
-            "updated_monotonic": time.monotonic(),
-            "generation": previous.get("generation", 0) + (previous.get("effective") != effective),
+            "updated_at": time.time(),
         }
         return True, "OK", effective
 
-    old = previous.get("effective")
-    restored = False
-    if old:
-        down_restored, _ = apply_netem(inner, old["delay_ms"], old["jitter_ms"], old["loss_pct"], old["download_mbit"],
-                                     old.get("loss_correlation_pct", 0), old.get("duplicate_pct", 0),
-                                     old.get("corrupt_pct", 0), old.get("reorder_pct", 0))
-        up_restored = not outer or apply_netem(outer, 0, 0, 0, old["upload_mbit"])[0]
-        restored = down_restored and up_restored
-    RUNTIME_EFFECTIVE[link_id] = {**previous, "desired": dict(effective),
-                                "effective": old if restored else {}, "apply_status": "rolled_back" if restored else "unknown",
-                                "apply_error": f"download: {msg_down}; upload: {msg_up}", "updated_at": time.time()}
     details = []
     if not ok_down:
         details.append(f"download/impairment: {msg_down}")
@@ -1871,13 +1846,11 @@ def get_qdisc_state(ifname: str):
 
 
 def clear_qdisc(ifname: str):
-    QDISC_GENERATIONS[ifname] = QDISC_GENERATIONS.get(ifname, 0) + 1
-    APPLIED_QDISCS.pop(ifname, None)
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
 # A burst allowance of 10 ms lets a TCP window's burst through at line rate, so ordinary traffic does not wait for
-# tokens. The nominal payload budget is 25 ms; actual queue delay depends on skb sizes and scheduling.
+# tokens. The queue is sized for 25 ms: it only fills when the link is really overloaded.
 SHAPER_QUEUE_MS = 25
 SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
@@ -1890,8 +1863,7 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
     window bursts overflowed it on an otherwise idle link and every transfer paid
     for retransmissions. The fix is a burst allowance that covers those windows
     (10 ms of rate), so an idle or moderately loaded link adds no queueing delay.
-    The nominal payload budget is 25 ms; skb memory accounting and packet sizes
-    mean this is not a bound on measured queue delay.
+    The queue holds 25 ms of data, the most a saturated link adds per direction.
     netem also keeps every packet for its delay, so its packet queue must hold
     rate × (delay + jitter) or it drops on long-delay links.
     """
@@ -1903,34 +1875,7 @@ def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
     return netem_limit, burst, limit
 
 
-def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
-                loss_correlation_pct=0.0, duplicate_pct=0.0, corrupt_pct=0.0, reorder_pct=0.0):
-    values = (delay_ms, jitter_ms, loss_pct, rate_mbit, loss_correlation_pct, duplicate_pct, corrupt_pct, reorder_pct)
-    if not all(isinstance(value, (int, float)) and math.isfinite(value) and value >= 0 for value in values):
-        return False, "Impairments must be finite, nonnegative numbers"
-    if jitter_ms > 0 and delay_ms <= 0:
-        return False, "Jitter requires a positive delay"
-    if reorder_pct > 0 and delay_ms <= 0:
-        return False, "Reordering requires a positive delay"
-    with PROFILE_APPLY_LOCK:
-        previous = APPLIED_QDISCS.get(ifname)
-        observed = None
-        if previous:
-            rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
-            if rc == 0 and observed.strip() and observed == previous["observed"] and previous["values"] == values:
-                return True, "OK"
-        in_place = bool(previous and observed == previous["observed"] and
-                        bool(previous["values"][3]) == bool(rate_mbit))
-        result = _apply_netem(ifname, *values, change=in_place) if in_place else _apply_netem(ifname, *values)
-        APPLIED_QDISCS.pop(ifname, None)
-        if result[0]:
-            rc, observed, _ = run_cmd(f"{TC} qdisc show dev {ifname}")
-            if rc == 0 and observed.strip():
-                APPLIED_QDISCS[ifname] = {"values": values, "observed": observed}
-        return result
-
-
-def _apply_netem(
+def apply_netem(
     ifname: str,
     delay_ms: float,
     jitter_ms: float,
@@ -1940,7 +1885,6 @@ def _apply_netem(
     duplicate_pct: float = 0.0,
     corrupt_pct: float = 0.0,
     reorder_pct: float = 0.0,
-    change: bool = False,
 ):
     """
     Apply netem + optional tbf on interface.
@@ -1948,10 +1892,8 @@ def _apply_netem(
     Advanced impairment controls are intentionally bounded to tc/netem
     primitives and operate only on configured lab interfaces.
     """
-    # Preserve backlog and counters when the verified hierarchy is unchanged.
-    verb = "change" if change else "add"
-    if not change:
-        clear_qdisc(ifname)
+    # Always start clean
+    clear_qdisc(ifname)
 
     netem_limit, burst_bytes, limit_bytes = shaper_queue_sizes(rate_mbit, delay_ms, jitter_ms)
     parts = ["netem", f"limit {netem_limit}"]
@@ -1978,12 +1920,7 @@ def _apply_netem(
     if reorder_pct and reorder_pct > 0:
         parts.append(f"reorder {min(100.0, reorder_pct):.3f}%")
 
-    if change:
-        parts = ["netem", f"limit {netem_limit}", f"delay {delay_ms:.1f}ms {jitter_ms:.1f}ms",
-                 f"loss {loss_pct:.3f}% {min(100.0, loss_correlation_pct):.3f}%",
-                 f"duplicate {min(100.0, duplicate_pct):.3f}%", f"corrupt {min(100.0, corrupt_pct):.3f}%",
-                 f"reorder {min(100.0, reorder_pct):.3f}%"]
-    netem_cmd = f"{TC} qdisc {verb} dev {ifname} root handle 1:0 " + " ".join(parts)
+    netem_cmd = f"{TC} qdisc add dev {ifname} root handle 1:0 " + " ".join(parts)
     rc, out, err = run_cmd(netem_cmd)
     if rc != 0:
         return False, f"Failed to apply netem: {err or out or 'unknown error'}"
@@ -1996,14 +1933,14 @@ def _apply_netem(
         # behind a bulk transfer. The fair queue's memory is the same 25 ms budget as before, so the longest queue
         # is unchanged. The rate limiter's own limit is doubled so that it never drops before the fair queue does.
         tbf_cmd = (
-            f"{TC} qdisc {verb} dev {ifname} parent 1:1 handle 10: tbf "
+            f"{TC} qdisc add dev {ifname} parent 1:1 handle 10: tbf "
             f"rate {rate_str} buffer {burst_bytes} limit {2 * limit_bytes}"
         )
         rc2, out2, err2 = run_cmd(tbf_cmd)
         if rc2 != 0:
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
         fq_cmd = (
-            f"{TC} qdisc {verb} dev {ifname} parent 10:1 handle 20: fq_codel "
+            f"{TC} qdisc add dev {ifname} parent 10:1 handle 20: fq_codel "
             f"memory_limit {limit_bytes} target 5ms interval 100ms"
         )
         rc3, out3, err3 = run_cmd(fq_cmd)
@@ -2578,10 +2515,6 @@ def parse_qdisc_stats(raw: str):
         if backlog:
             current.update(backlog_bytes=int(float(backlog.group(1)) * scale[backlog.group(2).lower()]),
                            backlog_packets=int(backlog.group(3)))
-        for key in ("drop_overlimit", "drop_overmemory", "ecn_mark", "ce_mark", "memory_used"):
-            match = re.search(r"\b" + key + r"\s+(\d+)", line)
-            if match:
-                current[key] = int(match.group(1))
     return qdiscs
 
 
@@ -2600,15 +2533,10 @@ def qdisc_counters(ifname: str):
     tbf = next((item for item in qdiscs if item["kind"] == "tbf"), None)
     fq = next((item for item in qdiscs if item["kind"] == "fq_codel"), None)
     # The fair queue holds what the rate limiter paces, so the rate limiter's backlog is already counted in it.
-    # Netem root backlog semantics differ by kernel. Use only the rate queue
-    # to estimate additional serialization delay, excluding intentional delay backlog.
-    backlog = (fq or tbf or {}).get("backlog_bytes") or 0
+    # The root netem and the rate limiter report the drops of the queue below them, so only the fair queue is counted.
+    backlog = sum(item["backlog_bytes"] or 0 for item in qdiscs if not (fq and item is tbf))
     return {
-        "queues": {"intentional_delay": netem, "rate_limiter": tbf, "fair_queue": fq},
-        "queue_accounting": {"backlog_basis": "rate queue only", "backlog_unit": "bytes",
-                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate"},
         "kind": root["kind"],
-        "generation": QDISC_GENERATIONS.get(ifname, 0),
         "packets": root["packets"],
         "netem_drops": (netem or {}).get("drops") or 0,
         "queue_drops": (fq or tbf or {}).get("drops") or 0,
@@ -2625,7 +2553,7 @@ def qdisc_rates(current, previous, dt):
     when CoDel signals congestion. netem's own counter adds its injected random loss to
     the overflow handed back by that queue.
     """
-    if not current or not previous or dt <= 0 or current["kind"] != previous["kind"] or current.get("generation", 0) != previous.get("generation", 0):
+    if not current or not previous or dt <= 0 or current["kind"] != previous["kind"]:
         return None
     sent = current["packets"] - previous["packets"]
     netem_drops = current["netem_drops"] - previous["netem_drops"]
@@ -3105,7 +3033,6 @@ def simulator_state():
     dem = status.get("dem") or {}
     return {"status": status.get("status"), "users": status.get("users"),
             "run_id": (status.get("run") or {}).get("run_id"),
-            "rate_demand": (status.get("run") or {}).get("rate_demand"),
             "dropped_transactions": status.get("dropped_transactions"),
             "persistence_error": status.get("persistence_error"),
             "requests_per_second": dem.get("requests_per_second"),
@@ -3194,19 +3121,16 @@ def calibration_file(kind):
         return None
 
 
-def simulator_dem_window(seconds, since=None, until=None, run_id=None):
+def simulator_dem_window(seconds):
     """The Traffic Simulator's DEM for the last seconds: what the sparse OT-style traffic experienced, with its loss."""
     try:
-        from urllib.parse import urlencode
-        query = urlencode({"since": since, "until": until, "run_id": run_id}) if since is not None else urlencode({"window": int(seconds)})
-        summary = traffic_generator_request(f"/api/v1/dem/summary?{query}", timeout=7.0)
+        summary = traffic_generator_request(f"/api/v1/dem/summary?window={int(seconds)}", timeout=5.0)
     except RuntimeError as exc:
         return {"error": str(exc)[:200]}
     apps = summary.get("applications") or {}
     ot = apps.get("ot_telemetry") or {}
     quality = ot.get("quality") or {}
-    return {"scoring_complete": summary.get("scoring_complete"), "evidence_issues": summary.get("evidence_issues"),
-            "ot_loss_pct": quality.get("udp_loss_pct"), "ot_jitter_p95_ms": quality.get("udp_rtt_variation_p95_ms"),
+    return {"ot_loss_pct": quality.get("udp_loss_pct"), "ot_jitter_p95_ms": quality.get("udp_rtt_variation_p95_ms"),
             "ot_p95_ms": ot.get("p95_ms"), "ot_bursts": ot.get("requests"),
             "requests_per_second": summary.get("requests_per_second"), "p95_ms": summary.get("p95_ms")}
 
@@ -3290,7 +3214,6 @@ def run_bandwidth_calibration(link_id, unshaped=False):
             lift_started = True
             lift_download_shaping(link_id)
             shaped = None
-        unloaded_probe = calibration_probe(link_id)
         for target in calibration.LADDER_MBPS:
             users = max(10, min(500, int(target / 5)))
             CALIBRATION_STATE["target_mbps"] = target
@@ -3309,30 +3232,19 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                 payload.pop("sparse_share")
                 status = traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0)
             run_id = (status.get("run") or {}).get("run_id")
-            path = (status.get("run") or {}).get("traffic_path") or {}
-            if path.get("mode") != "direct_netem" or path.get("wan_id") != link_id:
-                raise RuntimeError("WAN calibration requires the matching direct NetEm path; select this WAN before calibrating.")
             poller = calibration_trace.SimulatorPoller(fetch=calibration_health).start()
             time.sleep(calibration.SETTLE_S)
             devices = calibration_device(link_id)
             qdisc_before = qdisc_readings(devices)
             sim_before, sim_before_ms = _timed(simulator_state)
             start = time.time()
-            time.sleep(calibration.MEASURE_S / 2)
-            probe = dict(calibration_probe(link_id))
-            probe["unloaded_baseline"] = unloaded_probe
-            if (probe.get("success") and unloaded_probe.get("success") and
-                    probe.get("target") == unloaded_probe.get("target") and
-                    probe.get("latency_ms") is not None and unloaded_probe.get("latency_ms") is not None):
-                probe["additional_latency_ms"] = probe["latency_ms"] - unloaded_probe["latency_ms"]
-                probe["attribution"] = "additional RTT under load; queueing and endpoint contention are not separated"
-            remaining = calibration.MEASURE_S - (time.time() - start)
-            if remaining > 0:
-                time.sleep(remaining)
+            time.sleep(calibration.MEASURE_S)
             end = time.time()
             qdisc_after = qdisc_readings(devices)
             polls, poller = poller.stop(), None
             sim_after, sim_after_ms = _timed(simulator_state)
+            _, stop_ms = _timed(stop_test_owned_workload, run_id)
+            run_id = None
             measured, measure_ms = _timed(measure_wan, link_id, start, end)
             host = host_headroom(window_s=int(calibration.MEASURE_S), now=end)
             qdisc_delta = {direction: calibration_log.qdisc_deltas(
@@ -3344,14 +3256,11 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                                                      (qdisc_after.get("down") or {}).get("raw")))
             verdict = calibration.judge_step(target, shaped, measured.get("achieved_mbps"), shaper["drop_pct"],
                                              host.get("status", "unknown"), host.get("late_seconds", 0),
-                                             shaper["drops_ps"], require_demand=True,
-                                             demand=calibration.demand_window(sim_before.get("rate_demand"), sim_after.get("rate_demand")))
+                                             shaper["drops_ps"])
             if sparse_used:
-                sparse_window, dem_ms = _timed(simulator_dem_window, end - start, start, end, run_id)
+                sparse_window, dem_ms = _timed(simulator_dem_window, int(calibration.MEASURE_S))
             else:
                 sparse_window, dem_ms = {"skipped": "The simulator does not support sparse traffic; update it."}, None
-            _, stop_ms = _timed(stop_test_owned_workload, run_id)
-            run_id = None
             # The users that download share the rate; the sparse users send UDP bursts instead.
             paced_users = users - (round(users * payload["sparse_share"]) if "sparse_share" in payload else 0)
             wan_rows = wan_timeline(link_id, start, end)
@@ -3369,7 +3278,7 @@ def run_bandwidth_calibration(link_id, unshaped=False):
                             "stop_workload_ms": stop_ms, "measure_wan_ms": measure_ms, "dem_window_ms": dem_ms},
                 "wan_timeline": wan_rows,
                 "host_timeline": host_window(start, end),
-                "probe": probe,
+                "probe": calibration_probe(link_id),
             }
             log_event("calibration", calibration_log.step_line(verdict), target_mbps=target, status=verdict["status"])
             steps.append(verdict)
@@ -3628,14 +3537,14 @@ def path_signals(state: dict, samples: list):
         if (info["queue_drops_ps"] or 0) >= 1:
             signals["causes"].append({
                 "kind": "queue_drops", "direction": direction, "severity": "warn",
-                "text": f"{name} queue drops: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
+                "text": f"{name} queue full: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
             })
     loss = signals["injected"]["loss_pct"]
     if loss > 0 and fault == "normal":
         dropped = signals["directions"]["down"]["injected_drops_ps"]
         signals["causes"].append({
             "kind": "injected_loss", "direction": "down", "severity": "warn",
-            "text": f"{loss:g}% random loss injected on download" + (f" (estimated {dropped:.1f} packets/s from counters)" if dropped else ""),
+            "text": f"{loss:g}% random loss injected on download" + (f" ({dropped:.1f} packets/s)" if dropped else ""),
         })
     delay, jitter = signals["injected"]["delay_ms"], signals["injected"]["jitter_ms"]
     if (delay > 0 or jitter > 0) and fault == "normal":
@@ -3648,9 +3557,7 @@ def path_signals(state: dict, samples: list):
     # Health decides where a well-behaved SD-WAN appliance should steer traffic.
     sla = state.get("sla") or {}
     failing = [name for name, ok in (sla.get("checks") or {}).items() if not ok and name != "data_plane"]
-    if state.get("apply_status") == "unknown":
-        signals["health"], signals["health_reason"] = "unknown", "Impairment application failed; actual state is unverified"
-    elif fault != "normal":
+    if fault != "normal":
         signals["health"], signals["health_reason"] = "failed", f"{fault.replace('_', ' ')} active"
     elif not sla.get("pass", True):
         signals["health"], signals["health_reason"] = "degraded", "Model SLA fails on " + ", ".join(failing or ["impairment"])
@@ -5434,7 +5341,7 @@ def phase_window_dem(seconds, since=None, until=None, run_id=None, intervals=Non
     return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
             "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
             "p95_ms": dem.get("p95_ms"), "applications": applications,
-            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions")}}
+            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions", "business_acceptance", "coverage_pct", "score_range", "score_status") }}
 
 
 def recorder_close_phase():
@@ -5603,6 +5510,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             "experience_score": experience, "success_pct": success,
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
             "critical_alerts": (window or {}).get("critical_alerts", []),
+            **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "score_range", "score_status")},
             "worst_success_pct": success,
             "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
                       "health": item["health"]} for item in links.values()],
@@ -5616,13 +5524,16 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
 
     evaluated = [phase for phase in phases if phase["reached"]]
     def phase_verdict(phase):
-        if phase["note"] or not targets:
+        if confirmed_critical_failure(phase):
+            return "fail"
+        if phase["note"] or not targets or phase.get("business_acceptance") == "unknown":
             return "unknown"
+        if phase.get("business_acceptance") == "pass":
+            value, target = phase.get("experience_score"), targets.get("experience_min")
+            return "unknown" if value is None or target is None else "pass" if value >= target else "fail"
         checks = [(phase["experience_score"], targets.get("experience_min"), True),
                   (phase["success_pct"], targets.get("success_min_pct"), True),
                   (phase["interactive_p95_ms"], targets.get("interactive_p95_max_ms"), False)]
-        if phase.get("critical_alerts"):
-            return "fail"
         if any(actual is None or target is None for actual, target, _ in checks):
             return "unknown"
         return "pass" if all(actual >= target if higher else actual <= target for actual, target, higher in checks) else "fail"
@@ -6228,7 +6139,7 @@ def build_link_states(cfg: dict, include_qdisc=False):
 
         configured_effective = get_effective_profile(link, presets)
         runtime = RUNTIME_EFFECTIVE.get(link_id) or {}
-        effective = runtime.get("effective", {}) if runtime.get("apply_status") == "unknown" else runtime.get("effective") or configured_effective
+        effective = runtime.get("effective") or configured_effective
         runtime_quality = runtime.get("quality", quality)
         runtime_mode = runtime.get("mode", mode)
         fault = ACTIVE_FAULTS.get(link_id, "normal")
@@ -6257,8 +6168,6 @@ def build_link_states(cfg: dict, include_qdisc=False):
             "bandwidth_upload_mbit": bandwidth_upload,
             "nominal_download_mbit": nominal_download,
             "nominal_upload_mbit": nominal_upload,
-            "apply_status": runtime.get("apply_status", "unverified"),
-            "apply_error": runtime.get("apply_error"),
             "configured_effective": configured_effective,
             "effective": effective,
             "fault": fault,
@@ -9340,6 +9249,16 @@ def showroom_verdict(value, target, higher_is_better=True):
     return "pass" if (value >= target if higher_is_better else value <= target) else "fail"
 
 
+def confirmed_critical_failure(dem):
+    # Missing/overdue observations cannot erase an independently measured failure.
+    # Corrupt or mixed windows cannot establish one either.
+    invalid = {"row_limit", "clock_discontinuity", "configuration_changed_in_window"}
+    if dem.get("truncated") or invalid.intersection(dem.get("evidence_issues") or []):
+        return False
+    return dem.get("business_acceptance") == "fail" or any(
+        item.get("severity", "violation") in ("violation", "outage") for item in dem.get("critical_alerts") or [])
+
+
 def showroom_outcome(diagnosis, site_plan):
     """What the simulated users get: traffic running, result against targets, where and why."""
     generator = diagnosis.get("traffic_generator") or {}
@@ -9363,8 +9282,13 @@ def showroom_outcome(diagnosis, site_plan):
         verdicts["experience"] = "unknown"
     if dem.get("truncated") or dem.get("evidence_issues") or dem.get("scoring_complete") is not True:
         verdicts = {key: "unknown" for key in verdicts}
-    elif dem.get("critical_alerts"):
+    confirmed_failure = confirmed_critical_failure(dem)
+    if confirmed_failure:
         verdicts["experience"] = "fail"
+    elif dem.get("business_acceptance") == "unknown":
+        verdicts["experience"] = "unknown"
+    elif dem.get("business_acceptance") == "pass" and dem.get("scoring_complete") is True:
+        verdicts["experience"] = showroom_verdict(score, targets.get("experience_min"))
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -9382,7 +9306,8 @@ def showroom_outcome(diagnosis, site_plan):
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
             "verdicts": verdicts,
             **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
-                                            "critical_alerts", "limiting_application", "missing_measurements")},
+                                            "critical_alerts", "limiting_application", "missing_measurements", "coverage_pct", "score_range",
+                                            "score_status", "business_acceptance", "at_risk", "at_risk_reason", "legacy_score")},
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
         },

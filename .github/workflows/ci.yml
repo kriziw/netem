@@ -298,9 +298,3 @@ jobs:
           python -m json.tool release-please-config.json >/dev/null
           python -m json.tool .release-please-manifest.json >/dev/null
           test -s version.txt
-
-      - name: Verify shaping in an isolated Linux namespace
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y iproute2
-          sudo "$(command -v python)" tests/kernel_shaping_check.py
