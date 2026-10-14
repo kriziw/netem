@@ -211,6 +211,7 @@
   function stageMode(data) {
     const scenario = (data && data.scenario) || {};
     if (scenario.active && scenario.intro) return 'intro';
+    if (!scenario.active && (data && data.session || {}).active) return 'session';
     if (showPlanSummary(data)) return 'summary';
     if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
     return 'live';
@@ -235,12 +236,30 @@
       phases: (scenario.phases || []).map((phase, index) => ({
         number: index + 1, name: phase.name, duration: clock(phase.planned_s), what: phase.what || ''})),
       checks: scenario.checks || [],
+      measurements: scenario.measurements || [],
+      watch: scenario.watch || [],
       meta: [number(scenario.planned_s) && scenario.planned_s > 0 ? `About ${clock(scenario.planned_s)} long` : null,
         planProgress(plan)].filter(Boolean).join(' · '),
     };
   }
 
   const TEST_RESULTS = {passed: ['Passed', 'pass'], failed: ['Failed', 'fail'], stopped: ['Stopped', 'warn'], skipped: ['Not run', 'unknown']};
+
+  function sessionProgressView(progress) {
+    const facts = progress || {};
+    const outcomes = facts.outcomes || {};
+    const latest = facts.latest;
+    return {
+      points: [
+        {label: 'Tests completed', value: String(facts.tests_completed || 0), note: facts.tests_stopped ? `${facts.tests_stopped} stopped` : 'In this session'},
+        {label: 'Experience outcomes', value: `${outcomes.pass || 0} met · ${outcomes.fail || 0} missed`, note: `${outcomes.unknown || 0} not confirmed`},
+        {label: 'Lowest measured experience', value: number(facts.lowest_experience) ? `${Math.round(facts.lowest_experience)} / 100` : 'Not measured', note: facts.lowest_is_provisional ? 'Limited evidence' : 'Across measured phases'},
+        {label: 'Application completion · slowest phase P95', value: number(facts.slowest_phase_completion_p95_ms) ? `${Math.round(facts.slowest_phase_completion_p95_ms)} ms` : 'Not measured', note: 'Interactive requests; not network latency'},
+      ],
+      latest: latest ? `${latest.name} · experience ${latest.outcome === 'pass' ? 'targets met' : latest.outcome === 'fail' ? 'targets missed' : 'not confirmed'}` : 'No tests completed yet',
+      conclusion: latest ? (latest.conclusion || []).join(' ') : 'Your session is ready. The next test will be introduced before it starts.',
+    };
+  }
 
   // The whole run: the verdict, one row per test with what users got, and what the run showed.
   function planSummaryView(summary) {
@@ -293,7 +312,7 @@
   }
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
     phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView,
-    showPlanSummary, planSummaryView, waitingMedia, embedAddress, groupCards};
+    showPlanSummary, planSummaryView, waitingMedia, embedAddress, groupCards, sessionProgressView};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
@@ -625,7 +644,9 @@
     const mode = stageMode(latest);
     document.body.dataset.mode = mode;
     document.getElementById('stage').hidden = mode === 'live';
-    document.getElementById('waiting').hidden = mode !== 'waiting';
+    document.getElementById('waiting').hidden = !['waiting', 'session'].includes(mode);
+    const sessionProgress = document.getElementById('session-progress');
+    if (sessionProgress) sessionProgress.hidden = mode !== 'session';
     document.getElementById('intro').hidden = mode !== 'intro';
     document.getElementById('plan-summary').hidden = mode !== 'summary';
     if (mode === 'summary') {
@@ -651,8 +672,23 @@
         document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
       }
     }
-    if (mode === 'waiting') {
+    if (mode === 'waiting' || mode === 'session') {
       renderWaitingMedia(latest.showcase_video);
+      text('waiting-title', mode === 'session' ? 'Session so far' : 'Waiting for the session to start');
+      text('waiting-note', mode === 'session' ? 'Between tests · the next test will be introduced before it starts.' : 'The client, the appliance and the tests appear here once the operator starts the session.');
+      if (mode === 'session') {
+        const view = sessionProgressView(latest.session_progress);
+        text('session-progress-name', (latest.session || {}).name || 'Current session');
+        text('session-progress-latest', view.latest);
+        text('session-progress-conclusion', view.conclusion);
+        if (changed('session-progress-points', view.points)) {
+          document.getElementById('session-progress-points').replaceChildren(...view.points.map(point => {
+            const card = element('article', 'session-point');
+            card.append(element('span', '', point.label), element('strong', '', point.value), element('small', '', point.note));
+            return card;
+          }));
+        }
+      }
       const view = waitingView(latest.site);
       const site = document.getElementById('waiting-site');
       if (site) site.hidden = !view.site;
@@ -680,6 +716,9 @@
       document.getElementById('intro-checks-block').hidden = !view.checks.length;
       if (changed('intro-checks', view.checks)) {
         document.getElementById('intro-checks').replaceChildren(...view.checks.map(check => element('li', '', check)));
+      }
+      for (const key of ['measurements', 'watch']) {
+        if (changed(`intro-${key}`, view[key])) document.getElementById(`intro-${key}`).replaceChildren(...view[key].map(line => element('li', '', line)));
       }
     }
   }

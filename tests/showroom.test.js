@@ -246,7 +246,7 @@ test('the screen waits before the session, announces each test, then shows the l
   const report = {name: 'Brownout', ended_at: 90};
   const data = (scenario, session = false, extra = {}) => Object.assign({timestamp: 100, scenario, session: {active: session}}, extra);
   assert.equal(ui.stageMode(data({active: false})), 'waiting');
-  assert.equal(ui.stageMode(data({active: false}, true)), 'live');
+  assert.equal(ui.stageMode(data({active: false}, true)), 'session');
   assert.equal(ui.stageMode(data({active: true, intro: true})), 'intro');
   assert.equal(ui.stageMode(data({active: true, intro: true}, true)), 'intro');
   assert.equal(ui.stageMode(data({active: true})), 'live');
@@ -257,6 +257,47 @@ test('the screen waits before the session, announces each test, then shows the l
   assert.deepEqual(plain(ui.waitingView(null)), {site: false, title: '', meta: ''});
   assert.equal(ui.waitingView({sub_industry: 'Automotive', function: 'Manufacturing plant', industry: 'Manufacturing',
     size: 'Large', criticality: 'Business-critical'}).title, 'Automotive · Manufacturing plant');
+});
+
+test('session pause screen shows retained facts, yields to the briefing and returns after a test', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  let poll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) poll = fn; return 1; };
+  win.clearTimeout = () => {};
+  win.setInterval = () => 1;
+  const data = {timestamp: 7200, session: {active: true, name: 'Customer session'}, scenario: {active: false},
+    session_progress: {tests_completed: 2, outcomes: {pass: 1, fail: 0, unknown: 1}, lowest_experience: 72,
+      lowest_is_provisional: true, slowest_phase_completion_p95_ms: 450,
+      latest: {name: '<img src=x>', outcome: 'unknown', conclusion: ['Limited evidence.']}}, links: []};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
+  win.eval(source);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.equal(win.document.body.dataset.mode, 'session');
+  assert.equal(win.document.getElementById('session-progress').hidden, false);
+  assert.match(win.document.getElementById('session-progress-points').textContent, /72 \/ 100/);
+  assert.match(win.document.getElementById('session-progress-latest').textContent, /not confirmed/);
+  assert.equal(win.document.querySelectorAll('#session-progress img').length, 0);
+  data.scenario = {active: true, intro: true, starts_in_s: 30, scenario_name: 'Brownout',
+    measurements: ['Completion P95'], watch: ['Watch application recovery']};
+  await poll();
+  assert.equal(win.document.body.dataset.mode, 'intro');
+  assert.equal(win.document.getElementById('intro-seconds').textContent, '30');
+  assert.equal(win.document.getElementById('intro-watch').textContent, 'Watch application recovery');
+  data.scenario = {active: true};
+  await poll();
+  assert.equal(win.document.body.dataset.mode, 'live');
+  data.scenario = {active: false};
+  await poll();
+  assert.equal(win.document.body.dataset.mode, 'session');
+  assert.match(win.document.getElementById('session-progress-points').textContent, /72 \/ 100/);
+  data.session.active = false;
+  data.session_progress = null;
+  await poll();
+  assert.equal(win.document.body.dataset.mode, 'waiting');
+  assert.equal(win.document.getElementById('session-progress').hidden, true);
+  dom.window.close();
 });
 
 test('an announced test shows its plan, its checks and a countdown that ticks locally', () => {
@@ -293,7 +334,7 @@ test('after a run sequence the results replace the dashboard until the next test
     insights: [{tone: 'fail', text: 'Primary WAN outage missed: Request success ≥ 99%.'}, {tone: 'odd', text: 'Unknown tone'}]};
   const data = (extra = {}) => Object.assign({timestamp: 160, scenario: {active: false}, session: {active: false}, plan: {active: false}, plan_summary: summary}, extra);
   assert.equal(ui.stageMode(data()), 'summary');
-  assert.equal(ui.stageMode(data({session: {active: true}})), 'summary');
+  assert.equal(ui.stageMode(data({session: {active: true}})), 'session');
   assert.equal(ui.stageMode(data({scenario: {active: true, intro: true}})), 'intro');
   assert.equal(ui.stageMode(data({scenario: {active: true}})), 'live');
   assert.equal(ui.stageMode(data({plan: {active: true}})), 'live');

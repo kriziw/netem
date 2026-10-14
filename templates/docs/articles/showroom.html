@@ -23,7 +23,9 @@
 <p>The session records the client, the appliance under test and the primary and backup WANs when it starts. The header and the client band then show those details. The session ends when the operator completes it, or six hours after it started.</p>
 
 <h2 id="coming-up">Coming up</h2>
-<p>For 5 seconds before each test starts, the screen shows what is coming: the test and its WAN, a short description, each phase with its length and what it does (for example "Primary blackholed"), the checks it makes, and a countdown. In a site test plan this happens before every test, with the test's place in the plan. Then the live dashboard returns and the test begins. The screen checks for news every second while no test runs, so the announcement appears within a second.</p>
+<p>While a session is active and no test is running, the waiting-style screen shows session results so far: completed tests, experience outcomes (met / missed / not confirmed), lowest measured experience, slowest interactive application completion P95 across phases, and the latest test's brief conclusion. Repeated runs count separately. The values come from recorded full-phase results, not empty or idle live windows. Limited evidence stays labelled, and a completed test is never automatically counted as an experience pass. These session facts remain until the next test or the session ends.</p>
+<p>The 30-second briefing also names the measurements and configured targets, what to look for during impairment and recovery, and the selected live evidence window. Target-agent RTD/RTT is described as available only when supported. The announcement does not inject impairment, start test-owned traffic or advance the phase clock. Stopping during it cancels the test.</p>
+<p>For 30 seconds before each test starts, the screen shows what is coming: the test and its WAN, a short description, each phase with its length and what it does (for example "Primary blackholed"), the checks it makes, and a countdown. In a site test plan this happens before every test, with the test's place in the plan. Then the live dashboard returns and the test begins. The screen checks for news every second while no test runs, so the announcement appears within a second.</p>
 
 <h2 id="site">Client site band</h2>
 <p>The band at the top shows the site of the running lab session. Without a session it shows the active site profile from <a href="{{ url_for('tests') }}#site-scenario">Tests → Site scenario</a>. Choose the site when starting a session so the screen and the session report name the same client. With no site at all, the screen says so and judges results against the Command Center's lab thresholds.</p>
@@ -44,7 +46,7 @@
 <p>Health, routes and the target verdicts change on screen only after a change has lasted about 8 seconds, so the screen reads calmly from across a room. An outage shows at once. The Command Center keeps the detailed, second-by-second diagnosis for operators.</p>
 
 <h2 id="report">Test report</h2>
-<p>When a test ends, its report replaces the live findings for 30 minutes, or until the next test starts. The report shows:</p>
+<p>When a test ends, the showcase returns to the session summary screen. Detailed test reports remain available on the operator’s Tests page and in the lab session report. Each detailed report shows:</p>
 <ul>
 <li>the result, the WAN, the site, the duration and how many checks passed;</li>
 <li>a short conclusion, for example how far experience fell and in which phase;</li>
