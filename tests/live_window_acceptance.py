@@ -60,6 +60,8 @@ def check():
                 platform.SCENARIO_STATE.update(phase_index=1, phase='Degradation')
                 degraded = platform.publish_test_live_context()['dem']
                 assert degraded['requests'] == 2 and degraded['live_phase_id'] != baseline['live_phase_id'], degraded
+                explicit = api('/api/v1/dem/summary?window=60')
+                assert explicit['requests'] == 2 and explicit['since'] == degraded['since'], explicit
                 full = platform.phase_window_dem(30, since=now-30, until=now, run_id=run['run_id'])
                 assert full['requests'] == 4 and full['since'] == now-30 and full['until'] == now, full
                 reset = api('/api/v1/controller/heartbeat', method='POST',

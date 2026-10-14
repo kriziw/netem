@@ -5299,7 +5299,7 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
 
     if kind == "dem":
         try:
-            window = int(condition.get("window", 60))
+            window = int(condition.get("window", SCENARIO_STATE.get("live_window_seconds", 15)))
             payload = traffic_generator_request(
                 f"/api/v1/dem/experience?window={window}",
                 timeout=2.5,
