@@ -50,7 +50,9 @@ class QdiscStatsTests(unittest.TestCase):
     def test_counters_separate_queue_overflow_from_injected_loss(self):
         with patch.object(netem, "run_cmd", return_value=(0, TBF_OUTPUT, "")):
             value = netem.qdisc_counters("eth1")
-        self.assertEqual(value, {"kind": "netem", "packets": 9000, "netem_drops": 120, "queue_drops": 100,
+        self.assertIn("intentional_delay", value.pop("queues"))
+        self.assertEqual(value.pop("queue_accounting")["backlog_basis"], "rate queue only")
+        self.assertEqual(value, {"kind": "netem", "generation": netem.QDISC_GENERATIONS.get("eth1", 0), "packets": 9000, "netem_drops": 120, "queue_drops": 100,
                                  "backlog_bytes": 31 * 1024, "shaped": True})
         with patch.object(netem, "run_cmd", return_value=(0, BLACKHOLE_OUTPUT, "")):
             self.assertFalse(netem.qdisc_counters("eth1")["shaped"])
@@ -144,7 +146,7 @@ class CorrelationTests(unittest.TestCase):
         media = findings["media_loss"]
         self.assertEqual([(wan["label"], wan["affected"]) for wan in media["wans"]], [("WAN2", 18)])
         self.assertTrue(any("random loss" in text for text in media["wans"][0]["causes"]))
-        self.assertTrue(any("queue full" in text for text in media["wans"][0]["causes"]))
+        self.assertTrue(any("queue drops" in text for text in media["wans"][0]["causes"]))
         self.assertEqual((media["unattributed"], media["candidates"]), (3, ["WAN2"]))
         bandwidth = findings["bandwidth_bound"]
         self.assertEqual(bandwidth["wans"][0]["label"], "WAN1")
