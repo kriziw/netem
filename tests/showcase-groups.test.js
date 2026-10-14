@@ -38,3 +38,10 @@ test('cards are grey and show no score when the simulator is not live', () => {
   assert.ok(card.classList.contains('unknown'));
   assert.equal(card.querySelector('strong').textContent, '—');
 });
+
+test('an incomplete traffic group labels its score as provisional', () => {
+  const [card] = ui.groupCards([{label: 'Voice and video', score: 99, tone: 'unknown', scoring_complete: false,
+    text: 'Incomplete application evidence; this group cannot yet be judged.'}], true);
+  assert.equal(card.querySelector('strong').textContent, '99 / 100 · provisional');
+  assert.ok(card.classList.contains('unknown'));
+});

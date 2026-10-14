@@ -199,7 +199,8 @@ TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
 PROCESS_INSTANCE = uuid.uuid4().hex
 BOTTLENECK_COLUMNS = tuple(
     f"{direction}_{name}" for direction in ("down", "up")
-    for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes")
+    for name in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes",
+                 "queue_memory_drops_ps", "queue_packet_drops_ps", "queue_other_drops_ps")
 )
 NET_SYSFS = Path("/sys/class/net")
 PROBE_RUNTIME = {}
@@ -1884,31 +1885,44 @@ def clear_qdisc(ifname: str):
     run_cmd(f"{TC} qdisc del dev {ifname} root")
 
 
-# A burst allowance of 10 ms lets a TCP window's burst through at line rate, so ordinary traffic does not wait for
-# tokens. The nominal payload budget is 25 ms; actual queue delay depends on skb sizes and scheduling.
-SHAPER_QUEUE_MS = 25
+# Resource guards scale generously with configured line rate, separately from pacing.
+# CoDel controls persistent queue delay; memory exhaustion must not model WAN quality.
+SHAPER_QUEUE_BUDGET_MS = 1000
+SHAPER_MEMORY_HEADROOM = 4
+SHAPER_QUEUE_MIN_MEMORY = 8 * 1024 * 1024
+SHAPER_QUEUE_MAX_MEMORY = 512 * 1024 * 1024
+SHAPER_QUEUE_MIN_PACKETS = 8192
+SHAPER_QUEUE_MAX_PACKETS = 1048576
 SHAPER_BURST_MS = 10
 UNSHAPED_SIZING_MBIT = 1000
 
 
-def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
-    """Queue sizes that scale with the configured rate instead of fixed bytes.
+def shaper_queue_limits(rate_mbit: float):
+    """One second of line-rate traffic, with allocation headroom and resource guards.
 
-    A fixed 32 KB rate-limiter queue held under 3 ms at 100 Mbit/s, so TCP's
-    window bursts overflowed it on an otherwise idle link and every transfer paid
-    for retransmissions. The fix is a burst allowance that covers those windows
-    (10 ms of rate), so an idle or moderately loaded link adds no queueing delay.
-    The nominal payload budget is 25 ms; skb memory accounting and packet sizes
-    mean this is not a bound on measured queue delay.
-    netem also keeps every packet for its delay, so its packet queue must hold
-    rate × (delay + jitter) or it drops on long-delay links.
+    Packet capacity uses a conservative 256-byte reference packet. Memory
+    allocation varies by kernel and offloads; this is not a queue-delay guarantee.
+    """
+    rate = rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT
+    wire_bytes = rate * 125 * SHAPER_QUEUE_BUDGET_MS
+    packets = min(SHAPER_QUEUE_MAX_PACKETS, max(SHAPER_QUEUE_MIN_PACKETS, math.ceil(wire_bytes / 256)))
+    memory = min(SHAPER_QUEUE_MAX_MEMORY, max(SHAPER_QUEUE_MIN_MEMORY, math.ceil(wire_bytes * SHAPER_MEMORY_HEADROOM)))
+    return packets, memory
+
+
+def shaper_queue_sizes(rate_mbit: float, delay_ms: float, jitter_ms: float):
+    """Generous packet/memory guards, with a rate-scaled pacing burst.
+
+    fq_codel memory_limit accounts kernel allocation bytes, not wire bytes.
+    Do not derive that resource guard from a few milliseconds of payload.
+    The intentional-delay queue also needs room for the bandwidth-delay product.
     """
     bytes_per_ms = (rate_mbit if rate_mbit and rate_mbit > 0 else UNSHAPED_SIZING_MBIT) * 125
     hold_ms = max(0.0, float(delay_ms or 0)) + 3 * max(0.0, float(jitter_ms or 0))
-    netem_limit = max(1000, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
+    packets, memory = shaper_queue_limits(rate_mbit)
+    netem_limit = max(packets, math.ceil(bytes_per_ms * hold_ms * 1.5 / 1000))
     burst = max(3200, int(bytes_per_ms * SHAPER_BURST_MS))
-    limit = max(65536, int(bytes_per_ms * SHAPER_QUEUE_MS))
-    return netem_limit, burst, limit
+    return netem_limit, burst, memory
 
 
 def apply_netem(ifname, delay_ms, jitter_ms, loss_pct, rate_mbit,
@@ -1999,10 +2013,8 @@ def _apply_netem(
     if rate_mbit and rate_mbit > 0:
         rate_value = int(round(rate_mbit))
         rate_str = f"{rate_value}mbit"
-        # The rate limiter only paces. A fair queue behind it holds the backlog, so when it is full the drop falls
-        # on the largest flow, not on whichever packet arrives last: a sparse flow such as telemetry is not lost
-        # behind a bulk transfer. The fair queue's memory is the same 25 ms budget as before, so the longest queue
-        # is unchanged. The rate limiter's own limit is doubled so that it never drops before the fair queue does.
+        # TBF paces; its child fair queue holds the backlog. Keep resource guards
+        # generous at low WAN rates as well. CoDel may still drop to control delay.
         tbf_cmd = (
             f"{TC} qdisc {verb} dev {ifname} parent 1:1 handle 10: tbf "
             f"rate {rate_str} buffer {burst_bytes} limit {2 * limit_bytes}"
@@ -2012,7 +2024,7 @@ def _apply_netem(
             return False, f"Netem OK, but tbf failed: {err2 or out2 or 'unknown error'}"
         fq_cmd = (
             f"{TC} qdisc {verb} dev {ifname} parent 10:1 handle 20: fq_codel "
-            f"memory_limit {limit_bytes} target 5ms interval 100ms"
+            f"limit {shaper_queue_limits(rate_mbit)[0]} memory_limit {limit_bytes} target 5ms interval 100ms"
         )
         rc3, out3, err3 = run_cmd(fq_cmd)
         if rc3 != 0:
@@ -2574,6 +2586,10 @@ def parse_qdisc_stats(raw: str):
             current = {"kind": head.group(1), "handle": head.group(2), "root": " root " in f" {line} ",
                        "bytes": None, "packets": None, "drops": None, "overlimits": None,
                        "backlog_bytes": None, "backlog_packets": None}
+            # tc prints drop_overmemory only when nonzero. Advertising the
+            # memory_limit option establishes support for this counter.
+            if current["kind"] == "fq_codel" and re.search(r"\bmemory_limit\s", line):
+                current["drop_overmemory"] = 0
             qdiscs.append(current)
             continue
         if current is None:
@@ -2614,7 +2630,8 @@ def qdisc_counters(ifname: str):
     return {
         "queues": {"intentional_delay": netem, "rate_limiter": tbf, "fair_queue": fq},
         "queue_accounting": {"backlog_basis": "rate queue only", "backlog_unit": "bytes",
-                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate"},
+                              "memory_unit": "kernel allocation bytes", "injected_loss_basis": "counter difference estimate",
+                              "fair_queue_drops": {key: fq.get(key) for key in ("drops", "drop_overlimit", "drop_overmemory")} if fq else None},
         "kind": root["kind"],
         "generation": QDISC_GENERATIONS.get(ifname, 0),
         "packets": root["packets"],
@@ -2642,12 +2659,23 @@ def qdisc_rates(current, previous, dt):
         return None
     dropped = max(netem_drops, queue_drops)
     offered = sent + dropped
-    return {
+    rates = {
         "queue_drops_ps": queue_drops / dt,
         "injected_drops_ps": max(0, netem_drops - queue_drops) / dt,
         "drop_pct": dropped * 100.0 / offered if offered else 0.0,
         "backlog_bytes": current["backlog_bytes"],
     }
+    before = (previous.get("queue_accounting") or {}).get("fair_queue_drops") or {}
+    after = (current.get("queue_accounting") or {}).get("fair_queue_drops") or {}
+    keys = ("drops", "drop_overlimit", "drop_overmemory")
+    if all(before.get(key) is not None and after.get(key) is not None for key in keys):
+        total, limited, memory = (after[key] - before[key] for key in keys)
+        # Linux's overmemory count is a subset of overlimit, not an extra loss.
+        if 0 <= memory <= limited <= total:
+            rates.update(queue_memory_drops_ps=memory / dt,
+                         queue_packet_drops_ps=(limited - memory) / dt,
+                         queue_other_drops_ps=(total - limited) / dt)
+    return rates
 
 
 # ---------- Persistent telemetry / active measurement ----------
@@ -3608,6 +3636,13 @@ def path_signals(state: dict, samples: list):
     """Summarize one WAN's recent path measurements and the conditions they show."""
     effective = state.get("effective") or {}
     fault = state.get("fault", "normal")
+    # Do not describe this phase using pressure recorded under another profile.
+    expected = {key: float(effective.get(key) or 0) for key in ("delay_ms", "jitter_ms", "loss_pct")}
+    if state.get("runtime_quality") is not None:
+        expected["quality"] = float(state["runtime_quality"])
+    samples = [sample for sample in samples if sample.get("fault", fault) == fault and all(
+        sample.get(key) is None or math.isclose(float(sample[key]), value, abs_tol=1e-6)
+        for key, value in expected.items())]
     signals = {
         "link_id": state["id"],
         "label": state.get("label") or state["id"],
@@ -3626,7 +3661,7 @@ def path_signals(state: dict, samples: list):
             "limit_mbit": float(effective.get(limit_key) or 0) or None,
         }
         for key in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes"):
-            info[key] = _mean(sample.get(f"{direction}_{key}") for sample in samples)
+            info[key] = _mean(sample.get(f"{direction}_{key}") for sample in (valid if key == "util_pct" else samples))
         info["queue_delay_ms"] = (info["backlog_bytes"] * 8 / (info["limit_mbit"] * 1000)
                                   if info["backlog_bytes"] is not None and info["limit_mbit"] else None)
         signals["directions"][direction] = info
@@ -3662,10 +3697,13 @@ def path_signals(state: dict, samples: list):
         signals["health"], signals["health_reason"] = "failed", f"{fault.replace('_', ' ')} active"
     elif not sla.get("pass", True):
         signals["health"], signals["health_reason"] = "degraded", "Model SLA fails on " + ", ".join(failing or ["impairment"])
-    elif signals["full"]:
+    elif any(cause["kind"] == "saturated" for cause in signals["causes"]):
         signals["health"] = "congested"
         signals["health_reason"] = "; ".join(cause["text"] for cause in signals["causes"]
                                              if cause["kind"] in ("saturated", "queue_drops"))
+    elif any(cause["kind"] == "queue_drops" for cause in signals["causes"]):
+        signals["health"] = "queue_pressure"
+        signals["health_reason"] = "Queue drops measured; sustained high utilization is not established"
     else:
         signals["health"], signals["health_reason"] = "healthy", None
     return signals
@@ -9470,8 +9508,7 @@ def showroom_outcome(diagnosis, site_plan):
         verdicts["experience"] = "fail"
     elif dem.get("business_acceptance") == "unknown":
         verdicts["experience"] = "unknown"
-    elif dem.get("business_acceptance") == "pass" and dem.get("scoring_complete") is True:
-        verdicts["experience"] = showroom_verdict(score, targets.get("experience_min"))
+    # Application compliance cannot override a failed site target or invalid evidence.
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -9536,8 +9573,8 @@ CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business a
 CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
 IMPACT_VERBS = {"target_violation": "missing a configured application target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
                 "connection_errors": "cannot connect", "slow_wait": "responding slowly",
-                "bandwidth_bound": "slowed by a full line", "http_errors": "getting errors"}
-HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "degraded": "Degraded", "failed": "Down"}
+                "bandwidth_bound": "transferring slowly", "http_errors": "getting errors"}
+HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "queue_pressure": "Queue pressure", "degraded": "Degraded", "failed": "Down"}
 FAULT_WORDS = {"blackhole": "Outage injected", "downstream_blackhole": "Download outage injected",
                "upstream_blackhole": "Upload outage injected"}
 
@@ -9572,8 +9609,10 @@ def cause_text(kinds, link):
         return f"{name} is down"
     if "injected_loss" in kinds:
         return f"{link.get('loss_pct') or 0:g}% packet loss on {name}"
-    if "queue_drops" in kinds or "saturated" in kinds:
-        return f"{name} is full"
+    if "saturated" in kinds:
+        return f"high utilization measured on {name}"
+    if "queue_drops" in kinds:
+        return f"queue drops measured on {name}"
     if "injected_delay" in kinds:
         return f"{link.get('delay_ms') or 0:g} ms delay on {name}"
     return None
@@ -9601,7 +9640,7 @@ def current_impacts(diagnosis, by_id, by_label):
             cause = "the WAN that carried it is not identified"
         else:
             cause = (cause_text(top.get("cause_kinds") or [], link) if link else None) or \
-                f"not explained by {top['label']}: check the appliance"
+                f"observed on {top['label']}; cause not established"
         impacts[("experience", finding["id"], subject)] = {
             "impact": f"{subject}: {verb}", "cause": cause, "wan": top["label"] if top else None,
             "severity": "bad" if finding.get("severity") == "bad" else "warn"}
@@ -9654,6 +9693,8 @@ def showroom_story(diagnosis, links, outcome, now=None):
         for key, data in seen.items():
             store.setdefault(key, {"first": now})
             store[key].update(last=now, data=data)
+        experience = outcome.get("experience") or {}
+        complete = experience.get("scoring_complete") is True and not experience.get("evidence_issues")
         impacts = []
         for key, entry in list(store.items()):
             active = key in seen
@@ -9663,18 +9704,26 @@ def showroom_story(diagnosis, links, outcome, now=None):
                 continue
             if active and now - entry["first"] < STORY_IMPACT_SETTLE_S:
                 continue
-            impacts.append(dict(entry["data"], state="active" if active else "resolved"))
+            impacts.append(dict(entry["data"], state="active" if active else "resolved" if complete else "unconfirmed"))
         impacts.sort(key=lambda item: (item["state"] != "active", item["severity"] != "bad"))
-        experience = outcome.get("experience") or {}
         active = [item for item in impacts if item["state"] == "active"]
         if not experience.get("available"):
             users = "Waiting for simulated users."
+        elif experience.get("business_acceptance") == "fail" or (experience.get("verdicts") or {}).get("experience") == "fail":
+            users = "Users are below target."
+        elif (not complete or experience.get("business_acceptance") != "pass"
+              or experience.get("at_risk") or any(value != "pass" for value in (experience.get("verdicts") or {}).values())):
+            users = "User experience not yet confirmed."
+            latency = experience.get("interactive_p95_ms")
+            limit = (experience.get("targets") or {}).get("interactive_p95_max_ms")
+            if latency is not None and limit is not None and latency > limit:
+                users += " Observed response time is above target."
+            if active:
+                users += " Some transactions show problems."
         elif active:
-            users = "Users are affected."
+            users = "Some transactions show problems; overall targets are met."
         else:
-            # Impacts and health are already settled; the live target verdicts settle here.
-            below = "fail" in (experience.get("verdicts") or {}).values()
-            users = "Users are below target." if settled(("below",), below, now) else "Users are fine."
+            users = "Users are meeting targets."
         unwell = [f"{link['name']} is {HEALTH_WORDS.get(link['display_health'], link['display_health']).lower()}"
                   for link in links if link["display_health"] != "healthy"]
         wans = ("; ".join(unwell) + ".") if unwell else ("All WANs are healthy." if len(links) > 1 else "")

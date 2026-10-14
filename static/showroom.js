@@ -123,7 +123,7 @@
     };
   }
 
-  const HEALTH = {healthy: 'Healthy', congested: 'Busy', degraded: 'Degraded', failed: 'Down'};
+  const HEALTH = {healthy: 'Healthy', congested: 'Busy', queue_pressure: 'Queue pressure', degraded: 'Degraded', failed: 'Down'};
   const VERDICTS_SHORT = {steered: 'steered', unaffected: 'unaffected', balanced: 'healthy', stuck: 'on impaired WAN',
     stuck_impact: 'users affected', no_healthy: 'no healthy WAN', idle: 'no traffic', partial: 'partly traced', unattributed: 'WAN unknown'};
   const VERDICT_TONE = {steered: 'pass', unaffected: 'pass', balanced: 'pass', stuck: 'warn', partial: 'warn',
@@ -162,7 +162,7 @@
     const verdicts = (experience && experience.verdicts) || {};
     return {
       experience: {value: available && number(experience.experience_score) ? `${Math.round(experience.experience_score)} / 100` : '—',
-        target: `${prefix} ≥ ${format(t.experience_min)}`, verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
+        target: `${prefix} ≥ ${format(t.experience_min)}` + (experience && experience.scoring_complete === false ? ` · provisional${number(experience.coverage_pct) ? ', ' + pct(experience.coverage_pct, 0) + ' coverage' : ''}` : ''), verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
       success: {value: available ? pct(experience.success_pct, 2) : '—',
         target: `${prefix} ≥ ${format(t.success_min_pct)}%`, verdict: available ? verdicts.success || 'unknown' : 'unknown'},
       interactive: {value: available && number(experience.interactive_p95_ms) ? `${Math.round(experience.interactive_p95_ms)} ms` : '—',
@@ -444,7 +444,7 @@
   function groupCards(groups, live) {
     return (Array.isArray(groups) ? groups : []).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
-      const score = live && group.score != null ? group.score + ' / 100' : '—';
+      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? ' · provisional' : '') : '—';
       card.append(element('span', '', group.label), element('strong', '', score), element('p', '', group.text));
       return card;
     });
@@ -479,7 +479,7 @@
       (card, item) => {
         card.className = `impact ${item.state} ${item.severity}`;
         setText(card.querySelector('strong'), item.impact);
-        setText(card.querySelector('span'), `${item.state === 'resolved' ? 'Resolved · ' : ''}${item.cause}`);
+        setText(card.querySelector('span'), `${item.state === 'resolved' ? 'Resolved · ' : item.state === 'unconfirmed' ? 'No longer confirmed · ' : ''}${item.cause}`);
       });
     const routesBox = document.getElementById('routes');
     reconcile(routesBox, story.routes || [], route => route.label,
@@ -528,7 +528,7 @@
   function updatePath(node, link) {
     const field = name => node.querySelector(`[data-field="${name}"]`);
     const health = link.display_health || (link.fault !== 'normal' ? 'failed' : link.health || 'healthy');
-    node.className = `path ${({healthy: 'good', congested: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good')}`;
+    node.className = `path ${({healthy: 'good', congested: 'warn', queue_pressure: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good')}`;
     setText(field('name'), link.name);
     setText(field('profile'), [link.profile, number(link.download_limit_mbit) && number(link.upload_limit_mbit)
       ? `${format(link.download_limit_mbit)}/${format(link.upload_limit_mbit)} Mbit/s` : null].filter(Boolean).join(' · '));
