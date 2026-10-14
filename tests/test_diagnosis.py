@@ -397,3 +397,26 @@ class SteeringTests(unittest.TestCase):
         item = self.realtime(netem.assess_steering(dem, self.signals(), self.cfg, now=100))
         self.assertEqual((item["verdict"], item["requests"]), ("idle", 0))
         self.assertIsNone(item["unattributed_pct"])
+
+
+class PressureEvidenceTests(unittest.TestCase):
+    def test_drops_without_sustained_saturation_are_queue_pressure(self):
+        signal = netem.path_signals(state(down=42, up=42), [sample(
+            down_mbps=7.5, up_mbps=18, down_util_pct=18, up_util_pct=43)])
+        self.assertEqual(signal['health'], 'queue_pressure')
+        self.assertEqual(signal['full'], ['up'])
+        self.assertIn('not established', signal['health_reason'])
+        saturated = netem.path_signals(state(down=42, up=42), [sample(up_util_pct=95)])
+        self.assertEqual(saturated['health'], 'congested')
+
+    def test_previous_profile_and_invalid_rate_samples_do_not_claim_saturation(self):
+        previous = sample(delay_ms=5, jitter_ms=0, loss_pct=0, up_util_pct=99, up_queue_drops_ps=50)
+        current = sample(delay_ms=40, jitter_ms=0, loss_pct=3, up_util_pct=50, up_queue_drops_ps=0)
+        signal = netem.path_signals(state(delay=40, loss=3), [previous, current])
+        self.assertEqual(signal['directions']['up']['util_pct'], 50)
+        self.assertEqual(signal['directions']['up']['queue_drops_ps'], 0)
+        self.assertEqual(signal['health'], 'healthy')
+        invalid = dict(current, rate_valid=0, up_util_pct=99)
+        signal = netem.path_signals(state(delay=40, loss=3), [invalid])
+        self.assertIsNone(signal['directions']['up']['util_pct'])
+        self.assertNotEqual(signal['health'], 'congested')

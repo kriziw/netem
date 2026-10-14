@@ -336,3 +336,30 @@ test('the showcase video loops whether it is an embed or an uploaded file', () =
   assert.equal(ui.waitingMedia({kind: 'embed', src: 'https://evil.example/embed/abc'}), null);
   assert.equal(ui.waitingMedia(null), null);
 });
+
+test('provisional experience keeps its numeric utility and identifies incomplete coverage', () => {
+  const view = ui.resultView({available: true, experience_score: 96, scoring_complete: false, coverage_pct: 72,
+    targets: {experience_min: 80}, verdicts: {experience: 'unknown'}});
+  assert.equal(view.experience.value, '96 / 100');
+  assert.equal(view.experience.verdict, 'unknown');
+  assert.match(view.experience.target, /provisional, 72% coverage/);
+});
+
+test('queue pressure and unconfirmed recovery are displayed without implying saturation or recovery', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  win.setTimeout = () => 1; win.clearTimeout = () => {}; win.setInterval = () => {};
+  const snapshot = {timestamp: 100, scenario: {}, session: {}, plan: {}, traffic: {},
+    experience: {available: true, scoring_complete: false, targets: {}, verdicts: {}},
+    links: [{id: 'wan1', name: 'WAN1', fault: 'normal', display_health: 'queue_pressure', down_mbps: 7.5, up_mbps: 18}],
+    story: {status: 'User experience not yet confirmed.', impacts: [
+      {impact: 'File transfers: transferring slowly', cause: 'observed on WAN1; cause not established', state: 'unconfirmed', severity: 'warn'}], routes: []}};
+  win.fetch = async () => ({ok: true, json: async () => snapshot});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  assert.equal(win.document.querySelector('[data-field="health"]').textContent, 'Queue pressure');
+  assert.ok(win.document.querySelector('.path').classList.contains('warn'));
+  assert.match(win.document.querySelector('#impacts span').textContent, /^No longer confirmed/);
+  assert.doesNotMatch(win.document.querySelector('#impacts span').textContent, /Resolved/);
+  dom.window.close();
+});
