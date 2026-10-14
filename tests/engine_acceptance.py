@@ -92,6 +92,21 @@ def client(server_namespace, output):
     user._udp_burst("voice", 160, 10, .01, full_echo=True)
     assert events[-1]["exception"] is None
 
+    # Sustained sessions emit successive one-second windows for all media types.
+    user.runtime_config.update(media_pattern="sustained", media_session_s=2)
+    results["sustained_sessions"] = []
+    for application, size, packets, interval, camera in (("voice", 160, 50, .02, False),
+            ("video", 1200, 200, .005, False), ("cctv_backhaul", 1200, 200, .005, True)):
+        events.clear()
+        started = time.monotonic()
+        user._media_action(application, size, packets, interval, camera=camera)
+        assert len(events) == 2
+        assert sum(event["context"]["packets_sent"] for event in events) == packets * 2
+        assert all(event["exception"] is None for event in events)
+        results["sustained_sessions"].append(dict(application=application, windows=len(events),
+            duration_s=time.monotonic() - started, packets=packets * 2))
+    Path(output).write_text(json.dumps(results, indent=2, default=str))
+
     with tempfile.TemporaryDirectory() as directory:
         os.environ.update(TRAFFICGEN_DATABASE=directory + "/engine.db", TRAFFICGEN_RUNTIME_DIR=directory,
                           TRAFFICGEN_CONFIG_DIR=directory, TRAFFICGEN_DEFAULT_TARGET=config["target"],

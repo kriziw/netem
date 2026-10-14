@@ -27,3 +27,7 @@ revisions in a temporary checkout and measures real packets, directional rate
 arrivals, resizing and observer-on/off cases. Results describe the CI runner only.
 No disposable lab is available: appliance steering, supported deployed offload
 variants, queue sojourn and hardware capacity ceilings remain unverified.
+
+The user selected a coordinated maintenance-window upgrade. Do not use mixed
+platform/simulator versions for business acceptance. The compatibility test
+records the old platform's inability to enforce the new critical-failure result.
