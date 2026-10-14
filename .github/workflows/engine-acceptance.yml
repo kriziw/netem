@@ -23,7 +23,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: kriziw/netem-traffic-simulator
-          ref: 520c1b2106057a9e8e3f689caf80cb5914ee679a
+          ref: bab91972bfd1c777d0403f4846df32c42bfdaf6b
           path: _simulator
       - uses: actions/checkout@v4
         with:

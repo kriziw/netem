@@ -146,6 +146,8 @@ def client(server_namespace, output):
                             for key in ("offered_bytes", "admitted_bytes", "started_bytes", "delivered_bytes")}
                         tolerance = b["target_mbps"] * .05 + after["chunk_bytes"] * 8 / elapsed / 1e6
                         assert abs(directions[direction]["offered_bytes"] - b["target_mbps"]) <= tolerance
+                        if rate == 5:
+                            assert directions[direction]["admitted_bytes"] >= directions[direction]["offered_bytes"] - tolerance, (direction, directions)
                         assert directions[direction]["offered_bytes"] > 0
                         assert directions[direction]["delivered_bytes"] > 0, (direction, before, after, controller.telemetry())
                         assert b["target_mbps"] == a["target_mbps"]
