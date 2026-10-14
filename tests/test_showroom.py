@@ -234,7 +234,7 @@ class StoryTests(unittest.TestCase):
         mock = patch.object(netem, "SHOWROOM_STATE", {"values": {}, "impacts": {}})
         mock.start()
         self.addCleanup(mock.stop)
-        self.outcome = {"experience": {"available": True, "verdicts": {"experience": "pass", "success": "pass"}}, "steering": []}
+        self.outcome = {"experience": {"available": True, "scoring_complete": True, "business_acceptance": "pass", "verdicts": {"experience": "pass", "success": "pass"}}, "steering": []}
 
     def links(self, health="healthy", fault="normal", quality=100):
         return [{"id": "wan1", "name": "WAN1", "fault": fault, "health": health, "sla_pass": True, "quality": quality,
@@ -258,7 +258,7 @@ class StoryTests(unittest.TestCase):
         self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 60, "delay_ms": 45, "loss_pct": 2}),
                          "Impaired to 60% quality: 45 ms delay, 2% loss")
         link = {"name": "WAN1", "loss_pct": 2, "delay_ms": 45}
-        self.assertEqual(netem.cause_text(["queue_drops"], link), "WAN1 is full")
+        self.assertEqual(netem.cause_text(["queue_drops"], link), "queue drops measured on WAN1")
         self.assertEqual(netem.cause_text(["injected_loss", "queue_drops"], link), "2% packet loss on WAN1")
         self.assertEqual(netem.cause_text(["fault"], link), "WAN1 is down")
         self.assertIsNone(netem.cause_text([], link))
@@ -271,7 +271,7 @@ class StoryTests(unittest.TestCase):
         settled = netem.showroom_story(self.diagnosis(), self.links("degraded", quality=60), self.outcome, now=109)
         self.assertEqual(settled["impacts"], [{"impact": "Voice and video: breaking up", "cause": "2% packet loss on WAN1",
                                                "wan": "WAN1", "severity": "bad", "state": "active"}])
-        self.assertTrue(settled["status"].startswith("Users are affected."))
+        self.assertTrue(settled["status"].startswith("Some transactions show problems;"))
         resolved = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=115)
         self.assertEqual(resolved["impacts"][0]["state"], "resolved")
         gone = netem.showroom_story(self.diagnosis(failing=False), self.links(), self.outcome, now=150)
@@ -305,6 +305,54 @@ class StoryTests(unittest.TestCase):
     def test_status_reads_as_one_sentence_per_question(self):
         outcome = dict(self.outcome, steering=[{"label": "Voice & video", "reactions": [{"label": "WAN1", "steered_after_seconds": 12}]}])
         story = netem.showroom_story({"findings": [], "steering": {"classes": []}}, self.links(), outcome, now=5)
-        self.assertEqual(story["status"], "Users are fine. All WANs are healthy. The appliance moved voice & video off WAN1 in 12 s.")
+        self.assertEqual(story["status"], "Users are meeting targets. All WANs are healthy. The appliance moved voice & video off WAN1 in 12 s.")
         waiting = netem.showroom_story({}, self.links(), {"experience": {"available": False}}, now=50)
         self.assertTrue(waiting["status"].startswith("Waiting for simulated users."))
+
+
+class EvidenceStoryRegressionTests(unittest.TestCase):
+    setUp = StoryTests.setUp
+    links = StoryTests.links
+    diagnosis = StoryTests.diagnosis
+
+    def test_missing_evidence_is_not_a_pass_even_with_a_high_score(self):
+        outcome = {"experience": {"available": True, "experience_score": 96, "scoring_complete": False,
+                   "business_acceptance": "unknown", "verdicts": {"experience": "unknown"},
+                   "interactive_p95_ms": 435, "targets": {"interactive_p95_max_ms": 400}}}
+        story = netem.showroom_story({"findings": []}, self.links("degraded", quality=40), outcome, now=10)
+        self.assertIn("User experience not yet confirmed.", story["status"])
+        self.assertIn("Observed response time is above target.", story["status"])
+        self.assertNotIn("fine", story["status"])
+        # A raw metric miss remains an observation while acceptance is unknown.
+        outcome['experience'].update(scoring_complete=True, verdicts={'experience': 'unknown', 'interactive': 'fail'})
+        story = netem.showroom_story({'findings': []}, self.links(), outcome, now=20)
+        self.assertIn('User experience not yet confirmed.', story['status'])
+        self.assertNotIn('Users are below target.', story['status'])
+
+    def test_confirmed_failure_is_not_delayed_or_overridden_by_application_pass(self):
+        dem = {"requests": 120, "experience_score": 96, "scoring_complete": True,
+               "availability_pct": 100, "interactive_p95_ms": 435, "business_acceptance": "pass"}
+        diagnosis = {"traffic_generator": {"connected": True, "status": {"dem": dem}}}
+        outcome = netem.showroom_outcome(diagnosis, {"targets": {
+            "experience_min": 80, "success_min_pct": 99, "interactive_p95_max_ms": 400}})
+        self.assertEqual(outcome["experience"]["business_acceptance"], "fail")
+        story = netem.showroom_story({"findings": []}, self.links(), outcome, now=10)
+        self.assertTrue(story["status"].startswith("Users are below target."))
+        dem.update(interactive_p95_ms=100, evidence_issues=["dropped_transactions"])
+        self.assertEqual(netem.showroom_outcome(diagnosis, None)["experience"]["business_acceptance"], "unknown")
+
+    def test_missing_observations_do_not_confirm_recovery(self):
+        netem.showroom_story(self.diagnosis(), self.links(), self.outcome, now=10)
+        netem.showroom_story(self.diagnosis(), self.links(), self.outcome, now=20)
+        partial = {"experience": {"available": True, "scoring_complete": False, "business_acceptance": "unknown"}}
+        story = netem.showroom_story(self.diagnosis(failing=False), self.links(), partial, now=22)
+        self.assertEqual(story["impacts"][0]["state"], "unconfirmed")
+
+    def test_transfer_symptom_does_not_invent_full_line_or_blame_appliance(self):
+        diagnosis = {"findings": [{"source": "experience", "id": "bandwidth_bound", "severity": "bad",
+                     "applications": ["updates"], "wans": [{"link_id": "wan1", "label": "WAN1",
+                     "affected": 10, "cause_kinds": []}]}]}
+        netem.showroom_story(diagnosis, self.links(), self.outcome, now=10)
+        story = netem.showroom_story(diagnosis, self.links(), self.outcome, now=20)
+        self.assertEqual(story["impacts"][0]["impact"], "File transfers: transferring slowly")
+        self.assertEqual(story["impacts"][0]["cause"], "observed on WAN1; cause not established")

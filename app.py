@@ -3628,6 +3628,13 @@ def path_signals(state: dict, samples: list):
     """Summarize one WAN's recent path measurements and the conditions they show."""
     effective = state.get("effective") or {}
     fault = state.get("fault", "normal")
+    # Do not describe this phase using pressure recorded under another profile.
+    expected = {key: float(effective.get(key) or 0) for key in ("delay_ms", "jitter_ms", "loss_pct")}
+    if state.get("runtime_quality") is not None:
+        expected["quality"] = float(state["runtime_quality"])
+    samples = [sample for sample in samples if sample.get("fault", fault) == fault and all(
+        sample.get(key) is None or math.isclose(float(sample[key]), value, abs_tol=1e-6)
+        for key, value in expected.items())]
     signals = {
         "link_id": state["id"],
         "label": state.get("label") or state["id"],
@@ -3646,7 +3653,7 @@ def path_signals(state: dict, samples: list):
             "limit_mbit": float(effective.get(limit_key) or 0) or None,
         }
         for key in ("util_pct", "queue_drops_ps", "injected_drops_ps", "drop_pct", "backlog_bytes"):
-            info[key] = _mean(sample.get(f"{direction}_{key}") for sample in samples)
+            info[key] = _mean(sample.get(f"{direction}_{key}") for sample in (valid if key == "util_pct" else samples))
         info["queue_delay_ms"] = (info["backlog_bytes"] * 8 / (info["limit_mbit"] * 1000)
                                   if info["backlog_bytes"] is not None and info["limit_mbit"] else None)
         signals["directions"][direction] = info
@@ -3682,10 +3689,13 @@ def path_signals(state: dict, samples: list):
         signals["health"], signals["health_reason"] = "failed", f"{fault.replace('_', ' ')} active"
     elif not sla.get("pass", True):
         signals["health"], signals["health_reason"] = "degraded", "Model SLA fails on " + ", ".join(failing or ["impairment"])
-    elif signals["full"]:
+    elif any(cause["kind"] == "saturated" for cause in signals["causes"]):
         signals["health"] = "congested"
         signals["health_reason"] = "; ".join(cause["text"] for cause in signals["causes"]
                                              if cause["kind"] in ("saturated", "queue_drops"))
+    elif any(cause["kind"] == "queue_drops" for cause in signals["causes"]):
+        signals["health"] = "queue_pressure"
+        signals["health_reason"] = "Queue drops measured; sustained high utilization is not established"
     else:
         signals["health"], signals["health_reason"] = "healthy", None
     return signals
@@ -9416,8 +9426,7 @@ def showroom_outcome(diagnosis, site_plan):
         verdicts["experience"] = "fail"
     elif dem.get("business_acceptance") == "unknown":
         verdicts["experience"] = "unknown"
-    elif dem.get("business_acceptance") == "pass" and dem.get("scoring_complete") is True:
-        verdicts["experience"] = showroom_verdict(score, targets.get("experience_min"))
+    # Application compliance cannot override a failed site target or invalid evidence.
     steering = diagnosis.get("steering") or {}
     return {
         "traffic": {
@@ -9481,8 +9490,8 @@ CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business a
 CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
 IMPACT_VERBS = {"target_violation": "missing a configured application target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
                 "connection_errors": "cannot connect", "slow_wait": "responding slowly",
-                "bandwidth_bound": "slowed by a full line", "http_errors": "getting errors"}
-HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "degraded": "Degraded", "failed": "Down"}
+                "bandwidth_bound": "transferring slowly", "http_errors": "getting errors"}
+HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "queue_pressure": "Queue pressure", "degraded": "Degraded", "failed": "Down"}
 FAULT_WORDS = {"blackhole": "Outage injected", "downstream_blackhole": "Download outage injected",
                "upstream_blackhole": "Upload outage injected"}
 
@@ -9517,8 +9526,10 @@ def cause_text(kinds, link):
         return f"{name} is down"
     if "injected_loss" in kinds:
         return f"{link.get('loss_pct') or 0:g}% packet loss on {name}"
-    if "queue_drops" in kinds or "saturated" in kinds:
-        return f"{name} is full"
+    if "saturated" in kinds:
+        return f"high utilization measured on {name}"
+    if "queue_drops" in kinds:
+        return f"queue drops measured on {name}"
     if "injected_delay" in kinds:
         return f"{link.get('delay_ms') or 0:g} ms delay on {name}"
     return None
@@ -9546,7 +9557,7 @@ def current_impacts(diagnosis, by_id, by_label):
             cause = "the WAN that carried it is not identified"
         else:
             cause = (cause_text(top.get("cause_kinds") or [], link) if link else None) or \
-                f"not explained by {top['label']}: check the appliance"
+                f"observed on {top['label']}; cause not established"
         impacts[("experience", finding["id"], subject)] = {
             "impact": f"{subject}: {verb}", "cause": cause, "wan": top["label"] if top else None,
             "severity": "bad" if finding.get("severity") == "bad" else "warn"}
@@ -9599,6 +9610,8 @@ def showroom_story(diagnosis, links, outcome, now=None):
         for key, data in seen.items():
             store.setdefault(key, {"first": now})
             store[key].update(last=now, data=data)
+        experience = outcome.get("experience") or {}
+        complete = experience.get("scoring_complete") is True and not experience.get("evidence_issues")
         impacts = []
         for key, entry in list(store.items()):
             active = key in seen
@@ -9608,18 +9621,26 @@ def showroom_story(diagnosis, links, outcome, now=None):
                 continue
             if active and now - entry["first"] < STORY_SETTLE_S:
                 continue
-            impacts.append(dict(entry["data"], state="active" if active else "resolved"))
+            impacts.append(dict(entry["data"], state="active" if active else "resolved" if complete else "unconfirmed"))
         impacts.sort(key=lambda item: (item["state"] != "active", item["severity"] != "bad"))
-        experience = outcome.get("experience") or {}
         active = [item for item in impacts if item["state"] == "active"]
         if not experience.get("available"):
             users = "Waiting for simulated users."
+        elif experience.get("business_acceptance") == "fail" or (experience.get("verdicts") or {}).get("experience") == "fail":
+            users = "Users are below target."
+        elif (not complete or experience.get("business_acceptance") != "pass"
+              or experience.get("at_risk") or any(value != "pass" for value in (experience.get("verdicts") or {}).values())):
+            users = "User experience not yet confirmed."
+            latency = experience.get("interactive_p95_ms")
+            limit = (experience.get("targets") or {}).get("interactive_p95_max_ms")
+            if latency is not None and limit is not None and latency > limit:
+                users += " Observed response time is above target."
+            if active:
+                users += " Some transactions show problems."
         elif active:
-            users = "Users are affected."
+            users = "Some transactions show problems; overall targets are met."
         else:
-            # Impacts and health are already settled; the live target verdicts settle here.
-            below = "fail" in (experience.get("verdicts") or {}).values()
-            users = "Users are below target." if settled(("below",), below, now) else "Users are fine."
+            users = "Users are meeting targets."
         unwell = [f"{link['name']} is {HEALTH_WORDS.get(link['display_health'], link['display_health']).lower()}"
                   for link in links if link["display_health"] != "healthy"]
         wans = ("; ".join(unwell) + ".") if unwell else ("All WANs are healthy." if len(links) > 1 else "")
