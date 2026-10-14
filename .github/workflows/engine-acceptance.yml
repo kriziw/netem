@@ -15,11 +15,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Combine pinned scoring companion in this disposable checkout
-        run: |
-          git config user.name engine-ci
-          git config user.email engine-ci@example.invalid
-          git merge --no-commit --no-ff 163d6b6e616e229e0592a1af553e7c6d690019a1
+      # Scoring is merged into main. Exercise the checked-out PR directly;
+      # remerging its old pre-squash feature commit can conflict with new fixes.
       - uses: actions/checkout@v4
         with:
           repository: kriziw/netem-traffic-simulator
