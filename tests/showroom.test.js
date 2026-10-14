@@ -342,7 +342,7 @@ test('provisional experience keeps its numeric utility and identifies incomplete
     targets: {experience_min: 80}, verdicts: {experience: 'unknown'}});
   assert.equal(view.experience.value, '96 / 100');
   assert.equal(view.experience.verdict, 'unknown');
-  assert.match(view.experience.target, /provisional, 72% coverage/);
+  assert.match(view.experience.target, /provisional, 72% measured coverage/);
 });
 
 test('queue pressure and unconfirmed recovery are displayed without implying saturation or recovery', async () => {

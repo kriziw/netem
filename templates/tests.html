@@ -21,6 +21,14 @@
 
 {% with return_to='tests' %}{% include "_running_test.html" %}{% include "_traffic_path.html" %}{% endwith %}
 {% if last_test and not scenario_state.active %}{{ test_summary(last_test) }}{% endif %}
+{% if test_records %}
+<details class="card"><summary>Test records · {{ test_records|length }}</summary>
+  <div class="card-pad">{% for item in test_records %}
+    <p>{{ item.name }} · {{ item.result }} · {{ item.started_at|int }}
+    <a class="btn btn-sm" href="{{ url_for('test_record_download', test_id=item.test_id) }}">Download test log</a></p>
+  {% endfor %}</div>
+</details>
+{% endif %}
 
 <div class="section-title">Generic tests</div>
 <p class="field-help">NetEm starts the active site's workload when the simulator is idle (Office, 50 users if no site is saved), confirms active users before starting the phase clock, and stops only traffic started by this test. Existing workloads stay running. Configure the executing agent under <a href="{{ url_for('traffic_settings',section='network') }}">Paths & network</a>.</p>
@@ -79,7 +87,7 @@
         <div class="metric-value" style="font-size:13px" data-tg-availability>{{ "%.2f"|format(tg_dem.availability_pct) ~ "%" if tg_dem.availability_pct is not none else "—" }}</div>
       </div>
       <div class="metric-box">
-        <div class="metric-label">Interactive P95</div>
+        <div class="metric-label" title="Request start to full response, including target processing and transfer; not network RTT">Application completion · P95</div>
         <div class="metric-value" style="font-size:13px" data-tg-p95>{% set tg_p95 = tg_dem.interactive_p95_ms if tg_dem.interactive_p95_ms is not none else tg_dem.p95_ms %}{{ "%.0f"|format(tg_p95) ~ " ms" if tg_p95 is not none else "—" }}</div>
       </div>
     </div>

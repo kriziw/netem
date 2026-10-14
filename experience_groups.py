@@ -71,8 +71,17 @@ def group_summary(key, label, members, label_for):
     total_weight = sum(weights.values())
     score = round(sum(weights[name] * item["experience_score"] for name, item in scored.items()) / total_weight) if total_weight else None
     if incomplete or unscored:
+        limited = any(item.get('sample_confidence') == 'limited_sample' for item in scored.values())
+        missing = [label_for(name) for name, item in members.items() if not item.get('requests')]
+        text = (f"Measured from {requests} transactions; limited sample, acceptance not yet confirmed."
+                if limited and not unscored else "Incomplete application evidence; this group cannot yet be judged.")
+        if missing:
+            text += ' Awaiting: ' + ', '.join(missing) + '.'
+        if score is not None and score < GOOD_SCORE:
+            text += f" Observed impact: {label_for(worst)} ({scored[worst]['experience_score']:.0f}/100): {limit_reason(scored[worst])}."
         return {**summary, "score": score, "tone": "unknown", "scoring_complete": False,
-                "text": "Incomplete application evidence; this group cannot yet be judged."}
+                "sample_confidence": 'limited_sample' if limited else 'partial_coverage',
+                "text": text}
     tone = tone_for(score)
     if tone == "good":
         text = "Performing well."
@@ -90,9 +99,19 @@ def experience_groups(dem, label_for=None):
     """The sub-score and sentence for each traffic group, from a simulator DEM summary."""
     label_for = label_for or (lambda name: str(name).replace("_", " ").capitalize())
     applications = (dem or {}).get("applications") or {}
-    return [group_summary(key, label, {name: item for name, item in applications.items()
-                                       if (item.get("class") or "interactive") == key}, label_for)
-            for key, label in GROUPS]
+    result = []
+    for key, label in GROUPS:
+        members = {name: item for name, item in applications.items() if (item.get('class') or 'interactive') == key}
+        group = group_summary(key, label, members, label_for)
+        group['applications'] = [{'label': label_for(name), 'score': item.get('experience_score'),
+            'requests': item.get('requests') or 0, 'sample_confidence': item.get('sample_confidence'),
+            'scoring_complete': item.get('scoring_complete'), 'success_pct': item.get('availability_pct'),
+            'p95_ms': item.get('p95_ms'), 'class': item.get('class') or 'interactive',
+            'age_s': max(0, (dem.get('until') or 0) - item['last_observation_at'])
+                     if dem.get('until') is not None and item.get('last_observation_at') is not None else None}
+            for name, item in members.items()]
+        result.append(group)
+    return result
 
 
 def attach_experience_groups(dem, label_for=None):

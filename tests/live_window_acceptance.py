@@ -10,6 +10,7 @@ from pathlib import Path
 import sys
 import tempfile
 import time
+import zipfile
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -38,6 +39,9 @@ def check():
         for age in (12, 10, 4, 3):
             database.record_transaction(controller.settings.database_path, dict(run_id=run['run_id'], timestamp=now-age,
                 application='web_saas', endpoint_id='web', success=True, response_time_ms=50))
+        database.record_operation_events(controller.settings.database_path, [dict(run_id=run['run_id'],
+            operation_id=f'probe-{age}', kind='target_timing', timestamp=now-age, started_at=now-age-.01,
+            success=True, rtd_ms=value) for age, value in ((12, 1), (3, 20))])
         client = agent.test_client()
         headers = {'Authorization': 'Bearer ' + agent.config['TRAFFICGEN_SETTINGS'].api_key_path.read_text().strip()}
         def api(path, method='GET', payload=None, **kwargs):
@@ -60,10 +64,25 @@ def check():
                 platform.SCENARIO_STATE.update(phase_index=1, phase='Degradation')
                 degraded = platform.publish_test_live_context()['dem']
                 assert degraded['requests'] == 2 and degraded['live_phase_id'] != baseline['live_phase_id'], degraded
+                assert degraded['applications']['web_saas']['experience_score'] == 100
+                assert degraded['applications']['web_saas']['sample_confidence'] == 'limited_sample'
+                assert not degraded['scoring_complete'] and degraded['business_acceptance'] != 'pass'
+                assert degraded['timing']['target_rtd']['p95_ms'] == 20
+                assert degraded['timing']['target_rtd']['samples'] == 1
                 explicit = api('/api/v1/dem/summary?window=60')
                 assert explicit['requests'] == 2 and explicit['since'] == degraded['since'], explicit
                 full = platform.phase_window_dem(30, since=now-30, until=now, run_id=run['run_id'])
                 assert full['requests'] == 4 and full['since'] == now-30 and full['until'] == now, full
+                assert full['timing']['target_rtd']['samples'] == 2
+                test_id = 'c' * 32
+                platform.test_records.write(directory, test_id, 'configuration.json', {'scenario': {'name': 'Acceptance'}})
+                export = platform.test_records.collect_agent(directory, test_id, [run['run_id']], now-30, now, api)
+                assert export['complete'], export
+                bundle = platform.test_records.archive(directory, test_id)
+                with zipfile.ZipFile(bundle) as zipped:
+                    transactions = json.loads(zipped.read('agent-0-transactions-000.json'))
+                    assert len(transactions['items']) == 4
+                    assert 'agent-0-operations-000.json' in zipped.namelist()
                 reset = api('/api/v1/controller/heartbeat', method='POST',
                             payload={'run_id': run['run_id'], 'live_context': {'reset': True}})['dem']
                 assert reset['configured_window_seconds'] == 60 and reset['live_phase_id'] is None, reset
