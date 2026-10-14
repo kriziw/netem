@@ -50,8 +50,13 @@
           {% endif %}
         </template>
         <span class="eyebrow">Live SD-WAN demonstration</span>
-        <h2>Waiting for the session to start</h2>
-        <p class="waiting-note">The client, the appliance and the tests appear here once the operator starts the session.</p>
+        <h2 id="waiting-title">Waiting for the session to start</h2>
+        <p class="waiting-note" id="waiting-note">The client, the appliance and the tests appear here once the operator starts the session.</p>
+        <section id="session-progress" hidden aria-label="Session results so far">
+          <p id="session-progress-name"></p>
+          <div class="session-points" id="session-progress-points"></div>
+          <strong id="session-progress-latest"></strong><p id="session-progress-conclusion"></p>
+        </section>
       </div>
       <div class="intro" id="intro" hidden>
         <div class="intro-head">
@@ -59,6 +64,10 @@
           <div class="countdown"><span>Starts in</span><strong id="intro-seconds"></strong></div>
         </div>
         <ol class="intro-phases" id="intro-phases"></ol>
+        <div class="briefing-grid">
+          <section><span class="eyebrow">What we measure</span><ul id="intro-measurements"></ul></section>
+          <section><span class="eyebrow">What to look for</span><ul id="intro-watch"></ul></section>
+        </div>
         <div class="intro-checks" id="intro-checks-block"><span class="eyebrow">What we check</span><ul id="intro-checks"></ul></div>
         <p class="intro-meta" id="intro-meta"></p>
       </div>

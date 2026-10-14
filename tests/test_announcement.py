@@ -88,6 +88,8 @@ class AnnouncementTests(unittest.TestCase):
         self.assertEqual((snapshot["elapsed_s"], snapshot["phase_index"], snapshot["description"], snapshot["checks"]),
                          (0.0, None, "WAN1 fails and recovers.", ["SLA detects failure"]))
         self.assertEqual([phase["name"] for phase in snapshot["phases"]], ["Baseline", "Outage", "Recovery"])
+        self.assertIn('During impairment', str(snapshot['briefing']['watch']))
+        self.assertIn('application completion P95', str(snapshot['briefing']['measurements']))
         self.mocks["apply_selected_profile"].assert_not_called()
         self.mocks["recorder_start"].assert_not_called()
         wait_until(lambda: not netem.SCENARIO_STATE["intro"])
@@ -132,7 +134,7 @@ class AnnouncementTests(unittest.TestCase):
              patch.object(netem.threading, "Thread") as thread:
             netem.app.test_client().post("/lab/scenario/start", data={"link_id": "wan1", "scenario_id": "demo"})
         self.assertEqual(thread.call_args.kwargs["args"][2], netem.TEST_INTRO_S)
-        self.assertEqual(netem.TEST_INTRO_S, 5)
+        self.assertEqual(netem.TEST_INTRO_S, 30)
 
 
 if __name__ == "__main__":

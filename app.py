@@ -37,6 +37,7 @@ import calibration_trace
 import host_health
 import platform_test
 import site_catalog
+import showcase_summary
 from showroom import create_showroom_app
 import branding
 import appliance_platform
@@ -187,7 +188,7 @@ SCENARIO_STATE = {
     "checks": [],
 }
 # Every test is announced this long before it starts, so the showroom shows what is coming.
-TEST_INTRO_S = 5
+TEST_INTRO_S = 30
 ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
 BACKGROUND_STOP = threading.Event()
@@ -5834,13 +5835,19 @@ def scenario_preview(steps):
 
 
 def announce_test(scenario, seconds):
-    """Show what the test will do for a few seconds before it changes anything.
+    """Brief the audience before the test changes anything.
     Returns False when the test was stopped during the announcement."""
     phases, planned_s, checks = scenario_preview(scenario.get("steps", []))
+    cfg = load_config()
+    current_session = session_snapshot()
+    site = current_session.get('site') if current_session.get('active') else None
+    plan = active_site_plan({'site_profile': site} if site else cfg)
+    brief = showcase_summary.briefing(scenario, (plan or {}).get('targets') or SHOWROOM_LAB_TARGETS,
+                                     scenario.get('live_window_seconds') or 15)
     with RUNTIME_LOCK:
         SCENARIO_STATE.update(intro=True, intro_clock=time.monotonic() + seconds, step_label=f"Starting in {seconds:g} s",
                               description=scenario.get("description"), checks=checks, phases=phases,
-                              phase_index=None, phase=None, planned_s=planned_s, phase_started_s=None)
+                              phase_index=None, phase=None, planned_s=planned_s, phase_started_s=None, briefing=brief)
     log_event("scenario", f'{scenario["name"]} announced, starting in {seconds:g} s', scenario_id=scenario.get("id"))
     return not SCENARIO_STOP.wait(seconds)
 
@@ -5879,6 +5886,7 @@ def reset_scenario_state(result, error):
                 "intro_clock": None,
                 "description": None,
                 "checks": [],
+                "briefing": None,
             }
         )
     SCENARIO_PAUSE.clear()
@@ -9275,6 +9283,38 @@ def summary_belongs_to_session(summary, session):
     return bool(summary and isinstance(ended, (int, float)) and isinstance(started, (int, float)) and ended >= started)
 
 
+SHOWROOM_SESSION_PROGRESS = {}
+SHOWROOM_SESSION_PROGRESS_LOCK = threading.Lock()
+
+
+def showroom_session_progress(session):
+    """Read durable summary history once per finished test, never publish raw events."""
+    if not session.get('active') or not session.get('id'):
+        return None
+    session_id = session['id']
+    recent = [event for event in list(EVENT_LOG) if event.get('kind') == 'test-summary'
+              and (event.get('details') or {}).get('session_id') == session_id]
+    last = recent[-1] if recent else {}
+    key = (session_id, session.get('started_at'), last.get('timestamp'), (LAST_TEST_SUMMARY or {}).get('ended_at'))
+    with SHOWROOM_SESSION_PROGRESS_LOCK:
+        if SHOWROOM_SESSION_PROGRESS.get('key') == key:
+            return copy.deepcopy(SHOWROOM_SESSION_PROGRESS['value'])
+        events = read_session_events(session_id) + recent
+        summaries = {}
+        now = time.time()
+        for event in events:
+            if event.get('kind') != 'test-summary' or (event.get('details') or {}).get('session_id') != session_id:
+                continue
+            summary = (event.get('details') or {}).get('summary')
+            if not isinstance(summary, dict) or not summary_belongs_to_session(summary, session) or summary['ended_at'] > now:
+                continue
+            identity = summary.get('test_id') or (summary.get('scenario_id'), summary.get('started_at'), summary['ended_at'])
+            summaries[identity] = summary
+        value = showcase_summary.session_facts(list(summaries.values()), showroom_text)
+        SHOWROOM_SESSION_PROGRESS.update(key=key, value=value)
+        return copy.deepcopy(value)
+
+
 def showroom_session_snapshot():
     """Publish only presentation data, never configuration, addresses or secrets."""
     now = time.time()
@@ -9330,6 +9370,8 @@ def showroom_session_snapshot():
         })
     plan = site_plan_snapshot()
     outcome = showroom_outcome(diagnosis, site_plan)
+    brief = scenario.get('briefing') or showcase_summary.briefing(scenario,
+        (site_plan or {}).get('targets') or SHOWROOM_LAB_TARGETS, scenario.get('live_window_seconds') or 15)
     execution = ((diagnosis.get('traffic_generator') or {}).get('status') or {})
     scope = ((execution.get('run') or {}).get('run_id'),
              (execution.get('dem') or {}).get('live_phase_id'))
@@ -9353,6 +9395,8 @@ def showroom_session_snapshot():
             phases=[{"name": phase.get("name"), "planned_s": phase.get("planned_s"), "what": showroom_text(phase.get("what")) or None}
                     for phase in scenario.get("phases") or []],
             description=showroom_text(scenario.get("description")) or None,
+            measurements=[showroom_text(item) for item in brief['measurements']],
+            watch=[showroom_text(item, 320) for item in brief['watch']],
             checks=[showroom_text(check, 120) for check in (scenario.get("checks") or [])[:6]]),
         # Once a test ends, its summary stays on screen until the next one starts.
         "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") and summary_belongs_to_session(LAST_TEST_SUMMARY, lab_session) else None,
@@ -9362,6 +9406,7 @@ def showroom_session_snapshot():
         "session": {"active": bool(lab_session.get("active")), "name": lab_session.get("name"),
                     "site": (session_site or {}).get("label"),
                     "wan": {role: item.get("label") for role, item in (lab_session.get("wan") or {}).items()} or None},
+        "session_progress": showroom_session_progress(lab_session) if not scenario.get('active') else None,
         "site": showroom_site(site_plan),
         "plan": {"active": plan.get("active"), "label": plan.get("label"), "result": plan.get("result"),
                  "tests": [{"name": test.get("name"), "role": test.get("role"), "status": test.get("status")}
