@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.1.0](https://github.com/kriziw/netem/compare/v1.0.0...v1.1.0) (2026-10-14)
+
+
+### Features
+
+* configure live test windows without shortening phase reports ([#122](https://github.com/kriziw/netem/issues/122)) ([168d136](https://github.com/kriziw/netem/commit/168d136bfc8d06b2445d2600a163521e4e50d683))
+
+
+### Bug Fixes
+
+* give shaped traffic generous queue resource budgets ([#119](https://github.com/kriziw/netem/issues/119)) ([e43c10f](https://github.com/kriziw/netem/commit/e43c10f513407a4ad74b06e2acd6363c820f7a1b))
+* report showroom experience and queue pressure from evidence ([#120](https://github.com/kriziw/netem/issues/120)) ([722eaad](https://github.com/kriziw/netem/commit/722eaad2ce851baea57445c575940b48408b65d0))
+
 ## [1.0.0](https://github.com/kriziw/netem/compare/v0.32.0...v1.0.0) (2026-10-14)
 
 
