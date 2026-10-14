@@ -539,6 +539,14 @@ def traffic_generator_snapshot(include_catalog=False):
         return result
     try:
         result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
+        with RUNTIME_LOCK:
+            expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
+        if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
+                         (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
+                         bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
+            result['status']['dem'] = {'requests': 0, 'scoring_complete': False, 'business_acceptance': 'unknown',
+                'evidence_issues': ['live_phase_pending'], 'collecting_evidence': True,
+                'configured_window_seconds': SCENARIO_STATE.get('live_window_seconds', 15)}
         attach_experience_groups((result["status"] or {}).get("dem"), showroom_app_label)
         result["connected"] = True
         if include_catalog:
@@ -1303,7 +1311,7 @@ def validate_scenario_steps(raw_steps):
                     except (TypeError, ValueError):
                         raise ValueError(f"Step {index}: invalid experience policy.") from None
                     cleaned["experience_policy"] = copy.deepcopy(policy)
-                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed", "rate_down_mbps", "rate_up_mbps", "media_pattern", "media_session_s", "completion_grace_s"):
+                for field in ("generation_mode", "paced_mbps", "sparse_share", "seed", "rate_down_mbps", "rate_up_mbps", "media_pattern", "media_session_s", "completion_grace_s", "live_window_seconds"):
                     if field in value:
                         cleaned[field] = value[field]
             if operation == "start":
@@ -5291,7 +5299,7 @@ def evaluate_scenario_condition(condition: dict, default_link_id: str):
 
     if kind == "dem":
         try:
-            window = int(condition.get("window", 60))
+            window = int(condition.get("window", SCENARIO_STATE.get("live_window_seconds", 15)))
             payload = traffic_generator_request(
                 f"/api/v1/dem/experience?window={window}",
                 timeout=2.5,
@@ -5436,7 +5444,8 @@ def recorder_start(scenario: dict, link_id: str, phases: list):
         TEST_RECORDER.clear()
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
                              started_at=time.time(), phases=[phase["name"] for phase in phases],
-                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[])
+                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[],
+                             live_window_seconds=scenario.get("live_window_seconds", 15))
 
 
 def recorder_note(kind: str, item: dict):
@@ -5714,6 +5723,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     conclusion = narrative[:len(conclusion)] + reacted + narrative[len(conclusion):]
     application_groups = application_matrix(phases)
     return {
+        "live_window_seconds": record.get("live_window_seconds", 15),
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
         "site": site_label, "result": result, "execution_result": result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
         "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
@@ -5931,7 +5941,7 @@ def check_test_workload():
             return
         SCENARIO_STATE["workload_checked"] = now
     status = traffic_generator_request("/api/v1/controller/heartbeat", method="POST",
-        payload={"run_id": expected, "phase": str(SCENARIO_STATE.get('phase') or '')[:120]}, timeout=3.0)
+        payload={"run_id": expected, "phase": str(SCENARIO_STATE.get('phase') or '')[:120], "live_context": test_live_context()}, timeout=3.0)
     if ((status.get("run") or {}).get("run_id") != expected
             or status.get("status") not in ("starting", "running") or status.get("users", 0) <= 0):
         raise RuntimeError("Traffic Simulator stopped executing the test's workload. Test aborted and WAN baseline restored.")
@@ -5941,6 +5951,43 @@ def stop_test_owned_workload(run_id):
     status = traffic_generator_request("/api/v1/status", timeout=3.0)
     if (status.get("run") or {}).get("run_id") == run_id and status.get("status") in ("starting", "running"):
         traffic_generator_request("/api/v1/workloads/stop", method="POST", payload={"run_id": run_id}, timeout=5.0)
+
+
+def requested_live_window(value=None):
+    if value in (None, ''):
+        return 15
+    try:
+        number = float(value)
+    except (ValueError, TypeError):
+        number = float('nan')
+    if isinstance(value, bool) or not math.isfinite(number) or not number.is_integer() or not 5 <= number <= 120:
+        raise ValueError('Live experience window must be an integer from 5 to 120 seconds.')
+    return int(number)
+
+
+def test_live_context():
+    with RUNTIME_LOCK:
+        state = dict(SCENARIO_STATE)
+    return {'window_seconds': state.get('live_window_seconds', 15),
+            'phase_id': f"{state.get('scenario_id')}:{state.get('started_at')}:{state.get('phase_index')}",
+            'paused': bool(state.get('paused'))}
+
+
+def publish_test_live_context():
+    with RUNTIME_LOCK:
+        run_id = SCENARIO_STATE.get('workload_run_id')
+        supervised = SCENARIO_STATE.get('workload_supervised')
+    if not run_id or not supervised:
+        return
+    context = test_live_context()
+    status = traffic_generator_request('/api/v1/controller/heartbeat', method='POST', timeout=3.0,
+        payload={'run_id': run_id, 'phase': str(SCENARIO_STATE.get('phase') or '')[:120], 'live_context': context})
+    acknowledged = (status.get('dem') or {}).get('live_phase_id')
+    if acknowledged != context['phase_id']:
+        raise RuntimeError('The simulator did not acknowledge the current live measurement phase. Upgrade the simulator before running this test.')
+    with DIAGNOSIS_LOCK:
+        DIAGNOSIS_CACHE['checked'] = None
+    return status
 
 
 def prepare_manual_workload(cfg, scenario):
@@ -5955,6 +6002,7 @@ def prepare_manual_workload(cfg, scenario):
     payload = dict(plan["start"]) if plan else {"profile": "office", "users": 50, "spawn_rate": 5, "activity": "normal", "pattern": "steady"}
     payload.pop("operation", None)
     payload['controller_lease_seconds'] = 30
+    payload['live_window_seconds'] = scenario.get('live_window_seconds', 15)
     return traffic_generator_request("/api/v1/workloads/start", method="POST", payload=payload, timeout=5.0), True
 
 
@@ -6018,7 +6066,8 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                               phase_started_s=0.0 if phases else None, intro=False, intro_clock=None,
                               description=scenario.get("description"), checks=checks,
                               started_at=started_at, clock_start=time.monotonic(), step_label="Starting",
-                              preparing_workload=False, workload_supervised=supervised, workload_checked=None)
+                              preparing_workload=False, workload_supervised=supervised, workload_checked=None,
+                              live_window_seconds=scenario.get("live_window_seconds", 15))
     recorder_start(scenario, link_id, phases)
     if phases:
         recorder_note("phase_marks", {"name": phases[0]["name"], "at": time.time()})
@@ -6032,6 +6081,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
     )
 
     try:
+        publish_test_live_context()
         for index, step in enumerate(scenario.get("steps", []), start=1):
             if scenario_sleep(max(0, int(step.get("after", 0)))):
                 scenario_result = "stopped"
@@ -6060,6 +6110,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
             if phase_index is not None and phase_index != previous_phase:
                 recorder_close_phase()
                 recorder_note("phase_marks", {"name": phases[phase_index]["name"], "at": time.time()})
+                publish_test_live_context()
                 log_event("scenario", f'{scenario["name"]}: phase {phases[phase_index]["name"]}',
                           scenario_id=scenario.get("id"), link_id=link_id, phase=phases[phase_index]["name"])
 
@@ -6112,6 +6163,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                 operation = payload.pop("operation")
                 if operation == "start":
                     ensure_traffic_path(scenario["name"])
+                    payload['live_window_seconds'] = scenario.get('live_window_seconds', 15)
                     if supervised:
                         payload['controller_lease_seconds'] = 30
                 elif operation == 'stop' and supervised and scenario_workload_id:
@@ -6133,6 +6185,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                     if not scenario_workload_id:
                         raise RuntimeError("Traffic Simulator did not acknowledge the requested workload.")
                     wait_for_test_executor(result, scenario_workload_id)
+                    publish_test_live_context()
                 log_event("traffic-generator", f'{scenario["name"]}: {label}',
                           scenario_id=scenario.get("id"), link_id=link_id,
                           action=operation, run_id=(result.get("run") or {}).get("run_id"),
@@ -6209,7 +6262,7 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
         elif supervised and SCENARIO_STATE.get('workload_run_id'):
             try:
                 traffic_generator_request('/api/v1/controller/heartbeat', method='POST', timeout=3.0,
-                    payload={'run_id': SCENARIO_STATE['workload_run_id'], 'phase': ''})
+                    payload={'run_id': SCENARIO_STATE['workload_run_id'], 'phase': '', 'live_context': {'reset': True}})
             except Exception as exc:
                 log_event('traffic-generator', 'Borrowed workload phase could not be cleared', error=str(exc)[:240])
         try:
@@ -7265,6 +7318,7 @@ def traffic_generator_start():
         payload["media_mode"] = request.form.get("media_mode")
 
     try:
+        payload["live_window_seconds"] = requested_live_window(request.form.get("live_window_seconds"))
         ensure_traffic_path("Corporate workload")
         status = traffic_generator_request(
             "/api/v1/workloads/start",
@@ -7932,7 +7986,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
             break
         link_id = link_for_role[test["role"]]
         scenario = {"id": f"site_{test['id']}", "name": test["name"], "description": test.get("description"), "controller_managed": True,
-                    "steps": validate_scenario_steps(test["steps"])}
+                    "steps": validate_scenario_steps(test["steps"]), "live_window_seconds": plan.get("live_window_seconds", 15)}
         with RUNTIME_LOCK:
             if SITE_PLAN_STOP.is_set():
                 break
@@ -8086,11 +8140,18 @@ def site_run():
         return redirect_after("tests")
     try:
         length_s = requested_length_s(request.form.get("length_min"))
+        live_window_seconds = requested_live_window(request.form.get("live_window_seconds"))
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect_after("tests")
     if length_s:
         plan["tests"] = [dict(test, steps=scale_scenario_steps(test["steps"], length_s)) for test in plan["tests"]]
+    plan["live_window_seconds"] = live_window_seconds
+    plan["start"]["live_window_seconds"] = live_window_seconds
+    for test in plan["tests"]:
+        for step in test["steps"]:
+            if step.get("action") == "traffic_generator" and (step.get("value") or {}).get("operation") == "start":
+                step["value"]["live_window_seconds"] = live_window_seconds
     test_id = request.form.get("test_id") or "all"
     tests = [test for test in plan["tests"] if test_id in ("all", test["id"])]
     links = {role: request.form.get(f"{role}_link") or (session.get("wan") or {}).get(role, {}).get("link_id", "")
@@ -8143,12 +8204,13 @@ def lab_scenario_start():
         return redirect_after("scenarios")
     try:
         length_s = requested_length_s(request.form.get("length_min"))
+        live_window_seconds = requested_live_window(request.form.get("live_window_seconds"))
     except ValueError as exc:
         flash(str(exc), "error")
         return redirect_after("scenarios")
     if length_s:
         scenario = dict(scenario, steps=scale_scenario_steps(scenario["steps"], length_s))
-    scenario = dict(scenario, auto_workload=True, controller_managed=True)
+    scenario = dict(scenario, auto_workload=True, controller_managed=True, live_window_seconds=live_window_seconds)
 
     if not session_snapshot().get("active") and request.form.get("no_session_ack") != "1":
         # Generic tests normally run inside a lab session. Without one, the operator starts a session or confirms the test.
@@ -8202,6 +8264,11 @@ def lab_scenario_pause():
                 if TEST_RECORDER.get("active"):
                     TEST_RECORDER.setdefault("pauses", []).append({"start": SCENARIO_STATE["paused_at"], "end": None})
     if active:
+        try:
+            publish_test_live_context()
+        except RuntimeError as exc:
+            log_event('traffic-generator', 'Live window context unavailable', error=str(exc)[:240])
+            flash('Live measurements are unavailable until the simulator acknowledges this change.', 'error')
         log_event("scenario", f"{name}: paused" + (f" in phase {phase}" if phase else ""), phase=phase)
         flash("Test paused. It stays in its current phase until you resume it.", "info")
     elif announced:
@@ -8224,6 +8291,11 @@ def lab_scenario_resume():
                     TEST_RECORDER["pauses"][-1]["end"] = time.time()
             name = SCENARIO_STATE["scenario_name"]
     if active:
+        try:
+            publish_test_live_context()
+        except RuntimeError as exc:
+            log_event('traffic-generator', 'Live window context unavailable', error=str(exc)[:240])
+            flash('Live measurements are unavailable until the simulator acknowledges this change.', 'error')
         log_event("scenario", f"{name}: resumed after {round(held)} s", paused_seconds=round(held))
         flash("Test resumed.", "info")
     return redirect_after("tests")
@@ -9258,7 +9330,17 @@ def showroom_session_snapshot():
         })
     plan = site_plan_snapshot()
     outcome = showroom_outcome(diagnosis, site_plan)
+    execution = ((diagnosis.get('traffic_generator') or {}).get('status') or {})
+    scope = ((execution.get('run') or {}).get('run_id'),
+             (execution.get('dem') or {}).get('live_phase_id'))
+    with STORY_LOCK:
+        if SHOWROOM_STATE.get('scope') != scope:
+            SHOWROOM_STATE.update(scope=scope, values={}, impacts={})
     story = showroom_story(diagnosis, links, outcome)
+    if 'live_phase_pending' in ((execution.get('dem') or {}).get('evidence_issues') or []):
+        story['status'] = 'Collecting current-phase evidence.'
+    elif (execution.get('dem') or {}).get('at_risk') and outcome['experience'].get('business_acceptance') != 'fail':
+        story['status'] = 'Application responses are overdue; experience is not yet confirmed.'
     return {
         "timestamp": now, "links": links, "story": story, "time_format": time_format(cfg),
         "showcase_video": showcase_video_public(cfg),
@@ -9445,7 +9527,7 @@ def showroom_outcome(diagnosis, site_plan):
             "verdicts": verdicts,
             **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
                                             "critical_alerts", "limiting_application", "missing_measurements", "coverage_pct", "score_range",
-                                            "score_status", "at_risk", "at_risk_reason", "legacy_score")},
+                                            "score_status", "at_risk", "at_risk_reason", "legacy_score", "configured_window_seconds", "window_scope", "collecting_evidence", "live_paused")},
             "application_acceptance": dem.get("business_acceptance"),
             "business_acceptance": verdicts["experience"],
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
@@ -9482,6 +9564,7 @@ def showroom_outcome(diagnosis, site_plan):
 # stays a while, marked resolved, so the audience can follow what happened.
 
 STORY_SETTLE_S = 8
+STORY_IMPACT_SETTLE_S = 2
 STORY_HOLD_S = 30
 STORY_MAX_IMPACTS = 3
 SHOWROOM_STATE = {"values": {}, "impacts": {}}
@@ -9615,11 +9698,11 @@ def showroom_story(diagnosis, links, outcome, now=None):
         impacts = []
         for key, entry in list(store.items()):
             active = key in seen
-            settled_long_enough = entry["last"] - entry["first"] >= STORY_SETTLE_S
+            settled_long_enough = entry["last"] - entry["first"] >= STORY_IMPACT_SETTLE_S
             if not active and (not settled_long_enough or now - entry["last"] > STORY_HOLD_S):
                 store.pop(key)
                 continue
-            if active and now - entry["first"] < STORY_SETTLE_S:
+            if active and now - entry["first"] < STORY_IMPACT_SETTLE_S:
                 continue
             impacts.append(dict(entry["data"], state="active" if active else "resolved" if complete else "unconfirmed"))
         impacts.sort(key=lambda item: (item["state"] != "active", item["severity"] != "bad"))

@@ -471,7 +471,7 @@
     const groupHolder = document.getElementById('experience-groups');
     if (groupHolder) groupHolder.replaceChildren(...groupCards(experience.groups, live));
     const traffic = latest.traffic || {};
-    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${traffic.window_seconds || 60} s · ${traffic.requests.toLocaleString()} transactions` : '');
+    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` : '');
     const story = latest.story || {};
     setText(document.getElementById('story-status'), online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
     reconcile(document.getElementById('impacts'), story.impacts || [], item => `${item.impact}|${item.cause}`,

@@ -28,7 +28,7 @@ class ControllerExecutionTests(unittest.TestCase):
 
     @staticmethod
     def running(run_id='owned', users=10):
-        return {'status': 'running', 'users': users, 'run': {'run_id': run_id}}
+        return {'status': 'running', 'users': users, 'run': {'run_id': run_id}, 'dem': {'live_phase_id': netem.test_live_context()['phase_id']}}
 
     def test_manual_test_starts_site_workload_before_impairments_and_stops_only_owned_run(self):
         events = []
@@ -43,6 +43,8 @@ class ControllerExecutionTests(unittest.TestCase):
                 self.assertTrue(netem.SCENARIO_STATE['preparing_workload'])
                 self.assertEqual(netem.scenario_snapshot()['elapsed_s'], 0)
                 current = self.running()
+            if path.endswith('/heartbeat') and kwargs.get('payload', {}).get('live_context'):
+                current['dem'] = {'live_phase_id': kwargs['payload']['live_context'].get('phase_id')}
             if path.endswith('/stop'):
                 self.assertEqual(kwargs['payload'], {'run_id': 'owned'})
                 current = {'status': 'stopped'}
@@ -56,7 +58,7 @@ class ControllerExecutionTests(unittest.TestCase):
         self.assertEqual(netem.SCENARIO_STATE['result'], 'passed')
 
     def test_existing_workload_is_borrowed_and_left_running(self):
-        with patch.object(netem, 'traffic_generator_request', return_value=self.running('existing')) as api:
+        with patch.object(netem, 'traffic_generator_request', side_effect=lambda *a, **k: self.running('existing')) as api:
             netem.run_scenario('wan1', self.scenario)
         self.assertNotIn('/api/v1/workloads/start', [call.args[0] for call in api.call_args_list])
         self.assertNotIn('/api/v1/workloads/stop', [call.args[0] for call in api.call_args_list])
@@ -88,7 +90,7 @@ class ControllerExecutionTests(unittest.TestCase):
 
     def test_failed_restoration_cannot_report_a_pass(self):
         self.apply_selected_profile.side_effect = [(True, 'OK', {}), (False, 'bridge missing', {})]
-        with patch.object(netem, 'traffic_generator_request', return_value=self.running('existing')):
+        with patch.object(netem, 'traffic_generator_request', side_effect=lambda *a, **k: self.running('existing')):
             netem.run_scenario('wan1', self.scenario)
         self.assertEqual(netem.SCENARIO_STATE['result'], 'failed')
         self.assertIn('WAN restoration failed', netem.SCENARIO_STATE['error'])

@@ -7,3 +7,5 @@ config.json
 runtime/
 
 node_modules/
+
+live-window-acceptance-results.json
