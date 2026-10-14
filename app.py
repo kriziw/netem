@@ -9598,7 +9598,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
         active = [item for item in impacts if item["state"] == "active"]
         if not experience.get("available"):
             users = "Waiting for simulated users."
-        elif experience.get("business_acceptance") == "fail" or "fail" in (experience.get("verdicts") or {}).values():
+        elif experience.get("business_acceptance") == "fail" or (experience.get("verdicts") or {}).get("experience") == "fail":
             users = "Users are below target."
         elif (not complete or experience.get("business_acceptance") != "pass"
               or experience.get("at_risk") or any(value != "pass" for value in (experience.get("verdicts") or {}).values())):

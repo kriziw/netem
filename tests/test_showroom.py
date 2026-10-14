@@ -323,6 +323,11 @@ class EvidenceStoryRegressionTests(unittest.TestCase):
         self.assertIn("User experience not yet confirmed.", story["status"])
         self.assertIn("Observed response time is above target.", story["status"])
         self.assertNotIn("fine", story["status"])
+        # A raw metric miss remains an observation while acceptance is unknown.
+        outcome['experience'].update(scoring_complete=True, verdicts={'experience': 'unknown', 'interactive': 'fail'})
+        story = netem.showroom_story({'findings': []}, self.links(), outcome, now=20)
+        self.assertIn('User experience not yet confirmed.', story['status'])
+        self.assertNotIn('Users are below target.', story['status'])
 
     def test_confirmed_failure_is_not_delayed_or_overridden_by_application_pass(self):
         dem = {"requests": 120, "experience_score": 96, "scoring_complete": True,
