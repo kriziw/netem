@@ -1,0 +1,43 @@
+name: Engine acceptance
+on:
+  push:
+    branches: [codex/shaping-calibration]
+  pull_request:
+    paths: [app.py, calibration.py, tests/engine_acceptance.py, .github/workflows/engine-acceptance.yml]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  isolated-engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Combine pinned scoring companion in this disposable checkout
+        run: |
+          git config user.name engine-ci
+          git config user.email engine-ci@example.invalid
+          git merge --no-commit --no-ff f10306abbea3f9dfaf5e0c745170d77f9d05edd8
+      - uses: actions/checkout@v4
+        with:
+          repository: kriziw/netem-traffic-simulator
+          ref: 7bd8c9eabd42bc8281e068e75e270bbcf08865b3
+          path: _simulator
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: |
+          pip install -r _simulator/requirements.txt
+          sudo apt-get update -qq
+          sudo apt-get install -y iproute2 curl
+      - name: Exercise real packets and application engines in isolated namespaces
+        run: sudo env SIMULATOR_SOURCE="$PWD/_simulator" "$(command -v python)" tests/engine_acceptance.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: engine-acceptance-evidence
+          path: engine-acceptance-results.json
+          if-no-files-found: warn

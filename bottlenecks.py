@@ -54,7 +54,7 @@ def _max(rows, key):
 
 def finding(step, category, severity, title, evidence, action):
     return {"step": step, "category": category, "severity": severity, "title": title,
-            "evidence": evidence, "action": action}
+            "evidence": evidence, "action": action, "confidence": "hypothesis", "causality": "not independently verified"}
 
 
 def step_findings(step, shaped_mbps):
@@ -143,14 +143,14 @@ def step_findings(step, shaped_mbps):
             "The traffic generator ran no OT-style sparse users, so loss and jitter under this load were not measured.",
             "Check the simulator's sparse slots for this run."))
     probe = diagnostics.get("probe") or {}
-    if probe.get("success") and probe.get("latency_ms") is not None and probe.get("configured_delay_ms") is not None:
-        excess = probe["latency_ms"] - probe["configured_delay_ms"]
+    if probe.get("success") and probe.get("additional_latency_ms") is not None:
+        excess = probe["additional_latency_ms"]
         if excess > LATENCY_WARN_MS:
             findings.append(finding(
                 target, "latency", "bad" if excess > LATENCY_BAD_MS else "warn",
-                f"Probe latency {excess:.1f} ms beyond the configured delay",
-                f"{probe['latency_ms']:.1f} ms round trip against {probe['configured_delay_ms']:g} ms configured.",
-                "The extra delay is queueing. Compare with the shaper backlog in the per-second readings."))
+                f"Probe latency {excess:.1f} ms above the unloaded baseline",
+                f"{probe['latency_ms']:.1f} ms round trip on the same probe path; baseline {probe['unloaded_baseline']['latency_ms']:g} ms.",
+                "Additional delay may include queueing, baseline path latency or endpoint processing. Compare an unloaded baseline and the shaper backlog."))
 
     trace = (diagnostics.get("trace") or {}).get("summary") or {}
     findings.extend(_simulator_findings(target, trace, shaped_mbps, achieved))
@@ -188,7 +188,7 @@ def _simulator_findings(target, trace, shaped_mbps=None, achieved=None):
     if trace.get("poll_errors"):
         found.append(finding(
             target, "simulator", "bad", f"{trace['poll_errors']} status polls got no answer within 2 s",
-            "A poll unanswered after 2 s means the simulator's loop was held for at least that long.",
+            "The management request timed out; network, API, worker or event-loop delay can cause this.",
             "Read the event-loop finding for this step: the simulator was not answering NetEm."))
     cpu = trace.get("sim_cpu_pct_max")
     if cpu is not None and cpu >= SIM_CPU_WARN:
@@ -203,7 +203,7 @@ def _simulator_findings(target, trace, shaped_mbps=None, achieved=None):
         found.append(finding(
             target, "target", "bad" if unanswered else "warn",
             f"Controlled target answered its health check slowly (up to {_fmt(slow)} ms)",
-            f"{unanswered} seconds with no answer. The target serves the downloads, so a slow target slows them.",
+            f"{unanswered} seconds with no answer. This check traverses the traffic path, so the target and network contributions are not separated.",
             "Check the target VM's load and its event loop; the simulator's probe uses the same route."))
     quiet = trace.get("quiet_seconds") or 0
     if quiet >= QUIET_MIN_SECONDS:
@@ -222,7 +222,7 @@ def _simulator_findings(target, trace, shaped_mbps=None, achieved=None):
                 target, "target", "warn", f"Downloads waited {wait:.0f} ms for their first byte",
                 f"Mean first byte {wait:.0f} ms against {transfer:.0f} ms to transfer, with the paced users busy "
                 f"{busy * 100:.0f}% of the window.",
-                "The target was slow to start sending. Check its load and its sending side."))
+                "The first byte arrived late. Check path delay and target processing independently."))
         else:
             found.append(finding(
                 target, "path", "warn", f"Downloads took {transfer:.0f} ms to transfer once started",
@@ -260,7 +260,12 @@ def analyse(result):
     shaped = result.get("wan_rate_mbps")
     findings = []
     for step in steps:
-        findings.extend(step_findings(step, shaped))
+        scoped = step_findings(step, shaped)
+        for item in scoped:
+            diagnostics = step.get("diagnostics") or {}
+            item["observation"] = {"window": diagnostics.get("window"), "wan_id": result.get("link_id"),
+                                   "run_id": (diagnostics.get("simulator_before") or {}).get("run_id")}
+        findings.extend(scoped)
     if steps and any(not ((step.get("diagnostics") or {}).get("probe") or {}).get("success")
                      and ((step.get("diagnostics") or {}).get("probe") or {}).get("skipped")
                      for step in steps):

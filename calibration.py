@@ -16,16 +16,44 @@ DROP_NOTE_PCT = 0.5      # shaper drops above this share of offered packets are 
 REACHED_SHAPING = 0.95   # a step at or above this share of the WAN rate means the shaping is the limit
 
 
-def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, late_seconds, drops_ps=None):
+def demand_window(before, after, direction="down"):
+    """Counter deltas over the generator's monotonic interval, never a declared target substituted for demand."""
+    first, last = before or {}, after or {}
+    duration = last.get("timestamp_monotonic", 0) - first.get("timestamp_monotonic", 0)
+    a, b = (first.get("directions") or {}).get(direction), (last.get("directions") or {}).get(direction)
+    if duration <= 0 or not a or not b or a.get("target_mbps") != b.get("target_mbps"):
+        return {"complete": False, "reason": "missing or changed generator demand evidence"}
+    result = {"complete": True, "window_seconds": duration, "direction": direction}
+    for counter in ("offered_bytes", "admitted_bytes", "started_bytes", "delivered_bytes"):
+        delta = b.get(counter, -1) - a.get(counter, 0)
+        if delta < 0 or counter not in a or counter not in b:
+            return {"complete": False, "reason": "generator counters reset or missing"}
+        result[counter.replace("_bytes", "_mbps")] = delta * 8 / duration / 1e6
+    result["tolerance_mbps"] = b["target_mbps"] * .05 + last.get("chunk_bytes", 262144) * 8 / duration / 1e6
+    return result
+
+
+def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, late_seconds, drops_ps=None,
+               demand=None, require_demand=False):
     """The verdict for one step. Missing readings are not treated as passing: they fail the step they block."""
     expected = min(target_mbps, shaped_mbps) if shaped_mbps else target_mbps
     reasons, warnings = [], []
+    if require_demand and not (demand or {}).get("complete"):
+        reasons.append("generator demand measurement unavailable")
+    elif demand and demand.get("complete"):
+        tolerance = demand["tolerance_mbps"]
+        if demand["offered_mbps"] + tolerance < target_mbps:
+            reasons.append("generator arrival schedule below requested rate")
+        if demand["started_mbps"] + tolerance < expected:
+            reasons.append("generator dispatched insufficient payload for this capacity claim")
     if achieved_mbps is None:
         reasons.append("no WAN measurement in the window")
         achieved = 0.0
     else:
         achieved = achieved_mbps
     efficiency = achieved / expected if expected > 0 else 0.0
+    if host_status in (None, "unknown", "unavailable"):
+        reasons.append("NetEm host measurement unavailable")
     if host_status == "at_limit":
         reasons.append("NetEm host at its limit")
     if late_seconds:
@@ -45,12 +73,15 @@ def judge_step(target_mbps, shaped_mbps, achieved_mbps, drop_pct, host_status, l
         "status": "fail" if reasons else "pass",
         "reasons": reasons,
         "warnings": warnings,
+        "demand": demand,
     }
 
 
 def limited_by(step):
     """What stopped the ladder at this step, in the terms an operator acts on."""
     text = " ".join(step["reasons"])
+    if "generator" in text:
+        return "generator demand is insufficient or unverified; path capacity is not established"
     if "host" in text or "sampler" in text:
         return "NetEm host (CPU, scheduling or NIC)"
     cause = "path or traffic generator: the WAN carried less than the step offered"
