@@ -9313,7 +9313,9 @@ def showroom_outcome(diagnosis, site_plan):
             "verdicts": verdicts,
             **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
                                             "critical_alerts", "limiting_application", "missing_measurements", "coverage_pct", "score_range",
-                                            "score_status", "business_acceptance", "at_risk", "at_risk_reason", "legacy_score")},
+                                            "score_status", "at_risk", "at_risk_reason", "legacy_score")},
+            "application_acceptance": dem.get("business_acceptance"),
+            "business_acceptance": verdicts["experience"],
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
         },

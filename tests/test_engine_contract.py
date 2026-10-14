@@ -50,6 +50,7 @@ class EvidenceTests(unittest.TestCase):
                "business_acceptance": "unknown", "critical_alerts": []}
         state = {"traffic_generator": {"connected": True, "status": {"dem": dem}}}
         self.assertEqual(netem.showroom_outcome(state, None)["experience"]["verdicts"]["experience"], "fail")
+        self.assertEqual(netem.showroom_outcome(state, None)["experience"]["business_acceptance"], "fail")
         dem["scoring_complete"] = False
         self.assertEqual(netem.showroom_outcome(state, None)["experience"]["verdicts"]["experience"], "unknown")
 
