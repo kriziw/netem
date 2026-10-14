@@ -29,11 +29,11 @@ class PhaseWindowTests(unittest.TestCase):
         self.assertEqual(by_name["Recovery"]["success_pct"], 100.0)
         self.assertEqual(by_name["Recovery"]["worst_success_pct"], 100.0)
 
-    def test_a_phase_with_too_few_transactions_is_not_scored(self):
+    def test_small_phase_shows_measured_utility_but_has_no_target_verdict(self):
         ends = [{"name": "Severe brownout", "dem": window(0, 66.7, 6)}]
         summary = netem.summarize_test(record(ends), "passed", None)
         phase = next(item for item in summary["phases"] if item["name"] == "Severe brownout")
-        self.assertIsNone(phase["experience_score"])
+        self.assertEqual(phase["experience_score"], 0)
         self.assertIn("Incomplete phase evidence (6 transactions)", phase["note"])
 
     def test_without_an_exact_window_rolling_samples_are_not_substituted(self):
@@ -98,10 +98,10 @@ class ApplicationGroupTests(unittest.TestCase):
         erp = next(app for app in web["apps"] if app["key"] == "erp")
         self.assertEqual(erp["cells"]["Baseline"], "60 · 90.0% · 900 ms (30 tx)")
 
-    def test_an_application_with_too_few_transactions_is_not_scored(self):
+    def test_small_application_score_is_labelled_limited_evidence(self):
         plm = self.groups()["File transfers"]["apps"][0]
         self.assertEqual(plm["key"], "plm_cad")
-        self.assertEqual(plm["cells"]["Baseline"], "5 tx, too few to score")
+        self.assertEqual(plm["cells"]["Baseline"], "100 · 100.0% · 8000 ms (5 tx) [limited evidence]")
 
     def test_a_phase_without_a_window_has_no_application_figures(self):
         summary = netem.summarize_test(record([]), "passed", None)

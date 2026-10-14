@@ -36,6 +36,7 @@ import calibration_log
 import calibration_trace
 import host_health
 import platform_test
+import test_records
 import site_catalog
 from showroom import create_showroom_app
 import branding
@@ -2274,6 +2275,12 @@ def log_event(kind: str, message: str, **details):
         "details": details,
     }
     EVENT_LOG.append(event)
+    record_id = globals().get('TEST_RECORDER', {}).get('test_id')
+    if record_id and TEST_RECORDER.get('active'):
+        try:
+            test_records.append(RUNTIME_DIR, record_id, 'event', event)
+        except OSError:
+            TEST_RECORDER['record_error'] = 'Test journal could not be written'
     del EVENT_LOG[:-500]
 
     try:
@@ -5440,10 +5447,23 @@ LAST_TEST_SUMMARY = load_last_test_summary()
 
 
 def recorder_start(scenario: dict, link_id: str, phases: list):
+    test_id = uuid.uuid4().hex
+    started_at = time.time()
+    configuration = {'schema_version': 1, 'test_id': test_id, 'started_at': started_at,
+                     'scenario': scenario, 'configuration': load_config(),
+                     'platform_version': VERSION_PATH.read_text().strip() if VERSION_PATH.exists() else None,
+                     'session_id': active_session_id(),
+                     'timestamp_basis': 'Unix seconds; platform and simulator clocks must be synchronized for cross-host correlation'}
+    record_error = None
+    try:
+        test_records.write(RUNTIME_DIR, test_id, 'configuration.json', configuration)
+    except OSError as exc:
+        record_error = f'Test configuration could not be saved: {exc}'
     with TEST_RECORDER_LOCK:
         TEST_RECORDER.clear()
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
-                             started_at=time.time(), phases=[phase["name"] for phase in phases],
+                             started_at=started_at, test_id=test_id, record_error=record_error,
+                             run_ids=[], phases=[phase["name"] for phase in phases],
                              phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[],
                              live_window_seconds=scenario.get("live_window_seconds", 15))
 
@@ -5452,9 +5472,17 @@ def recorder_note(kind: str, item: dict):
     with TEST_RECORDER_LOCK:
         if TEST_RECORDER.get("active"):
             TEST_RECORDER[kind].append(item)
+            test_id = TEST_RECORDER.get('test_id')
+        else:
+            test_id = None
+    if test_id:
+        try:
+            test_records.append(RUNTIME_DIR, test_id, kind, item)
+        except OSError:
+            TEST_RECORDER['record_error'] = 'Test journal could not be written'
 
 
-# A phase with fewer transactions than this is not scored: one failure would decide its score.
+# Historical minimum evidence gate; small-sample utility is displayed separately from acceptance.
 MIN_PHASE_REQUESTS = 20
 
 
@@ -5476,12 +5504,12 @@ def phase_window_dem(seconds, since=None, until=None, run_id=None, intervals=Non
                           "experience": item.get("experience_score"), "weight": item.get("weight"),
                           "scoring_complete": item.get("scoring_complete"),
                           **{field: item.get(field) for field in ("criticality", "criticality_weight", "experience_targets",
-                              "quality", "score_components", "target_violations", "missing_measurements")}}
+                              "quality", "score_components", "target_violations", "missing_measurements", "evidence_issues", "sample_confidence", "timing")}}
                     for key, item in (dem.get("applications") or {}).items()}
     return {"experience": dem.get("experience_score"), "success": dem.get("availability_pct"),
             "interactive_p95_ms": dem.get("interactive_p95_ms"), "requests": dem.get("requests"),
             "p95_ms": dem.get("p95_ms"), "applications": applications,
-            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions", "business_acceptance", "coverage_pct", "score_range", "score_status") }}
+            **{key: dem.get(key) for key in ("scoring_complete", "truncated", "evidence_issues", "since", "until", "run_id", "critical_alerts", "intervals", "operation_lifecycle", "application_contributions", "business_acceptance", "coverage_pct", "evidence_coverage_pct", "sample_confidence", "timing", "score_range", "score_status") }}
 
 
 def recorder_close_phase():
@@ -5525,6 +5553,7 @@ def record_test_sample(payload: dict):
     dem = status.get("dem") or {}
     has_data = bool(dem.get("requests"))
     sample = {
+        "timestamp": time.time(), "run_id": (status.get('run') or {}).get('run_id'),
         "t": scenario.get("elapsed_s"), "phase": scenario.get("phase"), "paused": bool(scenario.get("paused")),
         "experience": dem.get("experience_score") if has_data else None,
         "success": dem.get("availability_pct") if has_data else None,
@@ -5541,6 +5570,22 @@ def record_test_sample(payload: dict):
     with TEST_RECORDER_LOCK:
         if TEST_RECORDER.get("active"):
             TEST_RECORDER["samples"] = (TEST_RECORDER["samples"] + [sample])[-2000:]
+            test_id = TEST_RECORDER.get('test_id')
+            run_id = sample.get('run_id')
+            if run_id and run_id not in TEST_RECORDER.setdefault('run_ids', []):
+                TEST_RECORDER['run_ids'].append(run_id)
+        else:
+            test_id = None
+    if test_id:
+        try:
+            test_records.append(RUNTIME_DIR, test_id, 'measurement', {'sample': sample, 'dem': dem,
+                'links': payload.get('links'), 'steering': payload.get('steering'),
+                'generator_health': {key: status.get(key) for key in ('persistence_error', 'dropped_transactions', 'engine_telemetry')},
+                'workload': {key: (status.get('run') or {}).get(key) for key in
+                    ('run_id', 'profile', 'target', 'target_users', 'activity', 'manifest', 'policy', 'seed',
+                     'media_pattern', 'generation_mode', 'traffic_path', 'target_info', 'contract_epoch')}})
+        except OSError:
+            TEST_RECORDER['record_error'] = 'Test measurement could not be saved'
 
 
 def _average(values):
@@ -5559,13 +5604,15 @@ APPLICATION_LABELS = {
 
 
 def _phase_application(key, item):
-    """One application's figures in one phase; too few of its own transactions means no score for it."""
+    """Keep measured utility visible while preserving the application's acceptance gate."""
     requests = item.get("requests") or 0
     scored = item.get("scoring_complete") is True
+    invalid = any(issue != 'outstanding_overdue_operations' for issue in item.get('evidence_issues') or [])
     return {"key": key, "class": item.get("class"), "requests": requests,
-            "experience": item.get("experience") if scored else None,
-            "success": item.get("success") if scored else None,
-            "p95_ms": item.get("p95_ms") if scored else None, "weight": item.get("weight"), "scoring_complete": scored}
+            "experience": item.get("experience") if not invalid else None,
+            "success": item.get("success") if not invalid else None,
+            "p95_ms": item.get("p95_ms") if not invalid else None, "weight": item.get("weight"), "scoring_complete": scored,
+            "sample_confidence": item.get('sample_confidence'), "timing": item.get('timing')}
 
 
 def _figures_text(experience, success, p95_ms, requests):
@@ -5601,12 +5648,16 @@ def application_matrix(phases):
                 group_score = sum(item["experience"] * weight for item, weight in zip(scored, weights)) / sum(weights) if sum(weights) else None
                 cells[phase["name"]] = _figures_text(group_score, success,
                                                      max(p95s, default=None), sum(item["requests"] for item in scored)) + " [worst app P95]"
+                if any(item.get('scoring_complete') is not True for item in present):
+                    cells[phase['name']] += ' [limited evidence]'
             else:
                 cells[phase["name"]] = _figures_text(None, None, None, sum(item["requests"] for item in present))
             for row in apps:
                 item = phase["applications"].get(row["key"])
                 row["cells"][phase["name"]] = (_figures_text(item["experience"], item["success"], item["p95_ms"],
                                                              item["requests"]) if item else "—")
+                if item and item.get('scoring_complete') is not True and item.get('experience') is not None:
+                    row['cells'][phase['name']] += ' [limited evidence]'
         groups.append({"label": label, "cells": cells, "apps": apps})
     return groups
 
@@ -5635,9 +5686,10 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
         if window is not None:
             transactions = window.get("requests") or 0
             scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and (bool(window.get("intervals")) or not any(row.get("paused") for row in rows))
-            experience = window.get("experience") if scored else None
-            success = window.get("success") if scored else None
-            p95 = window.get("interactive_p95_ms") if scored else None
+            invalid = window.get('truncated') or any(issue != 'outstanding_overdue_operations' for issue in window.get('evidence_issues') or [])
+            experience = window.get("experience") if not invalid else None
+            success = window.get("success") if not invalid else None
+            p95 = window.get("interactive_p95_ms") if not invalid else None
             note = None if scored else f"Incomplete phase evidence ({transactions} transactions); no target verdict."
         else:
             experience, success, p95 = None, None, None
@@ -5650,7 +5702,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             "experience_score": experience, "success_pct": success,
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
             "critical_alerts": (window or {}).get("critical_alerts", []),
-            **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "score_range", "score_status")},
+            **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "evidence_coverage_pct", "sample_confidence", "timing", "score_range", "score_status")},
             "worst_success_pct": success,
             "wans": [{"label": item["label"], "down_mbps": _average(item["down"]), "up_mbps": _average(item["up"]),
                       "health": item["health"]} for item in links.values()],
@@ -5744,11 +5796,49 @@ def recorder_finish(result: str, error):
         TEST_RECORDER["active"] = False
     if not record.get("active"):
         return None
+    if SCENARIO_STATE.get('workload_run_id') and SCENARIO_STATE['workload_run_id'] not in record.setdefault('run_ids', []):
+        record['run_ids'].append(SCENARIO_STATE['workload_run_id'])
     cfg = load_config()
     plan = active_site_plan(cfg)
     summary = summarize_test(record, result, error, (plan or {}).get("targets"), (plan or {}).get("label"))
     link = get_link(cfg, record.get("link_id") or "")
     summary["link"] = (link or {}).get("name") or record.get("link_id")
+    if record.get('test_id'):
+        summary['test_id'] = record['test_id']
+        try:
+            test_records.write(RUNTIME_DIR, record['test_id'], 'record.json', record)
+            test_records.write(RUNTIME_DIR, record['test_id'], 'summary.json', summary)
+            export = test_records.collect_agent(RUNTIME_DIR, record['test_id'], record.get('run_ids', []),
+                record['started_at'], summary['ended_at'], traffic_generator_request)
+            # Preserve the full WAN/host/probe sample history, independently of UI polling.
+            telemetry_complete = True
+            with telemetry_connect() as conn:
+                for table in ('telemetry_samples', 'host_samples', 'probe_samples'):
+                    rows = conn.execute(f'SELECT * FROM {table} WHERE timestamp>=? AND timestamp<? ORDER BY timestamp LIMIT 100001',
+                        (record['started_at'], summary['ended_at'])).fetchall()
+                    test_records.write(RUNTIME_DIR, record['test_id'], table + '.json',
+                        {'complete': len(rows) <= 100000, 'items': [dict(row) for row in rows[:100000]]})
+                    telemetry_complete = telemetry_complete and len(rows) <= 100000
+            summary['record_complete'] = (export['complete'] and telemetry_complete and not record.get('record_error')
+                and not (test_records.directory(RUNTIME_DIR, record['test_id']) / 'journal-truncated.json').exists())
+            test_records.write(RUNTIME_DIR, record['test_id'], 'summary.json', summary)
+            folder = test_records.directory(RUNTIME_DIR, record['test_id'])
+            (folder / 'README.txt').write_text(
+                '\n'.join(summary.get('narrative') or summary.get('conclusion') or []) +
+                '\n\nconfiguration.json: configuration at test start (credentials redacted).\n'
+                'timeline.jsonl: events and detailed live measurements, including confidence and queue evidence.\n'
+                'record.json: phase boundaries, pauses, full-phase summaries, checks and reactions.\n'
+                'agent-*.json: raw completed transactions, operation events and scoring contracts.\n'
+                'agent-export-status.json: completeness and any retrieval errors.\n'
+                '*_samples.json: WAN, host and probe evidence, with explicit row-limit indicators.\n'
+                'Application response time includes upload, target processing and body transfer.\n'
+                'Packet RTD/RTT is UDP echo round-trip time; one-way network latency is not measured.\n'
+                'Unix timestamps use each host clock. Correlation requires synchronized host clocks.\n'
+                'An unfinished record has no summary; missing evidence is never a successful test.\n', encoding='utf-8')
+            test_records.archive(RUNTIME_DIR, record['test_id'])
+        except (OSError, ValueError, sqlite3.Error) as exc:
+            summary['record_complete'] = False
+            summary['record_error'] = str(exc)[:200]
     LAST_TEST_SUMMARY = summary
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -6927,6 +7017,7 @@ def tests():
         site_plan=active_site_plan(cfg, traffic_generator.get("catalog")),
         site_state=site_plan_snapshot(),
         last_test=LAST_TEST_SUMMARY,
+        test_records=test_records.history(RUNTIME_DIR),
         events=list(reversed([
             event for event in EVENT_LOG
             if event.get("kind") in (
@@ -7086,6 +7177,20 @@ def session_report_json(session_id):
     if not report:
         abort(404)
     return jsonify(report)
+
+
+@app.get('/tests/records/<test_id>/download')
+def test_record_download(test_id):
+    try:
+        # Finished archives are immutable. An unfinished/crashed test can still
+        # export its durable configuration and journal, explicitly without a verdict.
+        folder = test_records.directory(RUNTIME_DIR, test_id)
+        path = folder / 'record.zip'
+        if not path.is_file() or not (folder / 'summary.json').is_file():
+            path = test_records.archive(RUNTIME_DIR, test_id)
+        return send_file(path, as_attachment=True, download_name=f'netem-test-{test_id}.zip')
+    except (ValueError, FileNotFoundError):
+        abort(404)
 
 
 @app.route("/scenarios")
@@ -9524,10 +9629,15 @@ def showroom_outcome(diagnosis, site_plan):
         "experience": {
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
             "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
+            "timing": {key: (dem.get('timing') or {}).get(key) for key in
+                ('packet_rtd_p50_upper_ms', 'packet_rtd_p95_upper_ms', 'packet_rtd_samples', 'packet_rtd_operations',
+                 'request_to_headers_p95_ms', 'response_body_p95_ms', 'one_way_latency_ms')},
+            "target_rtd": {key: ((dem.get('timing') or {}).get('target_rtd') or {}).get(key) for key in
+                ('p50_ms', 'p95_ms', 'last_ms', 'samples', 'attempts', 'no_reply', 'latest_at', 'complete')},
             "verdicts": verdicts,
             **{key: dem.get(key) for key in ("score_model", "scoring_complete", "evidence_issues", "application_contributions",
                                             "critical_alerts", "limiting_application", "missing_measurements", "coverage_pct", "score_range",
-                                            "score_status", "at_risk", "at_risk_reason", "legacy_score", "configured_window_seconds", "window_scope", "collecting_evidence", "live_paused")},
+                                            "score_status", "sample_confidence", "evidence_coverage_pct", "at_risk", "at_risk_reason", "legacy_score", "configured_window_seconds", "window_scope", "collecting_evidence", "live_paused")},
             "application_acceptance": dem.get("business_acceptance"),
             "business_acceptance": verdicts["experience"],
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.

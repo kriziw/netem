@@ -162,7 +162,7 @@
     const verdicts = (experience && experience.verdicts) || {};
     return {
       experience: {value: available && number(experience.experience_score) ? `${Math.round(experience.experience_score)} / 100` : '—',
-        target: `${prefix} ≥ ${format(t.experience_min)}` + (experience && experience.scoring_complete === false ? ` · provisional${number(experience.coverage_pct) ? ', ' + pct(experience.coverage_pct, 0) + ' coverage' : ''}` : ''), verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
+        target: `${prefix} ≥ ${format(t.experience_min)}` + (experience && experience.scoring_complete === false ? ` · ${experience.sample_confidence === 'limited_sample' ? 'limited sample' : 'provisional'}${number(experience.coverage_pct) ? ', ' + pct(experience.coverage_pct, 0) + ' measured coverage' : ''}` : ''), verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
       success: {value: available ? pct(experience.success_pct, 2) : '—',
         target: `${prefix} ≥ ${format(t.success_min_pct)}%`, verdict: available ? verdicts.success || 'unknown' : 'unknown'},
       interactive: {value: available && number(experience.interactive_p95_ms) ? `${Math.round(experience.interactive_p95_ms)} ms` : '—',
@@ -444,8 +444,19 @@
   function groupCards(groups, live) {
     return (Array.isArray(groups) ? groups : []).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
-      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? ' · provisional' : '') : '—';
+      card.dataset.group = group.key || group.label;
+      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? (group.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · provisional') : '') : '—';
       card.append(element('span', '', group.label), element('strong', '', score), element('p', '', group.text));
+      if (group.applications && group.applications.length) {
+        const details = element('details');
+        details.append(element('summary', '', 'Application measurements'));
+        for (const app of group.applications) {
+          const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
+          const confidence = app.scoring_complete === false ? (app.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · incomplete evidence') : '';
+          details.append(element('p', '', `${app.label}: ${measurement}${confidence} · ${app.requests} transactions${number(app.age_s) ? ' · latest ' + Math.round(app.age_s) + ' s ago' : ''}${number(app.p95_ms) ? ' · ' + (app.class === 'realtime' ? 'operation timing' : 'completion P95') + ' ' + Math.round(app.p95_ms) + ' ms' : ''}`));
+        }
+        card.append(details);
+      }
       return card;
     });
   }
@@ -469,7 +480,18 @@
       setText(tile.querySelector('[data-target]'), view[key].target);
     }
     const groupHolder = document.getElementById('experience-groups');
-    if (groupHolder) groupHolder.replaceChildren(...groupCards(experience.groups, live));
+    const timing = experience.target_rtd || {};
+    const timingNode = document.getElementById('network-timing');
+    if (timingNode) setText(timingNode, `Target agent round-trip delay (RTD/RTT), P95: ${live && number(timing.p95_ms) ? format(timing.p95_ms) + ' ms · ' + timing.samples + ' replies' : 'not measured in this window'}${number(timing.no_reply) && timing.no_reply ? ' · ' + timing.no_reply + ' unanswered checks' : ''}. UDP echo over the workload path, including endpoint processing. One-way network latency is not measured; WAN delay is the configured NetEm impairment.`);
+    if (groupHolder) {
+      const expanded = new Set(Array.from(groupHolder.children).filter(card => card.querySelector('details[open]')).map(card => card.dataset.group));
+      const cards = groupCards(experience.groups, live);
+      for (const card of cards) {
+        const details = card.querySelector('details');
+        if (details) details.open = expanded.has(card.dataset.group);
+      }
+      groupHolder.replaceChildren(...cards);
+    }
     const traffic = latest.traffic || {};
     setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` : '');
     const story = latest.story || {};
