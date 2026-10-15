@@ -29,6 +29,15 @@ that test. The next test can establish its own initial baseline. The public test
 start timestamp identifies consecutive tests even when no idle snapshot arrives
 between them; no internal run identifiers are exposed.
 
+At a phase transition, the showroom can retain the last measured outcomes from
+the immediately preceding phase until new-phase measurements arrive for each metric or group.
+The cards and heading say **Previous phase**, name that phase, and use neutral
+status colours. Each metric or group updates independently; new measurements,
+including zero scores, replace its retained value immediately. A confirmed current
+failure takes precedence over all retained values. No retained values cross test boundaries
+or an intervening phase with no measurements. This browser presentation cache
+does not change simulator windows, current-phase verdicts, assertions or reports.
+
 Observed scores keep neutral verdicts until acceptance is established. Confidence
 explanations and individual sample counts remain in expandable application
 measurements; the main cards lead with measured performance or observed impact.

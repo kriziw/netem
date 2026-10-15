@@ -243,6 +243,57 @@
       : {site: false, title: '', meta: ''};
   }
 
+  // Presentation only: retained measurements never enter current-phase evidence.
+  function createOutcomeContinuity() {
+    const fields = {experience: 'experience_score', success: 'success_pct', interactive: 'interactive_p95_ms'};
+    let test = null, phase = null, previous = null, last = null;
+    let seen = new Set(), seenGroups = new Set();
+    return data => {
+      const scenario = data.scenario || {}, current = data.experience || {};
+      const identity = scenario.started_at;
+      const phaseKey = scenario.phase_index ?? scenario.phase;
+      if (!scenario.active || scenario.intro || !number(identity)) {
+        test = phase = previous = last = null; seen.clear(); seenGroups.clear();
+        return {experience: current};
+      }
+      if (test !== identity) {
+        test = identity; phase = phaseKey; previous = last = null; seen.clear(); seenGroups.clear();
+      } else if (phase !== phaseKey) {
+        previous = last; last = null; phase = phaseKey; seen.clear(); seenGroups.clear();
+      }
+      if (current.available) {
+        const measured = (last || {}).experience || {};
+        last = {experience: JSON.parse(JSON.stringify(current)), name: scenario.phase || 'Previous phase'};
+        for (const [key, field] of Object.entries(fields)) {
+          if (number(current[field])) seen.add(key);
+          else if (number(measured[field])) last.experience[field] = measured[field];
+        }
+        const groups = new Map((measured.groups || []).map(group => [group.key, group]));
+        for (const group of current.groups || []) if (number(group.score)) {
+          groups.set(group.key, JSON.parse(JSON.stringify(group))); seenGroups.add(group.key);
+        }
+        last.experience.groups = [...groups.values()];
+      }
+      const failed = current.business_acceptance === 'fail' || (current.verdicts || {}).experience === 'fail';
+      if (previous && !failed) {
+        const experience = {...current}, previousMetrics = [];
+        for (const [key, field] of Object.entries(fields)) if (!seen.has(key) && number(previous.experience[field])) {
+          experience[field] = previous.experience[field]; previousMetrics.push(key);
+        }
+        const groups = new Map((current.groups || []).map(group => [group.key, group]));
+        for (const group of previous.experience.groups || []) if (!seenGroups.has(group.key) && number(group.score)) {
+          groups.set(group.key, {...group, tone: 'unknown', previous_phase: previous.name});
+        }
+        experience.groups = [...groups.values()];
+        if (previousMetrics.length || experience.groups.some(group => group.previous_phase)) {
+          experience.available = true;
+          return {experience, previousPhase: previous.name, previousMetrics, previousExperience: previous.experience};
+        }
+      }
+      return {experience: current};
+    };
+  }
+
   // The coming test: what each phase does, what is checked, and when it starts.
   function introView(scenario, plan) {
     const seconds = Math.ceil(Number(scenario.starts_in_s) || 0);
@@ -364,6 +415,7 @@
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
   let latest = null, online = false, page = 0, receivedAt = 0;
+  const outcomeContinuity = createOutcomeContinuity();
   const selectStage = createStageController();
   const text = (id, value) => setText(document.getElementById(id), value);
   const element = (tag, className, content) => {
@@ -508,6 +560,7 @@
   }
 
   function groupHeadline(group) {
+    if (group.previous_phase) return `Previous phase · ${group.previous_phase}`;
     if (group.score_adjusted) return group.text;
     if (group.scoring_complete !== false) return group.text;
     if (!number(group.score)) return 'Application checks are running.';
@@ -520,7 +573,7 @@
     return (Array.isArray(groups) ? groups : []).filter(group => group.requests || (group.applications || []).length).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
       card.dataset.group = group.key || group.label;
-      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? ' · observed' : '') : '—';
+      const score = live && group.score != null ? group.score + ' / 100' + (group.previous_phase ? ' · previous phase' : group.scoring_complete === false ? ' · observed' : '') : '—';
       card.append(element('span', '', group.label), element('strong', '', score), element('p', '', groupHeadline(group)));
       if (group.applications && group.applications.length) {
         const details = element('details');
@@ -539,8 +592,10 @@
   }
 
   function renderOutcome() {
-    const view = resultView(latest.experience);
-    const experience = latest.experience || {};
+    const display = outcomeContinuity(latest);
+    const experience = display.experience;
+    const previousPhase = display.previousPhase;
+    const view = resultView(experience);
     const live = online && Boolean(experience.available);
     const scoreText = value => number(value) ? `${Math.round(value)} / 100` : '—';
     const latencyText = value => number(value) ? `${Math.round(value)} ms` : '—';
@@ -551,22 +606,31 @@
     };
     for (const key of ['experience', 'success', 'interactive']) {
       const tile = document.getElementById(`result-${key}`);
-      tile.className = `result ${online ? view[key].verdict : 'unknown'}`;
+      const retained = (display.previousMetrics || []).includes(key);
+      const target = retained ? resultView(display.previousExperience)[key].target : view[key].target;
+      tile.className = `result ${online && !retained ? view[key].verdict : 'unknown'}`;
       const [raw, format] = tiles[key];
       showNumber(tile.querySelector('[data-value]'), live ? raw : null, format);
-      setText(tile.querySelector('[data-target]'), view[key].target);
+      setText(tile.querySelector('[data-target]'), (retained ? `Previous phase · ${previousPhase} · ` : '') + target);
+    }
+    const transition = document.getElementById('outcome-transition');
+    if (transition) {
+      transition.hidden = !previousPhase || !online;
+      setText(transition, previousPhase ? `Retaining labelled measurements from ${previousPhase} while ${latest.scenario.phase || 'the new phase'} starts. Each value updates when its current-phase measurement arrives.` : '');
     }
     const groupHolder = document.getElementById('experience-groups');
+    const retainedScore = (display.previousMetrics || []).includes('experience');
+    const scoreEvidence = retainedScore ? display.previousExperience : experience;
     const scoreImpact = document.getElementById('score-impact');
     if (scoreImpact) {
-      scoreImpact.hidden = !live || !(experience.target_failures || []).length;
-      setText(scoreImpact, (experience.target_failures || []).join(' · '));
+      scoreImpact.hidden = !live || !(scoreEvidence.target_failures || []).length;
+      setText(scoreImpact, (retainedScore ? `Previous phase · ${previousPhase}: ` : '') + (scoreEvidence.target_failures || []).join(' · '));
     }
     const scoreDetails = document.getElementById('score-details');
     if (scoreDetails) {
-      scoreDetails.hidden = !live || !number(experience.average_experience_score);
-      setText(document.getElementById('score-explanation'), `Measured application average: ${format(experience.average_experience_score)} / 100. ` +
-        (experience.score_adjusted ? 'The headline uses the worst confirmed critical impact and stays below the passing band when a critical application or site target is missed.'
+      scoreDetails.hidden = !live || !number(scoreEvidence.average_experience_score);
+      setText(document.getElementById('score-explanation'), (retainedScore ? `Previous phase · ${previousPhase}. ` : '') + `Measured application average: ${format(scoreEvidence.average_experience_score)} / 100. ` +
+        (scoreEvidence.score_adjusted ? 'The headline uses the worst confirmed critical impact and stays below the passing band when a critical application or site target is missed.'
           : 'The headline follows measured application performance. Confirmed critical or site target misses keep it below the passing band.'));
     }
     const timing = experience.target_rtd || {};
@@ -586,7 +650,7 @@
     }
     const traffic = latest.traffic || {};
     const monitoring = traffic.monitoring || {};
-    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` +
+    setText(document.getElementById('outcome-window'), previousPhase ? `Previous phase · ${previousPhase} · retained values labelled` : number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` +
       (monitoring.enabled ? ` · includes ${format(monitoring.checks)} application checks` : '') : '');
     const measurementNote = document.getElementById('measurement-note');
     if (measurementNote) {
