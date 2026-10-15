@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.0](https://github.com/kriziw/netem/compare/v1.2.0...v1.3.0) (2026-10-15)
+
+
+### Features
+
+* populate small-site showroom with continuous application evidence ([#126](https://github.com/kriziw/netem/issues/126)) ([dedfde5](https://github.com/kriziw/netem/commit/dedfde5f0a099e1be636da62c5b09687ac275453))
+
 ## [1.2.0](https://github.com/kriziw/netem/compare/v1.1.0...v1.2.0) (2026-10-14)
 
 
