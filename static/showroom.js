@@ -162,7 +162,7 @@
     const verdicts = (experience && experience.verdicts) || {};
     return {
       experience: {value: available && number(experience.experience_score) ? `${Math.round(experience.experience_score)} / 100` : '—',
-        target: `${prefix} ≥ ${format(t.experience_min)}` + (experience && experience.scoring_complete === false ? ` · ${experience.sample_confidence === 'limited_sample' ? 'limited sample' : 'provisional'}${number(experience.coverage_pct) ? ', ' + pct(experience.coverage_pct, 0) + ' measured coverage' : ''}` : ''), verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
+        target: `${prefix} ≥ ${format(t.experience_min)}` + (experience && experience.scoring_complete === false ? ' · observed' : ''), verdict: available ? verdicts.experience || 'unknown' : 'unknown'},
       success: {value: available ? pct(experience.success_pct, 2) : '—',
         target: `${prefix} ≥ ${format(t.success_min_pct)}%`, verdict: available ? verdicts.success || 'unknown' : 'unknown'},
       interactive: {value: available && number(experience.interactive_p95_ms) ? `${Math.round(experience.interactive_p95_ms)} ms` : '—',
@@ -211,6 +211,8 @@
   function stageMode(data) {
     const scenario = (data && data.scenario) || {};
     if (scenario.active && scenario.intro) return 'intro';
+    if (scenario.active && ((data && data.traffic || {}).monitoring || {}).preparing &&
+        ((data && data.experience || {}).verdicts || {}).experience !== 'fail') return 'preparing';
     if (!scenario.active && (data && data.session || {}).active) return 'session';
     if (showPlanSummary(data)) return 'summary';
     if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
@@ -459,16 +461,24 @@
         .filter(Boolean).join(' · ') || (running ? 'Simulated corporate users' : 'No workload running'));
   }
 
-  // Each traffic group under the experience tiles: its own score, its tone and one sentence on how it is performing.
+  function groupHeadline(group) {
+    if (group.scoring_complete !== false) return group.text;
+    if (!number(group.score)) return 'Application checks are running.';
+    if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
+    return 'Latest measured application performance. Monitoring continues.';
+  }
+
+  // Detailed confidence belongs with the expandable measurements, not in every headline.
   function groupCards(groups, live) {
-    return (Array.isArray(groups) ? groups : []).map(group => {
+    return (Array.isArray(groups) ? groups : []).filter(group => group.requests || (group.applications || []).length).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
       card.dataset.group = group.key || group.label;
-      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? (group.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · provisional') : '') : '—';
-      card.append(element('span', '', group.label), element('strong', '', score), element('p', '', group.text));
+      const score = live && group.score != null ? group.score + ' / 100' + (group.scoring_complete === false ? ' · observed' : '') : '—';
+      card.append(element('span', '', group.label), element('strong', '', score), element('p', '', groupHeadline(group)));
       if (group.applications && group.applications.length) {
         const details = element('details');
         details.append(element('summary', '', 'Application measurements'));
+        if (group.scoring_complete === false) details.append(element('p', '', group.text));
         for (const app of group.applications) {
           const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
           const confidence = app.scoring_complete === false ? (app.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · incomplete evidence') : '';
@@ -501,7 +511,10 @@
     const groupHolder = document.getElementById('experience-groups');
     const timing = experience.target_rtd || {};
     const timingNode = document.getElementById('network-timing');
-    if (timingNode) setText(timingNode, `Target agent round-trip delay (RTD/RTT), P95: ${live && number(timing.p95_ms) ? format(timing.p95_ms) + ' ms · ' + timing.samples + ' replies' : 'not measured in this window'}${number(timing.no_reply) && timing.no_reply ? ' · ' + timing.no_reply + ' unanswered checks' : ''}. UDP echo over the workload path, including endpoint processing. One-way network latency is not measured; WAN delay is the configured NetEm impairment.`);
+    if (timingNode) {
+      timingNode.hidden = !live || !number(timing.p95_ms);
+      setText(timingNode, `Target round-trip time · P95 ${format(timing.p95_ms)} ms${timing.no_reply ? ' · ' + timing.no_reply + ' unanswered checks' : ''}`);
+    }
     if (groupHolder) {
       const expanded = new Set(Array.from(groupHolder.children).filter(card => card.querySelector('details[open]')).map(card => card.dataset.group));
       const cards = groupCards(experience.groups, live);
@@ -512,7 +525,15 @@
       groupHolder.replaceChildren(...cards);
     }
     const traffic = latest.traffic || {};
-    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` : '');
+    const monitoring = traffic.monitoring || {};
+    setText(document.getElementById('outcome-window'), number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` +
+      (monitoring.enabled ? ` · includes ${format(monitoring.checks)} application checks` : '') : '');
+    const measurementNote = document.getElementById('measurement-note');
+    if (measurementNote) {
+      measurementNote.hidden = !monitoring.enabled;
+      setText(measurementNote, `${format(traffic.users)} simulated users + continuous application monitoring · ${monitoring.measured_apps}/${monitoring.expected_apps} applications measured` +
+        (monitoring.worker_errors ? ' · monitoring needs operator attention' : ''));
+    }
     const story = latest.story || {};
     setText(document.getElementById('story-status'), online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
     reconcile(document.getElementById('impacts'), story.impacts || [], item => `${item.impact}|${item.cause}`,
@@ -523,7 +544,9 @@
         setText(card.querySelector('span'), `${item.state === 'resolved' ? 'Resolved · ' : item.state === 'unconfirmed' ? 'No longer confirmed · ' : ''}${item.cause}`);
       });
     const routesBox = document.getElementById('routes');
-    reconcile(routesBox, story.routes || [], route => route.label,
+    const routes = (story.routes || []).filter(route => route.wan);
+    if (routesBox.parentElement) routesBox.parentElement.hidden = !routes.length;
+    reconcile(routesBox, routes, route => route.label,
       () => { const row = element('div', 'route'); row.append(element('span'), element('strong')); return row; },
       (row, route) => {
         const view = routeView(route);
@@ -531,7 +554,6 @@
         setText(row.querySelector('span'), view.label);
         setText(row.querySelector('strong'), view.text);
       });
-    if (!(story.routes || []).length) routesBox.append(element('p', 'muted', 'Shown once simulated users are running.'));
   }
 
   function renderReport() {
@@ -644,7 +666,7 @@
     const mode = stageMode(latest);
     document.body.dataset.mode = mode;
     document.getElementById('stage').hidden = mode === 'live';
-    document.getElementById('waiting').hidden = !['waiting', 'session'].includes(mode);
+    document.getElementById('waiting').hidden = !['waiting', 'session', 'preparing'].includes(mode);
     const sessionProgress = document.getElementById('session-progress');
     if (sessionProgress) sessionProgress.hidden = mode !== 'session';
     document.getElementById('intro').hidden = mode !== 'intro';
@@ -672,10 +694,12 @@
         document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
       }
     }
-    if (mode === 'waiting' || mode === 'session') {
+    if (mode === 'waiting' || mode === 'session' || mode === 'preparing') {
       renderWaitingMedia(latest.showcase_video);
-      text('waiting-title', mode === 'session' ? 'Session so far' : 'Waiting for the session to start');
-      text('waiting-note', mode === 'session' ? 'Between tests · the next test will be introduced before it starts.' : 'The client, the appliance and the tests appear here once the operator starts the session.');
+      text('waiting-title', mode === 'preparing' ? 'Establishing application baseline' : mode === 'session' ? 'Session so far' : 'Waiting for the session to start');
+      const monitoring = (latest.traffic || {}).monitoring || {};
+      text('waiting-note', mode === 'preparing' ? `Exercising the site applications through the appliance · ${monitoring.measured_apps}/${monitoring.expected_apps} applications measured`
+        : mode === 'session' ? 'Between tests · the next test will be introduced before it starts.' : 'The client, the appliance and the tests appear here once the operator starts the session.');
       if (mode === 'session') {
         const view = sessionProgressView(latest.session_progress);
         text('session-progress-name', (latest.session || {}).name || 'Current session');

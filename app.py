@@ -38,6 +38,7 @@ import host_health
 import platform_test
 import test_records
 import site_catalog
+import application_monitoring
 import showcase_summary
 from showroom import create_showroom_app
 import branding
@@ -439,6 +440,8 @@ def traffic_generator_base_url(cfg=None):
 
 
 def traffic_generator_request(path, method="GET", payload=None, timeout=3.0):
+    if path == '/api/v1/workloads/start' and method == 'POST' and isinstance(payload, dict):
+        payload = application_monitoring.start_payload(payload, simulator_catalog())
     cfg = load_config()
     integration = traffic_generator_config(cfg)
     key = traffic_generator_api_key()
@@ -1313,6 +1316,10 @@ def validate_scenario_steps(raw_steps):
                     except (TypeError, ValueError):
                         raise ValueError(f"Step {index}: invalid experience policy.") from None
                     cleaned["experience_policy"] = copy.deepcopy(policy)
+                if 'application_checks' in value:
+                    if not isinstance(value['application_checks'], bool):
+                        raise ValueError(f'Step {index}: application_checks must be a boolean.')
+                    cleaned['application_checks'] = value['application_checks']
                 for field in ("generation_mode", "paced_mbps", "sparse_share", "seed", "rate_down_mbps", "rate_up_mbps", "media_pattern", "media_session_s", "completion_grace_s", "live_window_seconds"):
                     if field in value:
                         cleaned[field] = value[field]
@@ -9667,6 +9674,7 @@ def showroom_outcome(diagnosis, site_plan):
             "status": (status or {}).get("status"), "users": (status or {}).get("users"),
             "label": showroom_text(run.get("label"), 120) or None, "activity": run.get("activity"),
             "media_mode": run.get("media_mode"), "requests": dem.get("requests"), "window_seconds": dem.get("window_seconds"),
+            "monitoring": application_monitoring.presentation(run, dem, time.time()),
             "applications": [{"name": showroom_app_label(name), "class": item.get("class") or DEFAULT_APP_CLASSES.get(name),
                               "share_pct": round(item["requests"] * 100.0 / total, 1),
                               "success_pct": item.get("availability_pct")}
