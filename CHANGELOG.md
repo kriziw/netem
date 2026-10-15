@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.3](https://github.com/kriziw/netem/compare/v1.3.2...v1.3.3) (2026-10-15)
+
+
+### Bug Fixes
+
+* keep baseline screen dismissed after a test goes live ([#135](https://github.com/kriziw/netem/issues/135)) ([035fcbf](https://github.com/kriziw/netem/commit/035fcbfa3954673711499acd313db618b4278e21))
+
 ## [1.3.2](https://github.com/kriziw/netem/compare/v1.3.1...v1.3.2) (2026-10-15)
 
 
