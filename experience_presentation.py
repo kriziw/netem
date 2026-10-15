@@ -23,7 +23,11 @@ def target_details(item, violations):
             target, unit = targets.get("success_min_pct"), "% success"
         elif key == "deadline":
             if targets.get("hard_deadline"):
-                details.append(f"{quality.get('deadline_misses', 'Observed')} late transactions (hard deadline {targets.get('deadline_ms', 0):g} ms)")
+                count = quality.get('deadline_misses')
+                deadline = targets.get('deadline_ms')
+                kind = 'packets' if 'packet' in quality.get('deadline_basis', '') else 'transactions'
+                details.append((f"{count:g} late {kind} (target 0" if count is not None else "Hard deadline not met (late count unavailable")
+                               + (f"; deadline {deadline:g} ms)" if deadline is not None else "; deadline unavailable)"))
                 continue
             actual = quality.get("packet_rtt_p95_upper_ms", item.get("p95_ms"))
             target, unit = targets.get("deadline_ms"), " ms P95"
@@ -38,10 +42,14 @@ def target_details(item, violations):
             actual = quality.get(f"sustained_{direction}_mbps" if sustained else f"transfer_{direction}_p05_mbps")
             target = targets.get(f"min_sustained_{direction}_mbps" if sustained else f"min_{direction}_mbps")
             unit = f" Mbit/s {'download' if direction == 'down' else 'upload'}"
-        label = key.replace("_", " ")
-        details.append(f"{actual:g}{unit} (target {'≥' if key == 'success' or key.startswith(('throughput_', 'sustained_')) else '≤'} {target:g})"
-                       if actual is not None and target is not None else f"{label} target missed")
-    return "; ".join(details) or "configured critical target missed"
+        label = {"success": "Request success", "deadline": "Response time", "loss": "Packet loss",
+                 "jitter": "Timing variation"}.get(key, key.replace("_", " "))
+        sign = '≥' if key == 'success' or key.startswith(('throughput_', 'sustained_')) else '≤'
+        target_unit = '%' if unit.startswith('%') else ' ms' if unit.startswith(' ms') else ' Mbit/s' if unit.startswith(' Mbit/s') else ''
+        measured = f"{actual:g}{unit}" if actual is not None else f"{label}: measurement unavailable"
+        requirement = f"target {sign} {target:g}{target_unit}" if target is not None else "target unavailable"
+        details.append(f"{measured} ({requirement})")
+    return "; ".join(details) or "Performance target not met; measurement details unavailable"
 
 
 def display_score(dem, average, minimum=75, label_for=str, site_misses=()):
