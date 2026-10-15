@@ -438,6 +438,69 @@ test('baseline screen stays dismissed after live display and resets for the next
   dom.window.close();
 });
 
+test('phase transitions retain labelled neutral outcomes until new measurements arrive without leaking across tests', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  let nextPoll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) nextPoll = fn; return 1; };
+  win.clearTimeout = () => {}; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true, started_at: 100, phase_index: 0, phase: 'Baseline'},
+    session: {active: true}, links: [], traffic: {requests: 30, window_seconds: 15},
+    experience: {available: true, experience_score: 90, success_pct: 100, interactive_p95_ms: 45,
+      targets: {experience_min: 80}, verdicts: {experience: 'pass', success: 'pass', interactive: 'pass'},
+      groups: [{key: 'interactive', label: 'Business apps', requests: 30, score: 85, tone: 'good', text: 'Performing well.'}]}};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  const doc = win.document;
+  const value = key => doc.querySelector(`#result-${key} [data-value]`).textContent;
+  assert.equal(value('experience'), '90 / 100');
+  data.scenario.phase_index = 1; data.scenario.phase = 'Brownout';
+  data.experience = {available: false, collecting_evidence: true, verdicts: {experience: 'unknown'}};
+  data.traffic.requests = 0;
+  for (let poll = 0; poll < 2; poll++) {
+    await nextPoll();
+    assert.equal(value('experience'), '90 / 100');
+    assert.equal(value('success'), '100.00%');
+    assert.equal(value('interactive'), '45 ms');
+    assert.equal(doc.getElementById('result-experience').className, 'result unknown');
+    assert.match(doc.getElementById('outcome-transition').textContent, /from Baseline while Brownout starts/);
+    assert.match(doc.querySelector('.subscore').textContent, /85 \/ 100 · previous phase/);
+    assert.equal(doc.querySelector('.subscore').className, 'subscore unknown');
+    assert.equal(data.experience.available, false); // Presentation does not rewrite evidence.
+  }
+  data.experience = {available: true, experience_score: 70, success_pct: 99, interactive_p95_ms: null,
+    targets: {experience_min: 80}, verdicts: {experience: 'unknown'}, groups: []};
+  await nextPoll();
+  assert.equal(value('experience'), '70 / 100');
+  assert.doesNotMatch(doc.querySelector('#result-experience [data-target]').textContent, /Previous phase/);
+  assert.equal(value('interactive'), '45 ms');
+  assert.match(doc.querySelector('#result-interactive [data-target]').textContent, /Previous phase · Baseline/);
+  assert.match(doc.querySelector('.subscore').textContent, /previous phase/);
+  data.experience = {available: true, experience_score: 0, success_pct: 0, interactive_p95_ms: null,
+    business_acceptance: 'fail', verdicts: {experience: 'fail', success: 'fail'}, groups: []};
+  await nextPoll();
+  assert.equal(value('experience'), '0 / 100');
+  assert.equal(value('success'), '0.00%');
+  assert.equal(value('interactive'), '—');
+  assert.equal(doc.getElementById('outcome-transition').hidden, true);
+  assert.equal(doc.getElementById('result-experience').className, 'result fail');
+  data.scenario.phase_index = 2; data.scenario.phase = 'Recovery';
+  data.experience = {available: false, verdicts: {experience: 'fail'}};
+  await nextPoll();
+  assert.equal(value('experience'), '—'); // A confirmed current failure is never covered by old measurements.
+  assert.equal(doc.getElementById('outcome-transition').hidden, true);
+  data.experience.verdicts.experience = 'unknown';
+  await nextPoll();
+  assert.equal(value('experience'), '0 / 100');
+  assert.match(doc.getElementById('outcome-window').textContent, /Previous phase · Brownout/);
+  data.scenario.started_at = 200; data.scenario.phase_index = 0;
+  await nextPoll();
+  assert.equal(value('experience'), '—');
+  assert.equal(doc.getElementById('outcome-transition').hidden, true);
+  dom.window.close();
+});
+
 test('customer display separates monitoring, keeps confidence in details and shows only attributed routes', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
