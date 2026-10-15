@@ -150,3 +150,23 @@ body.disconnected .traffic strong,body.disconnected .result strong{color:var(--s
 .subscore.warn{border-top-color:var(--showroom-b0753e)}.subscore.warn strong{color:var(--showroom-ffd28f)}
 .subscore.bad{border-top-color:var(--showroom-ff9dac)}.subscore.bad strong{color:var(--showroom-ff9dac)}
 @media(max-width:850px){.subscores{grid-template-columns:1fr}}
+
+/* Stable slots prevent waiting/observed/previous-phase text from shifting the
+   outcome cards. Longer text can still grow; measurements are never clipped. */
+.result{min-width:0;display:grid;grid-template-rows:minmax(1.9rem,auto) minmax(2.8rem,auto) minmax(2.9rem,auto);align-content:start}
+.result span,.result small{line-height:1.3;overflow-wrap:anywhere}
+.result strong{line-height:1.15}
+.subscore{min-width:0;display:grid;grid-template-rows:minmax(2rem,auto) minmax(2rem,auto) minmax(3.15rem,auto) auto;align-content:start}
+.subscore strong{line-height:1.2}
+.group-status{overflow-wrap:anywhere}
+.result,.subscore{transition:border-color .4s ease,background-color .4s ease}
+.result strong,.subscore strong{transition:color .4s ease}
+#outcome-window{min-height:2.6em;line-height:1.3;max-width:60%;text-align:right}
+#outcome-transition{min-height:2.6em;line-height:1.3}
+#outcome-transition[hidden],#network-timing[hidden],#measurement-note[hidden],#score-details[hidden]{display:block;visibility:hidden}
+#network-timing,#measurement-note{min-height:1.3em;line-height:1.3}
+.story-status{min-height:2.7em}
+.user-impact{min-height:4.2em;font-size:1rem;line-height:1.4;color:var(--showroom-b0c5db)}
+@media(prefers-reduced-motion:reduce){.result,.subscore,.result strong,.subscore strong{transition:none}}
+
+.field-help,#score-details{font-size:.75rem;line-height:1.3}

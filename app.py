@@ -5823,6 +5823,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             "experience_score": experience, "success_pct": success,
             "average_experience_score": grade["average_score"], "score_adjusted": grade["score_adjusted"],
             "target_failures": grade["target_failures"],
+            "user_impact": showcase_summary.application_impact(window or {}),
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
             "critical_alerts": (window or {}).get("critical_alerts", []),
             **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "evidence_coverage_pct", "sample_confidence", "timing", "score_range", "score_status")},
@@ -5911,7 +5912,8 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
         "site": site_label, "result": result, "execution_result": result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
         "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
-        "phases": phases, "remediation": remediation, "steering_target_s": steering_target,
+        "phases": phases, "user_impact": showcase_summary.observed_impact({"phases": phases}),
+        "remediation": remediation, "steering_target_s": steering_target,
         "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
                        "items": [{key: item.get(key) for key in ("label", "passed", "observed", "phase")} for item in assertions]},
         "conclusion": conclusion, "narrative": narrative,
@@ -8116,6 +8118,7 @@ def plan_test_row(test, summary):
         "id": test.get("id"), "name": test.get("name"), "role": test.get("role"), "result": test.get("status"),
         "link": summary.get("link"), "duration_s": summary.get("duration_s"), "measured": bool(phases),
         "checks": {"passed": checks.get("passed", 0), "total": checks.get("total", 0)},
+        "user_impact": showcase_summary.observed_impact(summary),
         "missed": [item.get("label") for item in checks.get("items") or [] if not item.get("passed")],
         "experience": base["experience_score"] if base else None,
         "success": base.get("success_pct") if base else None,
@@ -9712,7 +9715,7 @@ def showroom_plan_summary(summary, now, session):
         "title": showroom_text(summary.get("title")), "ended_at": ended, "duration_s": summary.get("duration_s"),
         "checks": summary.get("checks"), "targets": summary.get("targets"),
         "tests": [{key: row.get(key) for key in ("name", "role", "result", "link", "measured", "checks", "experience",
-                                                  "experience_low", "low_phase", "success_low", "p95_max")}
+                                                  "experience_low", "low_phase", "success_low", "p95_max", "user_impact")}
                   | {"moved": [{key: item.get(key) for key in ("traffic_class", "wan", "seconds", "within_target")}
                                for item in row.get("moved") or []]}
                   for row in summary.get("tests") or []],
@@ -9727,6 +9730,7 @@ def showroom_summary(summary):
     return {
         "name": summary.get("name"), "link": summary.get("link"), "site": summary.get("site"),
         "result": summary.get("result"), "ended_at": summary.get("ended_at"), "duration_s": summary.get("duration_s"),
+        "user_impact": showroom_text(summary.get("user_impact")),
         "conclusion": [showroom_text(line) for line in summary.get("narrative") or summary.get("conclusion") or []],
         "phases": [{key: phase.get(key) for key in ("name", "reached", "duration_s", "experience_score",
                                                     "average_experience_score", "score_adjusted", "success_pct",
@@ -9857,6 +9861,7 @@ def showroom_outcome(diagnosis, site_plan):
             "business_acceptance": verdicts["experience"],
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
+            "user_impact": " ".join(showcase_summary.application_impact(dem)),
         },
         "findings": [{
             "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),

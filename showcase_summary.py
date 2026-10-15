@@ -6,6 +6,44 @@ def number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
 
 
+def application_impact(dem):
+    """Explain measured target misses without inventing human symptoms or causes."""
+    from experience_presentation import INVALID_EVIDENCE
+    if dem.get('truncated') or INVALID_EVIDENCE.intersection(dem.get('evidence_issues') or []):
+        return []
+    effects = {}
+    for app in (dem.get('applications') or {}).values():
+        if not app.get('requests') or app.get('scoring_complete') is not True or app.get('evidence_issues'):
+            continue
+        misses = set(app.get('target_violations') or [])
+        kind = app.get('class') or 'interactive'
+        message = None
+        if kind == 'realtime':
+            if misses.intersection(('loss', 'jitter', 'deadline')):
+                message = 'Voice or video checks lost packets or missed timing targets; calls may break up.'
+            elif 'success' in misses:
+                message = 'Some voice or video checks failed; users may lose a call or meeting.'
+        elif kind == 'bulk':
+            if 'success' in misses:
+                message = 'Some file transfers failed; users may need to restart a transfer.'
+            elif 'deadline' in misses or any(key.startswith(('throughput_', 'sustained_')) for key in misses):
+                message = 'File transfers were slower than required; uploads and downloads may take longer.'
+        elif 'success' in misses:
+            message = 'Some business requests failed; users may need to retry a task.'
+        elif 'deadline' in misses:
+            message = 'Business applications responded slowly; users may wait longer for a task to finish.'
+        priority = 2 if 'success' in misses else 1
+        if message and (kind not in effects or priority > effects[kind][0]):
+            effects[kind] = (priority, message)
+    return [effects[kind][1] for kind in ('realtime', 'interactive', 'bulk') if kind in effects]
+
+
+def observed_impact(summary):
+    messages = list(dict.fromkeys(line for phase in summary.get('phases') or []
+                                 if phase.get('reached') is not False for line in phase.get('user_impact') or []))
+    return ' '.join(messages[:3])
+
+
 def session_facts(summaries, clean):
     summaries = sorted(summaries, key=lambda item: item.get('ended_at') or 0)
     outcomes = {'pass': 0, 'fail': 0, 'unknown': 0}
@@ -31,7 +69,7 @@ def session_facts(summaries, clean):
                      if item.get('passed') is False)
         results.append({'name': clean(summary.get('name')), 'execution': result,
                         'requirements': outcome if outcome in outcomes else 'unknown', 'recovery': recovery_result,
-                        'unmet_requirements': unmet,
+                        'unmet_requirements': unmet, 'user_impact': clean(observed_impact(summary)),
                         'conclusion': [clean(line) for line in summary.get('narrative') or summary.get('conclusion') or []]})
         for phase in summary.get('phases') or []:
             if phase.get('reached') is False:
@@ -49,6 +87,7 @@ def session_facts(summaries, clean):
             'slowest_phase_completion_p95_ms': max(times) if times else None,
             'latest': {'name': clean(latest.get('name')), 'ended_at': latest.get('ended_at'),
                        'execution': results[-1]['execution'], 'recovery': results[-1]['recovery'],
+                       'user_impact': results[-1]['user_impact'],
                        'outcome': latest.get('experience_result') if latest.get('experience_result') in outcomes else 'unknown',
                        'conclusion': [clean(line) for line in (latest.get('narrative') or latest.get('conclusion') or [])[:2]]}
                       if latest else None}
