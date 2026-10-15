@@ -96,11 +96,11 @@
     }));
   }
 
-  const RESULTS = {passed: ['Passed', 'pass'], failed: ['Failed', 'fail'], stopped: ['Stopped', 'warn']};
+  const RESULTS = {interrupted: ['Demonstration interrupted', 'warn'], passed: ['Passed', 'pass'], failed: ['Failed', 'fail'], stopped: ['Stopped', 'warn']};
 
   function reportView(summary) {
     const checks = summary.assertions || {};
-    const [result, tone] = RESULTS[summary.result] || [words(summary.result) || 'Finished', 'unknown'];
+    const [result, tone] = RESULTS[summary.execution_result || summary.result] || [words(summary.result) || 'Finished', 'unknown'];
     const target = summary.steering_target_s;
     return {
       name: summary.name || 'Test', result, tone,
@@ -326,7 +326,7 @@
     const response = outcomes.fail ? `Impact observed in ${outcomes.fail} test${outcomes.fail === 1 ? '' : 's'}`
       : outcomes.pass ? 'Targets maintained' : 'Measurements collected';
     const executionText = value => value === 'passed' ? 'Demonstration completed'
-      : value === 'failed' ? 'Execution needs attention' : value === 'stopped' ? 'Demonstration stopped' : 'Demonstration recorded';
+      : value === 'interrupted' ? 'Demonstration interrupted' : value === 'failed' ? 'Execution needs attention' : value === 'stopped' ? 'Demonstration stopped' : 'Demonstration recorded';
     const requirementText = value => value === 'pass' ? 'Requirements met' : value === 'fail' ? 'Requirements not met' : 'Requirements not yet confirmed';
     const responseText = latest && latest.outcome === 'fail' ? 'Application impact was observed during this demonstration.'
       : latest && latest.outcome === 'pass' ? 'Applications met the configured resilience requirements.'
@@ -345,6 +345,7 @@
       observation: latest && latest.user_impact || '',
       latest: latest ? `${latest.name} · ${executionText(latest.execution)}` : 'Ready for the first demonstration',
       conclusion: !latest ? 'Your session is ready. The next test will be introduced before it starts.'
+        : latest.execution === 'interrupted' ? ['Execution ended before completion. Recorded application impact is retained; incomplete recovery is not assessed.', responseText].join(' ')
         : latest.execution === 'failed' ? 'Review the execution details before drawing a resilience conclusion.'
           : latest.execution === 'stopped' ? 'This demonstration stopped before completion. Measurements collected so far are in the details.'
             : [responseText, recoveryText].filter(Boolean).join(' '),

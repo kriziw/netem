@@ -55,9 +55,9 @@ def session_facts(summaries, clean):
         outcome = summary.get('experience_result')
         outcomes[outcome if outcome in outcomes else 'unknown'] += 1
         result = summary.get('execution_result') or summary.get('result')
-        result = result if result in ('passed', 'failed', 'stopped') else 'unknown'
-        if result in ('passed', 'failed', 'stopped'):
-            execution[{'passed': 'completed', 'failed': 'attention', 'stopped': 'stopped'}[result]] += 1
+        result = result if result in ('passed', 'failed', 'stopped', 'interrupted') else 'unknown'
+        if result in ('passed', 'failed', 'stopped', 'interrupted'):
+            execution[{'passed': 'completed', 'failed': 'attention', 'interrupted': 'attention', 'stopped': 'stopped'}[result]] += 1
         recovery_phases = [phase for phase in summary.get('phases') or [] if phase.get('name') == 'Recovery']
         reached_recovery = [phase for phase in recovery_phases if phase.get('reached') is not False]
         recovery_result = reached_recovery[-1].get('experience_verdict', 'unknown') if reached_recovery else 'unknown' if recovery_phases else 'not_assessed'
