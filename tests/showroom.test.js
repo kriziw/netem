@@ -378,12 +378,49 @@ test('the showcase video loops whether it is an embed or an uploaded file', () =
   assert.equal(ui.waitingMedia(null), null);
 });
 
-test('provisional experience keeps its numeric utility and identifies incomplete coverage', () => {
+test('observed experience keeps numeric utility without declaring a pass', () => {
   const view = ui.resultView({available: true, experience_score: 96, scoring_complete: false, coverage_pct: 72,
     targets: {experience_min: 80}, verdicts: {experience: 'unknown'}});
   assert.equal(view.experience.value, '96 / 100');
   assert.equal(view.experience.verdict, 'unknown');
-  assert.match(view.experience.target, /provisional, 72% measured coverage/);
+  assert.match(view.experience.target, /observed/);
+});
+
+test('baseline preparation yields immediately to failures and ends when evidence is ready', () => {
+  const data = {scenario: {active: true}, traffic: {monitoring: {preparing: true}}, experience: {verdicts: {experience: 'unknown'}}};
+  assert.equal(ui.stageMode(data), 'preparing');
+  data.experience.verdicts.experience = 'fail';
+  assert.equal(ui.stageMode(data), 'live');
+  data.experience.verdicts.experience = 'pass';
+  data.traffic.monitoring.preparing = false;
+  assert.equal(ui.stageMode(data), 'live');
+  data.scenario.intro = true;
+  assert.equal(ui.stageMode(data), 'intro');
+});
+
+test('customer display separates monitoring, keeps confidence in details and shows only attributed routes', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  win.setTimeout = () => 1; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true}, session: {active: true}, links: [],
+    traffic: {users: 2, requests: 25, window_seconds: 15,
+      monitoring: {enabled: true, checks: 20, measured_apps: 4, expected_apps: 4}},
+    experience: {available: true, experience_score: 96, scoring_complete: false, verdicts: {experience: 'unknown'},
+      groups: [{key: 'interactive', label: 'Business apps', requests: 25, score: 96, tone: 'unknown', scoring_complete: false,
+        text: 'Limited sample, acceptance not yet confirmed.', applications: [{label: 'ERP', requests: 5, score: 96, scoring_complete: false}]}]},
+    story: {routes: [{label: 'Business apps', wan: null, state: 'unknown'}]}};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(resolve => setImmediate(resolve));
+  const doc = win.document;
+  assert.match(doc.getElementById('measurement-note').textContent, /2 simulated users \+ continuous application monitoring/);
+  assert.match(doc.getElementById('outcome-window').textContent, /includes 20 application checks/);
+  assert.match(doc.querySelector('.subscore > p').textContent, /Latest measured application performance/);
+  assert.match(doc.querySelector('.subscore details').textContent, /Limited sample/);
+  assert.equal(doc.getElementById('routes').parentElement.hidden, true);
+  assert.equal(doc.getElementById('network-timing').hidden, true);
+  assert.equal(doc.getElementById('result-experience').className, 'result unknown');
+  dom.window.close();
 });
 
 test('queue pressure and unconfirmed recovery are displayed without implying saturation or recovery', async () => {

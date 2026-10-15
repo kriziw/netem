@@ -79,6 +79,7 @@ header{gap:1.5rem}.partner{display:flex;flex-direction:column;align-items:flex-s
 body[data-mode="waiting"] .site,body[data-mode="waiting"] .columns,body[data-mode="intro"] .site,body[data-mode="intro"] .columns,
 body[data-mode="summary"] .site,body[data-mode="summary"] .columns{display:none}
 body[data-mode="session"] .site,body[data-mode="session"] .columns{display:none}
+body[data-mode="preparing"] .site,body[data-mode="preparing"] .columns{display:none}
 #session-progress[hidden]{display:none}
 #session-progress{width:100%;display:grid;gap:1rem}
 .session-points{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;text-align:left}

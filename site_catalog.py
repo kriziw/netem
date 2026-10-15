@@ -412,7 +412,8 @@ def fit_to_simulator(load, catalog_payload):
     # Run labels shipped with the industry catalog; older start APIs reject them.
     if catalog_payload is not None and "ot_telemetry" not in apps_known:
         payload.pop("label", None)
-    return payload, warnings
+    from application_monitoring import start_payload
+    return start_payload(payload, catalog_payload), warnings
 
 
 def _dem_assert(label, field, op, value, after=0, window=60, timeout=30):
