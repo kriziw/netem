@@ -49,26 +49,29 @@ bridge link</pre>
 ip link set enp6s21 master br-wan2</pre>
 
 <h2 id="service">Service will not start</h2>
-<pre>systemctl status techkarma-netem --no-pager
-journalctl -u techkarma-netem -n 100 --no-pager</pre>
+<p>Examples use the <code>netem</code> service and <code>/opt/netem</code> installation described in the README. On an existing appliance, substitute its configured service name and directory.</p>
+<pre>systemctl status netem --no-pager
+journalctl -u netem -n 100 --no-pager</pre>
 <p>Also validate Python imports from the repository:</p>
-<pre>cd /opt/techkarma-netem
+<pre>cd /opt/netem
 ./.venv/bin/python -m py_compile app.py netem_core.py
 ./.venv/bin/python -c 'from app import app; print(app.url_map)'</pre>
 
 <h2 id="git-permission">Update fails with “insufficient permission for adding an object”</h2>
 <p>This normally means Git objects were created by a different user, commonly root. Normalize ownership and test Git as the service user:</p>
-<pre>systemctl stop techkarma-netem
-chown -R techkarma:techkarma /opt/techkarma-netem
-runuser -u techkarma -- git -C /opt/techkarma-netem status
-runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin
-systemctl start techkarma-netem</pre>
+<pre>NETEM_USER=$(systemctl show netem -p User --value)
+NETEM_USER=${NETEM_USER:-root}
+systemctl stop netem
+chown -R "$NETEM_USER" /opt/netem
+runuser -u "$NETEM_USER" -- git -C /opt/netem status
+runuser -u "$NETEM_USER" -- git -C /opt/netem fetch --prune origin
+systemctl start netem</pre>
 <p>Avoid plain root-owned Git operations in this checkout afterward.</p>
 
 <h2 id="capture">Packet capture does not start</h2>
 <p>Check both the executable and service capabilities:</p>
 <pre>command -v tcpdump
-systemctl show techkarma-netem -p User -p AmbientCapabilities -p CapabilityBoundingSet</pre>
+systemctl show netem -p User -p AmbientCapabilities -p CapabilityBoundingSet</pre>
 <p><code>tcpdump</code> should be present and the service should have <code>CAP_NET_RAW</code>. Shaping itself normally needs <code>CAP_NET_ADMIN</code>.</p>
 
 <h2 id="scenario-stuck">Scenario appears stuck</h2>
@@ -93,8 +96,8 @@ systemctl show techkarma-netem -p User -p AmbientCapabilities -p CapabilityBound
 <div class="docs-table"><table>
 <thead><tr><th>Path</th><th>Purpose</th></tr></thead>
 <tbody>
-<tr><td><code>/opt/techkarma-netem/config.json</code></td><td>Persisted topology, profiles, scenarios and SLA settings</td></tr>
-<tr><td><code>/opt/techkarma-netem/runtime/events.jsonl</code></td><td>Persistent runtime event history</td></tr>
-<tr><td><code>/opt/techkarma-netem/runtime/captures/</code></td><td>Bounded PCAP files</td></tr>
-<tr><td><code>/opt/techkarma-netem/version.txt</code></td><td>Installed application version</td></tr>
+<tr><td><code>/opt/netem/config.json</code></td><td>Persisted topology, profiles, scenarios and SLA settings</td></tr>
+<tr><td><code>/opt/netem/runtime/events.jsonl</code></td><td>Persistent runtime event history</td></tr>
+<tr><td><code>/opt/netem/runtime/captures/</code></td><td>Bounded PCAP files</td></tr>
+<tr><td><code>/opt/netem/version.txt</code></td><td>Installed application version</td></tr>
 </tbody></table></div>

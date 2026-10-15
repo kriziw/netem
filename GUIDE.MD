@@ -1,90 +1,48 @@
-# Techkarma NetEm -- Quickstart Guide
+# NetEm WAN Lab — Quickstart Guide
 
-Techkarma NetEm is a lightweight WAN emulator appliance for security,
-SD-WAN and network lab environments.\
-It sits transparently in-line between devices and shapes latency,
-jitter, loss and bandwidth using Linux **tc/netem** and **tbf**, wrapped
-in a clean web interface.
+NetEm WAN Lab is a network resilience platform for firewall, routing and SD-WAN
+labs. It sits transparently between the appliance under test and its WAN networks,
+applies controlled impairments, and measures application outcomes with the companion
+Traffic Simulator.
 
-This guide explains how to deploy the appliance, connect it to your lab,
-and start shaping traffic.
+## Install
 
-## 1. Deployment Options
+Use the [installation instructions in README.md](README.md#installation) for
+dependencies, the Python environment and service setup. The maintained repository is:
 
-### Option A --- OVA Appliance (recommended)
-
--   Prebuilt Debian VM with NetEm preinstalled\
--   Import into ESXi, Proxmox, VirtualBox, VMware Workstation, etc\
--   Web UI available immediately\
--   NICs can be added at any time
-
-Download available through BuyMeACoffee Extras.
-
-### Option B --- Manual Installation (open source)
-
-``` bash
-git clone https://github.com/techkarma-no/techkarma-netem
-cd techkarma-netem
-sudo ./install.sh
+```bash
+git clone https://github.com/kriziw/netem.git
+cd netem
 ```
 
-## 2. Network Architecture
+## Open the interfaces
 
-Each WAN link uses two NICs:
+- Operator interface: `http://<netem-host>:8081/`
+- Read-only customer showroom: `http://<netem-host>:8082/`
 
-    WAN1-out <--> [br-wan1] <--> WAN1-in
-    WAN2-out <--> [br-wan2] <--> WAN2-in
+Keep the operator interface on the lab management network. See the README for
+showroom configuration and deployment details.
 
-Shaping is always applied on the **inner** NICs.
+## Configure the lab
 
-## 3. First Boot & Web UI
+1. Open **Settings → Setup** and map each WAN's inner and outer interfaces.
+2. Connect the Traffic Simulator and controlled target under **Settings**.
+3. Verify the selected traffic path through the appliance.
+4. Start a session, choose a site profile and run a test from **Tests**.
+5. Open the showroom on the customer display to follow application outcomes.
 
-Access UI:
+Each transparent WAN uses two interfaces connected by a bridge. Download and upload
+shaping follow their respective egress directions; see the in-app architecture guide.
 
-    http://<ip>:8081
+## Existing appliances
 
-Default login: - Username: techkarma\
-- Password: set at first boot (OVA) or during installation
+Older installations may retain the `techkarma-netem` service name, `/opt/techkarma-netem`
+directory or `techkarma` service account. Use the names configured on that appliance.
+A product wording update does not rename services, move installations or change accounts.
 
-## 4. Adding and Mapping NICs
+## Documentation and support
 
-1.  Add NICs in hypervisor\
-2.  Reboot/hot-attach\
-3.  Open *Settings → Interfaces*\
-4.  Map NICs to WAN1/WAN2
-
-## 5. Shaping Traffic
-
--   **Delay**
--   **Jitter**
--   **Packet Loss**
--   **Rate (bandwidth)**
-
-Uses `tc netem` and `tbf`.
-
-## 6. Typical Use Cases
-
--   SD-WAN failover\
--   Starlink/4G/5G modelling\
--   Firewall/IPS testing
-
-## 7. Troubleshooting
-
-### UI not loading
-
-    systemctl status techkarma-netem
-
-### Traffic not passing
-
-Check NIC mapping or bridges:
-
-    brctl show
-
-### Shaping ineffective
-
-    tc qdisc show dev <nic>
-
-## Support
-
-Donations: https://buymeacoffee.com/techkarma\
-Contact: admin@techkarma.no
+Use the in-app **Help & documentation**, [README.md](README.md), and the
+[project issue tracker](https://github.com/kriziw/netem/issues).
+Original code credits and licence notices are in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
+and [LICENSE](LICENSE).

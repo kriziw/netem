@@ -2,9 +2,9 @@
 
 A browser-based WAN impairment emulator for firewall, routing, SD-WAN and failover labs.
 
-> **Lab use only.** This fork is maintained and extended by **Kristofer Wohlgang** for network architecture and SD-WAN lab use.
+> **Lab use only.** Maintained by **Kristofer Wohlgang** for network architecture and SD-WAN lab use.
 
-This repository is a fork of **Techkarma NetEm** by [techkarma-no](https://github.com/techkarma-no/techkarma-netem). The original project provides the core Flask UI, transparent Linux bridge design and `tc/netem`-based shaping model. This fork keeps that foundation and extends it for persistent, repeatable virtual lab use.
+NetEm WAN Lab is an independently maintained network resilience platform for repeatable SD-WAN testing, application experience measurement and customer demonstrations. It combines controlled Linux `tc/netem` impairments, site workloads, test orchestration and measured outcomes in a single lab workflow.
 
 ## Resilience platform: top 10
 
@@ -96,7 +96,7 @@ Active probes are honest about topology scope: automatic-source probes follow th
 
 ---
 
-## What this fork adds
+## Platform capabilities
 
 - **Persistent WAN topology**
   - Optional automatic recreation of configured Linux bridges when the application starts.
@@ -211,7 +211,7 @@ sudo apt install -y python3 python3-venv python3-pip iproute2 bridge-utils git i
 sudo apt install -y tcpdump
 ```
 
-### 2. Clone this fork
+### 2. Clone the repository
 
 ```bash
 cd /opt
@@ -506,19 +506,9 @@ Recommended practices:
 
 ---
 
-## Upstream project and attribution
+## Project history
 
-This project is derived from:
-
-**Techkarma NetEm**  
-Original repository: https://github.com/techkarma-no/techkarma-netem  
-Original author/project: Techkarma / techkarma-no
-
-The original project established the WAN emulator concept, Flask interface, bridge handling and Linux `tc/netem` implementation on which this fork is based.
-
-This fork currently focuses on improvements useful for persistent SD-WAN and network architecture labs, including startup recovery, persisted WAN identities, editable access-technology presets, staged access-specific quality models, manual impairment sliders, asymmetric bandwidth shaping, and in-app updates.
-
-If you are looking for the original project or its appliance offering, please refer to the upstream repository and Techkarma documentation.
+NetEm WAN Lab is developed and maintained in [kriziw/netem](https://github.com/kriziw/netem). Its history includes code from Techkarma NetEm. Original credits are recorded in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ---
 
@@ -526,7 +516,7 @@ If you are looking for the original project or its appliance offering, please re
 
 The project remains licensed under the **MIT License**. See [LICENSE](LICENSE).
 
-The upstream attribution above is retained to make the origin of the fork and subsequent changes clear. The application UI identifies this as a lab-use fork maintained and extended by Kristofer Wohlgang, while crediting Techkarma NetEm as the project foundation.
+Copyright and permission notices for the original code are preserved in [LICENSE](LICENSE).
 
 ### Traffic Simulator integration validation
 
