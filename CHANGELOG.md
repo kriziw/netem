@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.1](https://github.com/kriziw/netem/compare/v1.3.0...v1.3.1) (2026-10-15)
+
+
+### Bug Fixes
+
+* present NetEm WAN Lab as independently maintained ([#128](https://github.com/kriziw/netem/issues/128)) ([fda928a](https://github.com/kriziw/netem/commit/fda928a359b08c1d8d634b704b825c004b4bfd66))
+* unify update checks and refresh all component cards ([#130](https://github.com/kriziw/netem/issues/130)) ([5f670f4](https://github.com/kriziw/netem/commit/5f670f49e761ea49763f57711b96976700ba7d95))
+
 ## [1.3.0](https://github.com/kriziw/netem/compare/v1.2.0...v1.3.0) (2026-10-15)
 
 
