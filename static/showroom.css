@@ -82,6 +82,9 @@ body[data-mode="session"] .site,body[data-mode="session"] .columns{display:none}
 body[data-mode="preparing"] .site,body[data-mode="preparing"] .columns{display:none}
 #session-progress[hidden]{display:none}
 #session-progress{width:100%;display:grid;gap:1rem}
+#session-progress-details{text-align:left;overflow-wrap:anywhere}
+#session-progress-details summary{cursor:pointer}
+#session-test-details article{margin-top:1rem}
 .session-points{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:.8rem;text-align:left}
 .session-point{padding:1rem 1.2rem;background:var(--showroom-101e30);border:1px solid var(--showroom-263c54);border-radius:.7rem;display:grid;gap:.45rem}
 .session-point strong{font-size:1.9rem}.session-point small{color:var(--showroom-a5b9cf)}

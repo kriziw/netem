@@ -276,8 +276,12 @@ test('session pause screen shows retained facts, yields to the briefing and retu
   await new Promise(resolve => setImmediate(resolve));
   assert.equal(win.document.body.dataset.mode, 'session');
   assert.equal(win.document.getElementById('session-progress').hidden, false);
-  assert.match(win.document.getElementById('session-progress-points').textContent, /72 \/ 100/);
-  assert.match(win.document.getElementById('session-progress-latest').textContent, /not confirmed/);
+  assert.doesNotMatch(win.document.getElementById('session-progress-points').textContent, /72 \/ 100/);
+  assert.match(win.document.getElementById('session-measurement-details').textContent, /72 \/ 100/);
+  assert.match(win.document.getElementById('session-progress-latest').textContent, /Demonstration recorded/);
+  assert.match(win.document.getElementById('session-requirement-counts').textContent, /1 not confirmed/);
+  assert.match(win.document.getElementById('session-test-details').textContent, /Requirements not yet confirmed/);
+  assert.match(win.document.getElementById('session-test-details').textContent, /Limited evidence/);
   assert.equal(win.document.querySelectorAll('#session-progress img').length, 0);
   data.scenario = {active: true, intro: true, starts_in_s: 30, scenario_name: 'Brownout',
     measurements: ['Completion P95'], watch: ['Watch application recovery']};
@@ -291,13 +295,37 @@ test('session pause screen shows retained facts, yields to the briefing and retu
   data.scenario = {active: false};
   await poll();
   assert.equal(win.document.body.dataset.mode, 'session');
-  assert.match(win.document.getElementById('session-progress-points').textContent, /72 \/ 100/);
+  assert.match(win.document.getElementById('session-measurement-details').textContent, /72 \/ 100/);
   data.session.active = false;
   data.session_progress = null;
   await poll();
   assert.equal(win.document.body.dataset.mode, 'waiting');
   assert.equal(win.document.getElementById('session-progress').hidden, true);
   dom.window.close();
+});
+
+test('between-test summary leads with demonstration and recovery while retaining unmet requirements', () => {
+  const view = ui.sessionProgressView({tests_completed: 1, execution: {completed: 1, attention: 0, stopped: 0},
+    outcomes: {pass: 0, fail: 1, unknown: 0}, recovery: {pass: 1}, lowest_experience: 0,
+    lowest_is_provisional: true, slowest_phase_completion_p95_ms: 2090,
+    latest: {name: 'Progressive brownout', execution: 'passed', outcome: 'fail', recovery: 'pass'},
+    demonstration_results: [{name: 'Progressive brownout', execution: 'passed', requirements: 'fail',
+      unmet_requirements: ['Voice: 3% loss; target ≤ 1%'], conclusion: ['Execution completed.']}]});
+  assert.equal(view.latest, 'Progressive brownout · Demonstration completed');
+  assert.match(view.conclusion, /Application impact was observed/);
+  assert.match(view.conclusion, /Recovery met the configured requirements/);
+  assert.equal(view.points[0].label, 'Tests demonstrated');
+  assert.equal(view.points[1].value, 'Impact observed in 1 test');
+  assert.equal(view.points[2].value, 'Confirmed in 1 test');
+  assert.equal(view.points[3].value, '2.09 s P95');
+  assert.doesNotMatch(JSON.stringify(view.points), /0 \/ 100|missed/);
+  assert.match(view.details.measurement, /0 \/ 100 · preliminary measurement/);
+  assert.match(view.details.tests[0].title, /Requirements not met/);
+  assert.match(view.details.tests[0].lines[0], /Unmet requirement: Voice/);
+  const failed = ui.sessionProgressView({execution: {completed: 0, attention: 1},
+    latest: {name: 'Interrupted test', execution: 'failed', outcome: 'unknown'}});
+  assert.match(failed.latest, /Execution needs attention/);
+  assert.match(failed.conclusion, /Review the execution details/);
 });
 
 test('an announced test shows its plan, its checks and a countdown that ticks locally', () => {
