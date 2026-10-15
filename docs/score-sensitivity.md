@@ -1,5 +1,26 @@
 # Score scale and criticality sensitivity
 
+## Customer headline and phase grades
+
+The showroom headline and newly generated phase summaries use a **target-aligned
+experience grade**, while the simulator's measured weighted utility remains
+unchanged and is available in score details. A confirmed critical target miss uses
+the lower of the weighted average, the affected applications' measured scores,
+and the highest integer below both the existing good band (75) and the site's
+experience threshold. Thus a confirmed miss with a 97 average and an 80 site target
+gets a headline grade of 74, not a near-perfect failing headline. This is an
+explicit acceptance grade, not a claim that measured latency or loss worsened.
+Complete, valid site success/completion target misses use the same passing-band
+rule. Lower measured scores remain lower; healthy baseline and recovery retain
+their measured average. Group cards apply the rule to confirmed critical misses
+within that group and name the missed target.
+
+Observation-only alerts, missing/overdue evidence alone, and corrupt or truncated
+windows do not trigger the rule. Reports name the affected application, measurement
+and configured target, and preserve the measured average alongside any adjusted
+grade. Existing saved reports are historical and are not rewritten. The utility
+analysis below describes the unchanged simulator measurements.
+
 Deterministic policy analysis, not live performance measurements. The CSV covers every medium business-critical industry/sub-industry/function combination and each configured critical application. All other applications are assumed healthy and the selected application is completely unavailable, with sufficient evidence. Standard/important/critical factors 1/2/4 remain the approved defaults; alternatives below are comparisons only.
 
 | Site | Failed critical application | Workload share | Equal weights | Approved 1/2/4 | Comparison 1/2/8 | Acceptance |

@@ -84,6 +84,7 @@
       name: phase.name, reached: phase.reached !== false,
       duration: number(phase.duration_s) ? clock(phase.duration_s) : '',
       experience: number(phase.experience_score) ? `${Math.round(phase.experience_score)}` : '—',
+      experienceNote: phase.score_adjusted && number(phase.average_experience_score) ? `Target-aligned · measured average ${Math.round(phase.average_experience_score)}/100` : '',
       success: number(phase.success_pct) ? `${phase.success_pct.toFixed(1)}%` : '—',
       low: number(phase.worst_success_pct) && number(phase.success_pct) && phase.worst_success_pct < phase.success_pct - 0.05
         ? `low ${phase.worst_success_pct.toFixed(1)}%` : '',
@@ -462,6 +463,7 @@
   }
 
   function groupHeadline(group) {
+    if (group.score_adjusted) return group.text;
     if (group.scoring_complete !== false) return group.text;
     if (!number(group.score)) return 'Application checks are running.';
     if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
@@ -478,6 +480,7 @@
       if (group.applications && group.applications.length) {
         const details = element('details');
         details.append(element('summary', '', 'Application measurements'));
+        if (group.score_adjusted) details.append(element('p', '', `Measured group average: ${group.average_score}/100. Confirmed critical target misses keep the headline below the passing band.`));
         if (group.scoring_complete === false) details.append(element('p', '', group.text));
         for (const app of group.applications) {
           const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
@@ -509,6 +512,18 @@
       setText(tile.querySelector('[data-target]'), view[key].target);
     }
     const groupHolder = document.getElementById('experience-groups');
+    const scoreImpact = document.getElementById('score-impact');
+    if (scoreImpact) {
+      scoreImpact.hidden = !live || !(experience.target_failures || []).length;
+      setText(scoreImpact, (experience.target_failures || []).join(' · '));
+    }
+    const scoreDetails = document.getElementById('score-details');
+    if (scoreDetails) {
+      scoreDetails.hidden = !live || !number(experience.average_experience_score);
+      setText(document.getElementById('score-explanation'), `Measured application average: ${format(experience.average_experience_score)} / 100. ` +
+        (experience.score_adjusted ? 'The headline uses the worst confirmed critical impact and stays below the passing band when a critical application or site target is missed.'
+          : 'The headline follows measured application performance. Confirmed critical or site target misses keep it below the passing band.'));
+    }
     const timing = experience.target_rtd || {};
     const timingNode = document.getElementById('network-timing');
     if (timingNode) {
@@ -578,7 +593,9 @@
       traffic.append(...row.traffic.map(wan => element('span', `wan ${wan.health}`, wan.text)));
       const steering = element('td');
       steering.append(...row.steering.map(item => element('span', `pill ${item.tone}`, `${item.label}: ${item.text}`)));
-      tr.append(name, element('td', '', row.experience), success, element('td', '', row.interactive), traffic, steering);
+      const experienceCell = element('td', '', row.experience);
+      if (row.experienceNote) experienceCell.append(element('small', '', row.experienceNote));
+      tr.append(name, experienceCell, success, element('td', '', row.interactive), traffic, steering);
       return tr;
     }));
     const remediation = document.getElementById('report-remediation');

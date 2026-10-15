@@ -31,6 +31,7 @@ from urllib import request as urllib_request
 
 import calibration
 from experience_groups import attach_experience_groups
+from experience_presentation import display_score
 import bottlenecks
 import calibration_log
 import calibration_trace
@@ -5705,10 +5706,21 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             transactions, note = None, "Exact phase evidence unavailable; rolling measurements were not substituted."
         applications = {key: _phase_application(key, item)
                         for key, item in ((window or {}).get("applications") or {}).items()}
+        site_misses = []
+        for value, target, label, higher in (
+            (success, (targets or {}).get("success_min_pct"), "Request success", True),
+            (p95, (targets or {}).get("interactive_p95_max_ms"), "Application completion P95", False),
+        ):
+            if value is not None and target is not None and (value < target if higher else value > target):
+                site_misses.append(f"{label}: {value:g} (target {'≥' if higher else '≤'} {target:g})")
+        grade = display_score(window or {}, experience, (targets or {}).get("experience_min"), showroom_app_label, site_misses)
+        experience = grade["score"]
         phases.append({
             "name": name, "reached": mark is not None, "applications": applications,
             "duration_s": round((following["at"] if following else ended_at) - mark["at"]) if mark else None,
             "experience_score": experience, "success_pct": success,
+            "average_experience_score": grade["average_score"], "score_adjusted": grade["score_adjusted"],
+            "target_failures": grade["target_failures"],
             "interactive_p95_ms": p95, "transactions": transactions, "note": note,
             "critical_alerts": (window or {}).get("critical_alerts", []),
             **{key: (window or {}).get(key) for key in ("business_acceptance", "evidence_issues", "truncated", "coverage_pct", "evidence_coverage_pct", "sample_confidence", "timing", "score_range", "score_status")},
@@ -5763,6 +5775,13 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             conclusion.append(f"Experience stayed at {base['experience_score']:.0f} through the test.")
     else:
         conclusion.append("No simulated user traffic was measured, so user impact and steering were not assessed.")
+    for phase in phases:
+        if phase.get("target_failures"):
+            conclusion.append(f"{phase['name']} missed targets: " + "; ".join(phase["target_failures"]) + ".")
+        if phase.get("score_adjusted"):
+            conclusion.append(f"{phase['name']} uses a target-aligned experience grade of {phase['experience_score']:.0f}/100; "
+                              f"the measured application average was {phase['average_experience_score']:.0f}/100. "
+                              "Confirmed critical or site target misses keep the grade below the passing band.")
     # Remediation lines are kept apart so a report can show them in their own section.
     reacted = []
     for item in remediation:
@@ -9605,7 +9624,8 @@ def showroom_summary(summary):
         "name": summary.get("name"), "link": summary.get("link"), "site": summary.get("site"),
         "result": summary.get("result"), "ended_at": summary.get("ended_at"), "duration_s": summary.get("duration_s"),
         "conclusion": [showroom_text(line) for line in summary.get("narrative") or summary.get("conclusion") or []],
-        "phases": [{key: phase.get(key) for key in ("name", "reached", "duration_s", "experience_score", "success_pct",
+        "phases": [{key: phase.get(key) for key in ("name", "reached", "duration_s", "experience_score",
+                                                    "average_experience_score", "score_adjusted", "success_pct",
                                                     "worst_success_pct", "interactive_p95_ms", "steering")}
                    | {"wans": [{key: wan.get(key) for key in ("label", "down_mbps", "up_mbps", "health")}
                                for wan in phase.get("wans") or []]}
@@ -9695,6 +9715,12 @@ def showroom_outcome(diagnosis, site_plan):
         verdicts["experience"] = "fail"
     elif dem.get("business_acceptance") == "unknown":
         verdicts["experience"] = "unknown"
+    site_misses = []
+    if verdicts["success"] == "fail":
+        site_misses.append(f"Request success: {success:g}% (target ≥ {targets['success_min_pct']:g}%)")
+    if verdicts["interactive"] == "fail":
+        site_misses.append(f"Application completion P95: {interactive:g} ms (target ≤ {targets['interactive_p95_max_ms']:g} ms)")
+    grade = display_score(dem, score, targets.get("experience_min"), showroom_app_label, site_misses)
     # Application compliance cannot override a failed site target or invalid evidence.
     steering = diagnosis.get("steering") or {}
     return {
@@ -9711,7 +9737,9 @@ def showroom_outcome(diagnosis, site_plan):
         },
         "experience": {
             "available": has_data, "targets_source": "site" if site_plan else "lab", "targets": targets,
-            "experience_score": score, "success_pct": success, "interactive_p95_ms": interactive,
+            "experience_score": grade["score"], "average_experience_score": grade["average_score"],
+            "score_adjusted": grade["score_adjusted"], "target_failures": [showroom_text(line) for line in grade["target_failures"]],
+            "success_pct": success, "interactive_p95_ms": interactive,
             "timing": {key: (dem.get('timing') or {}).get(key) for key in
                 ('packet_rtd_p50_upper_ms', 'packet_rtd_p95_upper_ms', 'packet_rtd_samples', 'packet_rtd_operations',
                  'request_to_headers_p95_ms', 'response_body_p95_ms', 'one_way_latency_ms')},

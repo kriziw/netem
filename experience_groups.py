@@ -1,9 +1,11 @@
 """Experience sub-scores for each traffic group, shown under the overall score.
 
-The overall and group scores use configured workload and criticality weights,
-so a poor group shows even when another group sets the overall score. Each group also gets one short sentence: how it is
+Measured averages use configured workload and criticality weights. Confirmed
+critical target misses keep the display grade below the passing band.
+Each group also gets one short sentence: how it is
 performing and, when it is not, what limits it, from the evidence the simulator scored.
 """
+from experience_presentation import display_score
 
 # The traffic groups, in the order the dashboard shows them. The names match the impact wording.
 GROUPS = (("realtime", "Voice and video"), ("interactive", "Web and business apps"), ("bulk", "File transfers"))
@@ -55,7 +57,7 @@ def limit_reason(item):
     return f"its {worst.replace('_', ' ')} score is lowest"
 
 
-def group_summary(key, label, members, label_for):
+def group_summary(key, label, members, label_for, evidence=None):
     requests = sum(int(item.get("requests") or 0) for item in members.values())
     summary = {"key": key, "label": label, "requests": requests}
     if not requests:
@@ -70,6 +72,14 @@ def group_summary(key, label, members, label_for):
     weights = {name: item.get("weight") if item.get("weight") is not None else 1 for name, item in scored.items()}
     total_weight = sum(weights.values())
     score = round(sum(weights[name] * item["experience_score"] for name, item in scored.items()) / total_weight) if total_weight else None
+    alerts = [{"application": name, "severity": "violation", "violations": item["target_violations"]}
+              for name, item in members.items() if item.get("target_violations")
+              and (item.get("critical") or (item.get("experience_targets") or {}).get("critical"))]
+    grade = display_score({**(evidence or {}), "applications": members, "critical_alerts": alerts,
+                           "business_acceptance": None}, score, label_for=label_for)
+    if grade["score_adjusted"]:
+        return {**summary, **grade, "tone": tone_for(grade["score"]), "scoring_complete": not incomplete and not unscored,
+                "text": "Critical targets missed: " + "; ".join(grade["target_failures"]) + "."}
     if incomplete or unscored:
         limited = any(item.get('sample_confidence') == 'limited_sample' for item in scored.values())
         missing = [label_for(name) for name, item in members.items() if not item.get('requests')]
@@ -102,7 +112,7 @@ def experience_groups(dem, label_for=None):
     result = []
     for key, label in GROUPS:
         members = {name: item for name, item in applications.items() if (item.get('class') or 'interactive') == key}
-        group = group_summary(key, label, members, label_for)
+        group = group_summary(key, label, members, label_for, dem)
         group['applications'] = [{'label': label_for(name), 'score': item.get('experience_score'),
             'requests': item.get('requests') or 0, 'sample_confidence': item.get('sample_confidence'),
             'scoring_complete': item.get('scoring_complete'), 'success_pct': item.get('availability_pct'),

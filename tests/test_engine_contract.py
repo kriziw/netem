@@ -20,12 +20,14 @@ class EvidenceTests(unittest.TestCase):
                  patch.object(netem, "traffic_generator_request", return_value=dict(base, **change)):
                 self.assertFalse(netem.evaluate_scenario_condition(condition, "wan1")[0])
 
-    def test_showroom_keeps_nonzero_utility_and_critical_alert(self):
+    def test_showroom_grades_critical_miss_and_keeps_measured_utility_and_alert(self):
         dem = {"requests": 100, "experience_score": 91, "scoring_complete": True, "availability_pct": 100,
                "interactive_p95_ms": 100, "critical_alerts": [{"application": "erp", "violations": ["deadline"]}]}
         diagnosis = {"traffic_generator": {"connected": True, "status": {"dem": dem}}}
         result = netem.showroom_outcome(diagnosis, None)["experience"]
-        self.assertEqual(result["experience_score"], 91)
+        self.assertEqual(result["experience_score"], 74)
+        self.assertEqual(result["average_experience_score"], 91)
+        self.assertEqual(dem["experience_score"], 91)
         self.assertEqual(result["verdicts"]["experience"], "fail")
         self.assertEqual(result["critical_alerts"], dem["critical_alerts"])
         for invalid in ({"truncated": True}, {"evidence_issues": ["dropped_transactions"]}, {"evidence_issues": ["persistence_unhealthy"]}):
