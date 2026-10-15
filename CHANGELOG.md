@@ -1,5 +1,18 @@
 # Changelog
 
+## [1.3.6](https://github.com/kriziw/netem/compare/v1.3.5...v1.3.6) (2026-10-15)
+
+
+### Bug Fixes
+
+* steady showroom outcomes and explain user impact ([#143](https://github.com/kriziw/netem/issues/143)) ([dbf0f7f](https://github.com/kriziw/netem/commit/dbf0f7fa11967d7120be98568f746f13fc755f4e))
+* tolerate transient simulator heartbeat timeouts ([#142](https://github.com/kriziw/netem/issues/142)) ([b3dd434](https://github.com/kriziw/netem/commit/b3dd4340d3c00ab0228fac65cb371efd973e9e54))
+
+
+### Documentation
+
+* separate available capabilities from planned improvements ([#145](https://github.com/kriziw/netem/issues/145)) ([cf2ec9d](https://github.com/kriziw/netem/commit/cf2ec9d2b973c21194d53878642db0010c566c8b))
+
 ## [1.3.5](https://github.com/kriziw/netem/compare/v1.3.4...v1.3.5) (2026-10-15)
 
 
