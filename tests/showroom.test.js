@@ -441,3 +441,27 @@ test('queue pressure and unconfirmed recovery are displayed without implying sat
   assert.doesNotMatch(win.document.querySelector('#impacts span').textContent, /Resolved/);
   dom.window.close();
 });
+
+test('critical failure headline names the target and keeps measured average in details', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  win.setTimeout = () => 1; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true}, session: {active: true}, links: [], traffic: {},
+    experience: {available: true, experience_score: 74, average_experience_score: 97, score_adjusted: true,
+      target_failures: ['ERP: 413 ms P95 (target ≤ 400)'], targets: {experience_min: 80}, verdicts: {experience: 'fail'},
+      groups: [{key: 'interactive', label: 'Business apps', score: 74, average_score: 97, score_adjusted: true,
+        tone: 'warn', scoring_complete: false, text: 'Critical targets missed: ERP deadline.',
+        applications: [{label: 'ERP', requests: 20, score: 97}]}]}};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  const doc = win.document;
+  assert.equal(doc.querySelector('#result-experience [data-value]').textContent, '74 / 100');
+  assert.equal(doc.getElementById('result-experience').className, 'result fail');
+  assert.equal(doc.getElementById('score-impact').hidden, false);
+  assert.match(doc.getElementById('score-impact').textContent, /413 ms P95/);
+  assert.match(doc.getElementById('score-explanation').textContent, /Measured application average: 97/);
+  assert.match(doc.querySelector('.subscore > p').textContent, /Critical targets missed/);
+  assert.match(doc.querySelector('.subscore details').textContent, /Measured group average: 97/);
+  dom.window.close();
+});

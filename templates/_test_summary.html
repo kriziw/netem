@@ -25,7 +25,7 @@
         <tr{% if not phase.reached %} class="muted-row"{% endif %}>
           <td><strong>{{ phase.name }}</strong></td>
           <td>{% if phase.reached and phase.duration_s is not none %}{{ (phase.duration_s // 60)|int }}:{{ "%02d"|format((phase.duration_s % 60)|int) }}{% else %}not reached{% endif %}</td>
-          <td>{{ "%.0f"|format(phase.experience_score) if phase.experience_score is not none else '—' }}{% if phase.note %}<small class="field-help">{{ phase.note }}</small>{% endif %}</td>
+          <td>{{ "%.0f"|format(phase.experience_score) if phase.experience_score is not none else '—' }}{% if phase.score_adjusted %}<small class="field-help">Target-aligned grade · measured average {{ "%.0f"|format(phase.average_experience_score) }}/100</small>{% endif %}{% if phase.note %}<small class="field-help">{{ phase.note }}</small>{% endif %}</td>
           <td>{% if phase.success_pct is not none %}{{ "%.1f"|format(phase.success_pct) }}%{% if phase.worst_success_pct is not none and phase.worst_success_pct < phase.success_pct - 0.05 %} <span class="field-help">(low {{ "%.1f"|format(phase.worst_success_pct) }}%)</span>{% endif %}{% else %}—{% endif %}</td>
           <td>{{ "%.0f ms"|format(phase.interactive_p95_ms) if phase.interactive_p95_ms is not none else '—' }}</td>
           <td>{% for wan in phase.wans %}{{ wan.label }} {{ "%.0f"|format(wan.down_mbps) if wan.down_mbps is not none else '—' }}/{{ "%.0f"|format(wan.up_mbps) if wan.up_mbps is not none else '—' }}{% if wan.health and wan.health != 'healthy' %} <span class="status warn">{{ wan.health }}</span>{% endif %}{% if not loop.last %}<br>{% endif %}{% endfor %}</td>
