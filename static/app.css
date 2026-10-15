@@ -1039,6 +1039,31 @@ body.update-active{overflow:hidden}
 .command-shortcuts { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
 .command-shortcuts .quick-action { flex:1 1 150px; min-height:0; display:flex; flex-wrap:wrap; gap:4px 8px; align-items:center; }
 .command-shortcuts .quick-action span { margin:0; }
+.session-console { margin-bottom:10px; }
+.session-console-layout { display:grid; grid-template-columns:minmax(220px,250px) minmax(0,1fr); gap:18px; align-items:start; }
+.session-console-layout > * { min-width:0; }
+.session-console-summary { border-right:1px solid var(--border); padding-right:18px; }
+.session-console-summary .kv { grid-template-columns:80px minmax(0,1fr); align-items:start; }
+.session-console-tests > .section-title { margin:0 0 10px; }
+.site-test-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; }
+.site-test-row { display:flex; flex-direction:column; gap:12px; min-width:0; padding:12px; border:1px solid var(--border); border-radius:var(--radius-sm); background:var(--surface-2); }
+.site-test-copy { flex:1; min-width:0; overflow-wrap:anywhere; }
+.site-test-copy strong { display:block; font-size:12px; line-height:1.45; }
+.site-test-copy .field-help { margin:6px 0 0; }
+.site-test-role { display:block; margin-bottom:5px; color:var(--muted); font-size:10px; }
+.site-test-controls { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px; }
+.site-test-controls form { margin:0; }
+@media (max-width:1300px) {
+  .site-test-grid { grid-template-columns:repeat(2,minmax(0,1fr)); }
+}
+@media (max-width:1000px) {
+  .session-console-layout { grid-template-columns:1fr; gap:14px; }
+  .session-console-summary { border-right:0; padding-right:0; border-bottom:1px solid var(--border); padding-bottom:12px; }
+}
+@media (max-width:620px) {
+  .site-test-grid { grid-template-columns:1fr; }
+  .session-console > .card-head { flex-wrap:wrap; align-items:flex-start; }
+}
 .command-detail > summary { cursor:pointer; justify-content:flex-start; }
 .command-detail > summary::before { content:"›"; font-size:20px; color:var(--muted); }
 .command-detail[open] > summary::before { transform:rotate(90deg); }
