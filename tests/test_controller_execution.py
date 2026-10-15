@@ -57,6 +57,46 @@ class ControllerExecutionTests(unittest.TestCase):
         self.assertIn('/api/v1/workloads/stop', events)
         self.assertEqual(netem.SCENARIO_STATE['result'], 'passed')
 
+    def test_recovery_timeout_retries_before_removing_fault_and_continues(self):
+        scenario = dict(self.scenario, steps=[
+            {'after': 0, 'action': 'fault', 'value': 'upstream_blackhole', 'phase': 'Baseline'},
+            {'after': 0, 'action': 'fault', 'value': 'normal', 'phase': 'Recovery'}])
+        recovery_requests = []
+        events = []
+        def api(path, **kwargs):
+            payload = kwargs.get('payload') or {}
+            if path.endswith('/heartbeat') and payload.get('phase') == 'Recovery':
+                recovery_requests.append(payload.copy())
+                events.append('heartbeat')
+                if len(recovery_requests) == 1:
+                    raise RuntimeError('connection timed out') from TimeoutError('read timed out')
+            return self.running('existing')
+        def fault(_profile, value, _presets):
+            events.append(value)
+            return True, 'OK'
+        with patch.object(netem, 'traffic_generator_request', side_effect=api), \
+             patch.object(netem, 'recorder_close_phase'), \
+             patch.object(netem, 'apply_runtime_fault', side_effect=fault):
+            netem.run_scenario('wan1', scenario)
+        self.assertEqual(netem.SCENARIO_STATE['result'], 'passed')
+        self.assertEqual(len(recovery_requests), 2)
+        self.assertEqual(recovery_requests[0], recovery_requests[1])
+        self.assertEqual(events, ['upstream_blackhole', 'heartbeat', 'heartbeat', 'normal'])
+
+    def test_exhausted_heartbeat_marks_interrupted_and_restores_wan(self):
+        def api(path, **kwargs):
+            if path.endswith('/heartbeat'):
+                raise RuntimeError('connection timed out') from TimeoutError('read timed out')
+            return self.running('existing')
+        with patch.dict(netem.TEST_RECORDER, {'active': True}, clear=True), \
+             patch.object(netem, 'recorder_close_phase'), \
+             patch.object(netem, 'traffic_generator_request', side_effect=api):
+            netem.run_scenario('wan1', self.scenario)
+            self.assertEqual(netem.TEST_RECORDER['execution_result'], 'interrupted')
+        self.assertEqual(netem.SCENARIO_STATE['result'], 'failed')
+        self.assertIn('timed out twice', netem.SCENARIO_STATE['error'])
+        self.apply_selected_profile.assert_called_once()  # Only baseline restoration.
+
     def test_existing_workload_is_borrowed_and_left_running(self):
         with patch.object(netem, 'traffic_generator_request', side_effect=lambda *a, **k: self.running('existing')) as api:
             netem.run_scenario('wan1', self.scenario)
