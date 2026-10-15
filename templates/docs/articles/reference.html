@@ -21,17 +21,19 @@
 <tr><td><code>config.json</code></td><td>WANs, access profiles, custom scenarios, probes and SLA profile</td></tr>
 <tr><td><code>runtime/events.jsonl</code></td><td>Runtime event stream</td></tr>
 <tr><td><code>runtime/sessions.json</code></td><td>Up to 100 lab-session records and completed report snapshots</td></tr>
-<tr><td><code>runtime/telemetry.db</code></td><td>SQLite WAN telemetry and active-probe samples</td></tr>
+<tr><td><code>runtime/telemetry.db</code></td><td>SQLite WAN, host and active-probe samples</td></tr>
+<tr><td><code>runtime/inventory.db</code></td><td>Appliance inventory, monitoring observations and alerts</td></tr>
+<tr><td><code>runtime/test-records/</code></td><td>Saved per-test configuration, timeline, evidence and downloadable ZIPs</td></tr>
 <tr><td><code>runtime/captures/</code></td><td>Bounded PCAP files</td></tr>
 </tbody></table></div>
-<p>SQLite time-series retention is currently 168 hours. WAN samples are collected approximately every two seconds while the service is running.</p>
+<p>SQLite time-series retention is currently 168 hours. WAN samples are collected approximately once per second while the service is running. Test records are separate files retained across restarts; they are not automatically deleted by the seven-day telemetry cleanup.</p>
 
 <h2 id="current-boundaries">Current boundaries</h2>
 <ul>
 <li>The UI currently supports two WAN links.</li>
 <li>Active probe Automatic source follows the NetEm host route; transparent WAN ports without L3 addressing cannot independently prove appliance-side path behavior.</li>
-<li>Vendor-observed SLA/path-selection integration is not yet implemented.</li>
-<li>PMTUD blackhole simulation, bounded traffic generation and PCAP replay remain roadmap items.</li>
+<li>FortiGate management health/licence monitoring is available; appliance-reported SD-WAN SLA/path-selection integration remains planned.</li>
+<li>Application traffic generation is available through the Traffic Simulator. Dedicated PMTUD-blackhole simulation, guarded iperf3 workflows and PCAP replay remain planned.</li>
 <li>Built-in authentication is not yet provided.</li>
 </ul>
 

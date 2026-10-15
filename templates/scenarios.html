@@ -81,17 +81,14 @@
   </section>
   {% endfor %}
 
-  <section class="card future-card">
+  <section class="card">
     <div class="card-head">
-      <div><div class="card-title">Conditional orchestration</div><div class="card-sub">Future capability</div></div>
-      <span class="future-tag">Roadmap</span>
+      <div><div class="card-title">Conditional orchestration</div><div class="card-sub">Condition-based waits and assertions</div></div>
+      <span class="status good">Available now</span>
     </div>
     <div class="card-pad">
-      <div class="kv">
-        <div class="k">Wait until</div><div class="v">SLA state / vendor condition / traffic threshold</div>
-        <div class="k">Then</div><div class="v">Continue, branch, fail test or trigger capture</div>
-        <div class="k">Targets</div><div class="v">Parallel WAN1 + WAN2 actions</div>
-      </div>
+      <p>Wait for expected SLA, probe, traffic, application-experience or measured-steering conditions. Assertions record outcomes with bounded timeouts and stop/continue handling.</p>
+      <p class="field-help">Parallel WAN actions, branching, capture triggers and appliance-reported SD-WAN events remain <a href="{{ url_for('documentation_page', slug='roadmap') }}#next">planned improvements</a>.</p>
     </div>
   </section>
 </div>
@@ -120,7 +117,7 @@
   {"after": 15, "action": "fault", "value": "normal", "label": "Restore"},
   {"after": 5, "action": "mtu", "value": 0, "label": "MTU restored"}
 ]</textarea>
-        <div class="field-help">Actions: quality, fault, mtu · max 30 stages · each wait capped at 3600 seconds.</div>
+        <div class="field-help">Actions: quality, fault, mtu, phase, traffic_generator, wait, assert · max 30 stages · timed delays up to 3600 seconds; conditional timeouts up to 600 seconds.</div>
         <div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="submit">Save scenario</button></div>
       </form>
     </div>
