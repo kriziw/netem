@@ -23,11 +23,13 @@ class PhaseWindowTests(unittest.TestCase):
         ends = [{"name": "Baseline", "dem": window(100, 100.0, 300)},
                 {"name": "Severe brownout", "dem": window(0, 79.4, 240, 180.0)},
                 {"name": "Recovery", "dem": window(100, 100.0, 280)}]
-        summary = netem.summarize_test(record(ends, samples), "passed", None)
+        summary = netem.summarize_test(record(ends, samples), "passed", None,
+                                     targets={"experience_min": 80, "success_min_pct": 99, "interactive_p95_max_ms": 400})
         by_name = {phase["name"]: phase for phase in summary["phases"]}
         self.assertEqual(by_name["Severe brownout"]["experience_score"], 0)
         self.assertEqual(by_name["Recovery"]["success_pct"], 100.0)
         self.assertEqual(by_name["Recovery"]["worst_success_pct"], 100.0)
+        self.assertEqual([phase['experience_verdict'] for phase in summary['phases']], ['pass', 'fail', 'pass'])
 
     def test_small_phase_shows_measured_utility_but_has_no_target_verdict(self):
         ends = [{"name": "Severe brownout", "dem": window(0, 66.7, 6)}]

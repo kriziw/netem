@@ -26,6 +26,32 @@ class SessionShowcaseTests(unittest.TestCase):
         self.assertEqual(facts['slowest_phase_completion_p95_ms'], 1000)
         self.assertNotIn('192.0.2.1', str(facts))
         self.assertEqual(facts['latest']['outcome'], 'unknown')
+        self.assertEqual(facts['execution'], {'completed': 3, 'attention': 0, 'stopped': 1})
+
+    def test_demonstration_completion_impact_and_recovery_are_independent(self):
+        summary = {'name': 'Brownout', 'execution_result': 'passed', 'experience_result': 'fail',
+                   'ended_at': 10, 'phases': [
+                       {'name': 'Severe brownout', 'experience_score': 0, 'note': 'Incomplete evidence',
+                        'target_failures': ['Voice: 3% loss (target ≤ 1%)']},
+                       {'name': 'Recovery', 'reached': True, 'experience_score': 100, 'experience_verdict': 'pass'}],
+                   'conclusion': ['Execution completed.', 'Recovered.', 'Address 192.0.2.1']}
+        facts = session_facts([summary], netem.showroom_text)
+        self.assertEqual(facts['execution']['completed'], 1)
+        self.assertEqual(facts['outcomes']['fail'], 1)
+        self.assertEqual(facts['recovery']['pass'], 1)
+        self.assertEqual(facts['latest']['recovery'], 'pass')
+        self.assertIn('Voice: 3% loss', facts['demonstration_results'][0]['unmet_requirements'][0])
+        self.assertTrue(facts['lowest_is_provisional'])
+        self.assertNotIn('192.0.2.1', str(facts))
+        # Old or incomplete phase records cannot prove recovery from a high score alone.
+        summary['phases'][-1].pop('experience_verdict')
+        self.assertEqual(session_facts([summary], str)['recovery']['unknown'], 1)
+        summary['phases'][-1]['experience_verdict'] = 'fail'
+        summary['execution_result'] = 'failed'
+        facts = session_facts([summary], str)
+        self.assertEqual(facts['execution']['completed'], 0)
+        self.assertEqual(facts['execution']['attention'], 1)
+        self.assertEqual(facts['recovery']['fail'], 1)
 
     def test_only_current_session_history_is_counted_and_repeated_runs_survive(self):
         def event(session_id, start, end):

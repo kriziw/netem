@@ -41,6 +41,25 @@ The monitoring schedule supplies regular samples in a healthy small-site lab.
 Outages, missing target metadata, unknown WAN mapping and host overload still
 require operator action; the display does not invent measurements or green results.
 
+## Between-test demonstration summary
+
+The session pause screen separates execution from resilience: tests demonstrated,
+observed application impact, measured recovery and slowest application response.
+A completed degradation demonstration may show application impact without being
+presented as a failed demonstration. Execution errors and stopped tests remain
+explicit and are not counted as completed demonstrations.
+
+The expandable **Resilience requirements and measurements** section retains
+met/not-met/unconfirmed counts, every test's requirement status, recorded unmet
+requirements and conclusions. The lowest measured score, including a preliminary
+zero with its evidence qualifier, stays in these details rather than dominating
+the main screen. No resilience verdicts or scores are changed.
+
+Recovery is confirmed only from a reached Recovery phase with a recorded passing
+phase verdict. New summaries retain the existing phase-verdict calculation;
+historical records without this verdict cannot establish recovery from a high
+score alone. Below-target recovery and incomplete evidence remain explicit.
+
 ## Explaining missed application targets
 
 Target-violation findings name each application, its measured value and the exact

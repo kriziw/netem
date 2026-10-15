@@ -270,15 +270,41 @@
     const facts = progress || {};
     const outcomes = facts.outcomes || {};
     const latest = facts.latest;
+    const execution = facts.execution || {completed: facts.tests_completed || 0, stopped: facts.tests_stopped || 0};
+    const recovery = facts.recovery || {};
+    const response = outcomes.fail ? `Impact observed in ${outcomes.fail} test${outcomes.fail === 1 ? '' : 's'}`
+      : outcomes.pass ? 'Targets maintained' : 'Measurements collected';
+    const executionText = value => value === 'passed' ? 'Demonstration completed'
+      : value === 'failed' ? 'Execution needs attention' : value === 'stopped' ? 'Demonstration stopped' : 'Demonstration recorded';
+    const requirementText = value => value === 'pass' ? 'Requirements met' : value === 'fail' ? 'Requirements not met' : 'Requirements not yet confirmed';
+    const responseText = latest && latest.outcome === 'fail' ? 'Application impact was observed during this demonstration.'
+      : latest && latest.outcome === 'pass' ? 'Applications met the configured resilience requirements.'
+        : 'Measurements were collected; resilience requirements are not yet fully confirmed.';
+    const recoveryText = latest && latest.recovery === 'pass' ? 'Recovery met the configured requirements.'
+      : latest && latest.recovery === 'fail' ? 'Recovery remained below the configured requirements; see details.'
+        : latest && latest.recovery === 'unknown' ? 'Recovery is not yet confirmed.' : '';
+    const duration = number(facts.slowest_phase_completion_p95_ms) ? `${format(facts.slowest_phase_completion_p95_ms / 1000)} s P95` : 'Not measured';
     return {
       points: [
-        {label: 'Tests completed', value: String(facts.tests_completed || 0), note: facts.tests_stopped ? `${facts.tests_stopped} stopped` : 'In this session'},
-        {label: 'Experience outcomes', value: `${outcomes.pass || 0} met · ${outcomes.fail || 0} missed`, note: `${outcomes.unknown || 0} not confirmed`},
-        {label: 'Lowest measured experience', value: number(facts.lowest_experience) ? `${Math.round(facts.lowest_experience)} / 100` : 'Not measured', note: facts.lowest_is_provisional ? 'Limited evidence' : 'Across measured phases'},
-        {label: 'Application completion · slowest phase P95', value: number(facts.slowest_phase_completion_p95_ms) ? `${Math.round(facts.slowest_phase_completion_p95_ms)} ms` : 'Not measured', note: 'Interactive requests; not network latency'},
+        {label: 'Tests demonstrated', value: String(execution.completed || 0), note: [execution.attention ? `${execution.attention} execution${execution.attention === 1 ? ' needs' : 's need'} attention` : '', execution.stopped ? `${execution.stopped} stopped` : ''].filter(Boolean).join(' · ') || 'Completed in this session'},
+        {label: 'Application response', value: response, note: outcomes.unknown ? `${outcomes.unknown} awaiting confirmation` : 'Measured during the demonstrations'},
+        {label: 'Recovery', value: recovery.pass ? `Confirmed in ${recovery.pass} test${recovery.pass === 1 ? '' : 's'}` : recovery.fail || recovery.unknown ? 'Not confirmed' : 'Not assessed', note: recovery.fail ? `${recovery.fail} recovery phase${recovery.fail === 1 ? '' : 's'} below requirements` : recovery.unknown ? `${recovery.unknown} awaiting confirmation` : recovery.pass ? 'Application requirements met during recovery' : 'No recovery assessment recorded'},
+        {label: 'Slowest application response', value: duration, note: 'Interactive requests under test; not network latency'},
       ],
-      latest: latest ? `${latest.name} · experience ${latest.outcome === 'pass' ? 'targets met' : latest.outcome === 'fail' ? 'targets missed' : 'not confirmed'}` : 'No tests completed yet',
-      conclusion: latest ? (latest.conclusion || []).join(' ') : 'Your session is ready. The next test will be introduced before it starts.',
+      latest: latest ? `${latest.name} · ${executionText(latest.execution)}` : 'Ready for the first demonstration',
+      conclusion: !latest ? 'Your session is ready. The next test will be introduced before it starts.'
+        : latest.execution === 'failed' ? 'Review the execution details before drawing a resilience conclusion.'
+          : latest.execution === 'stopped' ? 'This demonstration stopped before completion. Measurements collected so far are in the details.'
+            : [responseText, recoveryText].filter(Boolean).join(' '),
+      details: {
+        counts: `Resilience requirements: ${outcomes.pass || 0} met · ${outcomes.fail || 0} not met · ${outcomes.unknown || 0} not confirmed.`,
+        measurement: number(facts.lowest_experience) ? `Lowest measured experience: ${Math.round(facts.lowest_experience)} / 100${facts.lowest_is_provisional ? ' · preliminary measurement; limited evidence' : ''}.` : 'No experience score measured.',
+        tests: (facts.demonstration_results || (latest ? [{...latest, requirements: latest.outcome}] : [])).map(test => ({
+          title: `${test.name} · ${requirementText(test.requirements)}`,
+          execution: executionText(test.execution),
+          lines: [...(test.unmet_requirements || []).map(line => `Unmet requirement: ${line}`), ...(test.conclusion || [])],
+        })),
+      },
     };
   }
 
@@ -741,6 +767,17 @@
         text('session-progress-name', (latest.session || {}).name || 'Current session');
         text('session-progress-latest', view.latest);
         text('session-progress-conclusion', view.conclusion);
+        text('session-requirement-counts', view.details.counts);
+        text('session-measurement-details', view.details.measurement);
+        if (changed('session-requirement-details', view.details.tests)) {
+          document.getElementById('session-test-details').replaceChildren(...view.details.tests.map(test => {
+            const item = element('article');
+            const lines = element('ul');
+            lines.append(...test.lines.map(line => element('li', '', line)));
+            item.append(element('strong', '', test.title), element('p', '', test.execution), lines);
+            return item;
+          }));
+        }
         if (changed('session-progress-points', view.points)) {
           document.getElementById('session-progress-points').replaceChildren(...view.points.map(point => {
             const card = element('article', 'session-point');

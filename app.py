@@ -5856,7 +5856,9 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
         if any(actual is None or target is None for actual, target, _ in checks):
             return "unknown"
         return "pass" if all(actual >= target if higher else actual <= target for actual, target, higher in checks) else "fail"
-    verdicts = [phase_verdict(phase) for phase in evaluated]
+    for phase in evaluated:
+        phase["experience_verdict"] = phase_verdict(phase)
+    verdicts = [phase["experience_verdict"] for phase in evaluated]
     experience_result = "fail" if "fail" in verdicts else "pass" if verdicts and all(value == "pass" for value in verdicts) else "unknown"
     conclusion = [f"{record.get('name') or 'Test'} {'execution completed' if result == 'passed' and not assertions else result}" +
                   (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
