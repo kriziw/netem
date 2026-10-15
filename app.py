@@ -687,6 +687,11 @@ def ensure_traffic_path(context):
 def workload_finding(status, signals, expected_run=None):
     """When the simulator's traffic and what NetEm measures cannot both be right."""
     common = {"source": "platform", "severity": "bad", "wans": [], "unattributed": 0, "candidates": []}
+    if expected_run and not (status or {}).get("status"):
+        return dict(common, id="workload_unconfirmed", severity="warn",
+                    title="Simulator status temporarily unavailable",
+                    detail="NetEm could not verify the test workload. A missing response does not establish that it stopped.",
+                    hint="Check the simulator connection if this persists.")
     run = (status or {}).get("run") or {}
     if (run.get("traffic_path") or {}).get("mode") == "direct_baseline" and not expected_run:
         return None
@@ -5858,12 +5863,22 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
         return "pass" if all(actual >= target if higher else actual <= target for actual, target, higher in checks) else "fail"
     for phase in evaluated:
         phase["experience_verdict"] = phase_verdict(phase)
+    execution_result = record.get("execution_result") or result
+    if execution_result == "interrupted" and evaluated:
+        # A partial last phase cannot confirm successful recovery. Independently
+        # measured failures remain visible even when execution is interrupted.
+        if evaluated[-1]["experience_verdict"] == "pass":
+            evaluated[-1]["experience_verdict"] = "unknown"
     verdicts = [phase["experience_verdict"] for phase in evaluated]
-    experience_result = "fail" if "fail" in verdicts else "pass" if verdicts and all(value == "pass" for value in verdicts) else "unknown"
-    conclusion = [f"{record.get('name') or 'Test'} {'execution completed' if result == 'passed' and not assertions else result}" +
+    experience_result = "fail" if "fail" in verdicts else "pass" if execution_result != "interrupted" and verdicts and all(value == "pass" for value in verdicts) else "unknown"
+    execution_label = ("demonstration interrupted" if execution_result == "interrupted"
+                       else "execution completed" if result == "passed" and not assertions else result)
+    conclusion = [f"{record.get('name') or 'Test'} {execution_label}" +
                   (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
     if error and result != "passed":
         conclusion.append(str(error)[:200])
+    if execution_result == "interrupted":
+        conclusion.append("Execution ended before completion. Measurements collected before interruption are retained; incomplete phases cannot confirm resilience or recovery.")
     measured_phases = [phase for phase in phases if phase["experience_score"] is not None]
     if measured_phases:
         base = next((phase for phase in measured_phases if phase["name"] in BASELINE_PHASES), measured_phases[0])
@@ -5876,7 +5891,8 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                 text += f", ending at {measured_phases[-1]['experience_score']:.0f} in {measured_phases[-1]['name']}"
             conclusion.append(text + ".")
         else:
-            conclusion.append(f"Experience stayed at {base['experience_score']:.0f} through the test.")
+            scope = "during the recorded phases" if execution_result == "interrupted" else "through the test"
+            conclusion.append(f"Experience stayed at {base['experience_score']:.0f} {scope}.")
     else:
         conclusion.append("No simulated user traffic was measured, so user impact and steering were not assessed.")
     for phase in phases:
@@ -5909,7 +5925,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     return {
         "live_window_seconds": record.get("live_window_seconds", 15),
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
-        "site": site_label, "result": result, "execution_result": result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
+        "site": site_label, "result": result, "execution_result": execution_result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
         "duration_s": round(ended_at - (record.get("started_at") or ended_at)),
         "phases": phases, "remediation": remediation, "steering_target_s": steering_target,
         "assertions": {"passed": len(assertions) - len(failed), "total": len(assertions),
@@ -6159,6 +6175,28 @@ def wait_for_test_executor(status, run_id, timeout_s=30):
     raise InterruptedError("Test stopped while waiting for the executing agent.")
 
 
+class SimulatorHeartbeatTimeout(RuntimeError):
+    """The bounded controller heartbeat retry was exhausted."""
+
+
+def test_controller_heartbeat(payload):
+    # Only this idempotent control request may be repeated. Never retry workload
+    # starts, application traffic, HTTP rejections, or certificate/auth failures.
+    for attempt in range(2):
+        try:
+            return traffic_generator_request("/api/v1/controller/heartbeat", method="POST",
+                                             payload=payload, timeout=3.0)
+        except RuntimeError as exc:
+            if not isinstance(exc.__cause__, TimeoutError):
+                raise
+            if attempt:
+                raise SimulatorHeartbeatTimeout("Simulator control timed out twice; demonstration interrupted.") from exc
+            if SCENARIO_STOP.is_set():
+                raise InterruptedError("Test stopped during simulator control timeout.") from exc
+            log_event("traffic-generator", "Simulator heartbeat timed out; retrying once",
+                      run_id=payload.get("run_id"), phase=payload.get("phase"))
+
+
 def check_test_workload():
     """A phase cannot silently outlive its executing workload; check every 5 s."""
     with RUNTIME_LOCK:
@@ -6170,8 +6208,8 @@ def check_test_workload():
         if checked is not None and now - checked < 5:
             return
         SCENARIO_STATE["workload_checked"] = now
-    status = traffic_generator_request("/api/v1/controller/heartbeat", method="POST",
-        payload={"run_id": expected, "phase": str(SCENARIO_STATE.get('phase') or '')[:120], "live_context": test_live_context()}, timeout=3.0)
+    status = test_controller_heartbeat(
+        {"run_id": expected, "phase": str(SCENARIO_STATE.get('phase') or '')[:120], "live_context": test_live_context()})
     if ((status.get("run") or {}).get("run_id") != expected
             or status.get("status") not in ("starting", "running") or status.get("users", 0) <= 0):
         raise RuntimeError("Traffic Simulator stopped executing the test's workload. Test aborted and WAN baseline restored.")
@@ -6210,8 +6248,11 @@ def publish_test_live_context():
     if not run_id or not supervised:
         return
     context = test_live_context()
-    status = traffic_generator_request('/api/v1/controller/heartbeat', method='POST', timeout=3.0,
-        payload={'run_id': run_id, 'phase': str(SCENARIO_STATE.get('phase') or '')[:120], 'live_context': context})
+    status = test_controller_heartbeat(
+        {'run_id': run_id, 'phase': str(SCENARIO_STATE.get('phase') or '')[:120], 'live_context': context})
+    if ((status.get('run') or {}).get('run_id') != run_id
+            or status.get('status') not in ('starting', 'running') or status.get('users', 0) <= 0):
+        raise RuntimeError("Traffic Simulator stopped executing the test's workload. Test aborted and WAN baseline restored.")
     acknowledged = (status.get('dem') or {}).get('live_phase_id')
     if acknowledged != context['phase_id']:
         raise RuntimeError('The simulator did not acknowledge the current live measurement phase. Upgrade the simulator before running this test.')
@@ -6474,8 +6515,11 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
             scenario_result = "stopped"
 
     except Exception as exc:
-        scenario_result = "failed"
+        scenario_result = "stopped" if isinstance(exc, InterruptedError) and SCENARIO_STOP.is_set() else "failed"
         scenario_error = str(exc)[:240]
+        with TEST_RECORDER_LOCK:
+            if TEST_RECORDER.get("active") and scenario_result == "failed":
+                TEST_RECORDER["execution_result"] = "interrupted"
 
     finally:
         try:
@@ -9726,7 +9770,8 @@ def showroom_summary(summary):
         return None
     return {
         "name": summary.get("name"), "link": summary.get("link"), "site": summary.get("site"),
-        "result": summary.get("result"), "ended_at": summary.get("ended_at"), "duration_s": summary.get("duration_s"),
+        "result": summary.get("result"), "execution_result": summary.get("execution_result"),
+        "experience_result": summary.get("experience_result"), "ended_at": summary.get("ended_at"), "duration_s": summary.get("duration_s"),
         "conclusion": [showroom_text(line) for line in summary.get("narrative") or summary.get("conclusion") or []],
         "phases": [{key: phase.get(key) for key in ("name", "reached", "duration_s", "experience_score",
                                                     "average_experience_score", "score_adjusted", "success_pct",

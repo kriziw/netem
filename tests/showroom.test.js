@@ -596,3 +596,18 @@ test('critical failure headline names the target and keeps measured average in d
   assert.match(doc.querySelector('.subscore details').textContent, /Measured group average: 97/);
   dom.window.close();
 });
+
+
+test('interruption is separate from measured resilience failures in session and report', () => {
+  const view = ui.sessionProgressView({execution: {attention: 1}, outcomes: {fail: 1}, recovery: {unknown: 1},
+    latest: {name: 'Flaky underlay', execution: 'interrupted', outcome: 'fail', recovery: 'unknown'}});
+  assert.match(view.latest, /Demonstration interrupted/);
+  assert.match(view.conclusion, /Application impact was observed/);
+  assert.match(view.conclusion, /incomplete recovery is not assessed/);
+  assert.match(view.details.counts, /1 not met/);
+  const report = ui.reportView({result: 'failed', execution_result: 'interrupted', phases: [],
+    conclusion: ['Interrupted', 'Voice success 42%; target 99%']});
+  assert.equal(report.result, 'Demonstration interrupted');
+  assert.equal(report.tone, 'warn');
+  assert.deepEqual(plain(report.conclusion), ['Voice success 42%; target 99%']);
+});

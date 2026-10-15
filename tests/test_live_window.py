@@ -24,10 +24,10 @@ class LiveWindowTests(unittest.TestCase):
             netem.SCENARIO_STATE['phase_index'] = 1
             after = netem.test_live_context()
             self.assertNotEqual(before['phase_id'], after['phase_id'])
-            with patch.object(netem, 'traffic_generator_request', return_value={'dem': {'live_phase_id': after['phase_id']}}) as api:
+            with patch.object(netem, 'traffic_generator_request', return_value={'status': 'running', 'users': 2, 'run': {'run_id': 'run-a'}, 'dem': {'live_phase_id': after['phase_id']}}) as api:
                 netem.publish_test_live_context()
                 self.assertEqual(api.call_args.kwargs['payload']['live_context']['window_seconds'], 15)
-            with patch.object(netem, 'traffic_generator_request', return_value={'dem': {'live_phase_id': before['phase_id']}}):
+            with patch.object(netem, 'traffic_generator_request', return_value={'status': 'running', 'users': 2, 'run': {'run_id': 'run-a'}, 'dem': {'live_phase_id': before['phase_id']}}):
                 with self.assertRaises(RuntimeError):
                     netem.publish_test_live_context()
 

@@ -1,5 +1,6 @@
 {% macro test_summary(summary, title="Last test summary") %}
-{% set tone = {'passed': 'good', 'failed': 'bad'}.get(summary.result, 'warn') %}
+{% set execution = summary.execution_result or summary.result %}
+{% set tone = {'passed': 'good', 'failed': 'bad'}.get(execution, 'warn') %}
 {% set verdicts = {'steered': 'steered away', 'unaffected': 'unaffected', 'balanced': 'all WANs healthy', 'stuck': 'on impaired WAN',
                    'stuck_impact': 'on impaired WAN, users affected', 'no_healthy': 'no healthy WAN', 'idle': 'no traffic',
                    'partial': 'partly attributed', 'unattributed': 'WAN unknown'} %}
@@ -9,11 +10,12 @@
       <div class="card-title">{{ title }} · {{ summary.name }}</div>
       <div class="card-sub">{% if summary.link %}On {{ summary.link }} · {% endif %}{% if summary.site %}{{ summary.site }} · {% endif %}{{ (summary.duration_s // 60)|int }}:{{ "%02d"|format((summary.duration_s % 60)|int) }} long{% if summary.assertions.total %} · {{ summary.assertions.passed }} of {{ summary.assertions.total }} checks passed{% endif %}</div>
     </div>
-    <div><span class="status {{ tone }}">{{ (summary.result or 'finished')|capitalize }}</span>
+    <div><span class="status {{ tone }}">{{ 'Demonstration interrupted' if execution == 'interrupted' else (execution or 'finished')|capitalize }}</span>
     {% if summary.test_id %}<a class="btn btn-sm" href="{{ url_for('test_record_download', test_id=summary.test_id) }}">Download test log</a>{% endif %}</div>
   </div>
   <div class="card-pad">
     {% if summary.record_complete is sameas false %}<p class="field-help">The test log contains incomplete evidence. See its export status for missing records.</p>{% endif %}
+    {% if summary.experience_result %}<p><strong>Resilience requirements:</strong> {{ {'pass': 'Met', 'fail': 'Not met in recorded measurements', 'unknown': 'Not confirmed'}.get(summary.experience_result, 'Not confirmed') }}</p>{% endif %}
     <ul class="summary-lines">
       {% for line in (summary.narrative or summary.conclusion)[1:] %}<li>{{ line }}</li>{% endfor %}
     </ul>
