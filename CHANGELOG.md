@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.3.2](https://github.com/kriziw/netem/compare/v1.3.1...v1.3.2) (2026-10-15)
+
+
+### Bug Fixes
+
+* align showroom experience grades with critical target misses ([#132](https://github.com/kriziw/netem/issues/132)) ([f4438b3](https://github.com/kriziw/netem/commit/f4438b30d1348f2e6b37ea93d83c9759407996c9))
+* require sustained evidence for WAN queue pressure ([#133](https://github.com/kriziw/netem/issues/133)) ([f216643](https://github.com/kriziw/netem/commit/f2166430ac0bbda9e1a2260906f86e1f50279db2))
+* use available space for session site tests ([#131](https://github.com/kriziw/netem/issues/131)) ([869ea81](https://github.com/kriziw/netem/commit/869ea81cb77ed4fe79952b3b67038581bdc809b1))
+
 ## [1.3.1](https://github.com/kriziw/netem/compare/v1.3.0...v1.3.1) (2026-10-15)
 
 
