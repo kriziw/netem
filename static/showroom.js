@@ -109,7 +109,7 @@
         number(summary.ended_at) && `finished ${window.NetEmTime.clock(summary.ended_at, {seconds: false})}`]
         .filter(Boolean).join(' · '),
       // The first line repeats the result shown in the heading.
-      conclusion: (summary.conclusion || []).slice(1),
+      conclusion: [summary.user_impact, ...(summary.conclusion || []).slice(1)].filter(Boolean),
       remediation: (summary.remediation || []).map(item => ({
         text: `${item.traffic_class} moved off ${item.wan} in ${item.seconds} s` +
           (item.within_target === true ? ` · within the ${target} s target` : item.within_target === false ? ` · slower than the ${target} s target` : ''),
@@ -342,6 +342,7 @@
         {label: 'Recovery', value: recovery.pass ? `Confirmed in ${recovery.pass} test${recovery.pass === 1 ? '' : 's'}` : recovery.fail || recovery.unknown ? 'Not confirmed' : 'Not assessed', note: recovery.fail ? `${recovery.fail} recovery phase${recovery.fail === 1 ? '' : 's'} below requirements` : recovery.unknown ? `${recovery.unknown} awaiting confirmation` : recovery.pass ? 'Application requirements met during recovery' : 'No recovery assessment recorded'},
         {label: 'Slowest application response', value: duration, note: 'Interactive requests under test; not network latency'},
       ],
+      observation: latest && latest.user_impact || '',
       latest: latest ? `${latest.name} · ${executionText(latest.execution)}` : 'Ready for the first demonstration',
       conclusion: !latest ? 'Your session is ready. The next test will be introduced before it starts.'
         : latest.execution === 'interrupted' ? ['Execution ended before completion. Recorded application impact is retained; incomplete recovery is not assessed.', responseText].join(' ')
@@ -354,7 +355,7 @@
         tests: (facts.demonstration_results || (latest ? [{...latest, requirements: latest.outcome}] : [])).map(test => ({
           title: `${test.name} · ${requirementText(test.requirements)}`,
           execution: executionText(test.execution),
-          lines: [...(test.unmet_requirements || []).map(line => `Unmet requirement: ${line}`), ...(test.conclusion || [])],
+          lines: [test.user_impact, ...(test.unmet_requirements || []).map(line => `Unmet requirement: ${line}`), ...(test.conclusion || [])].filter(Boolean),
         })),
       },
     };
@@ -382,7 +383,7 @@
           number(test.p95_max) ? `slowest response ${Math.round(test.p95_max)} ms` : null];
         return {name: test.name, result: label, tone: rowTone,
           where: [test.link, test.checks && test.checks.total ? `${test.checks.passed}/${test.checks.total} checks` : null].filter(Boolean).join(' · '),
-          facts: facts.filter(Boolean).join(' · '),
+          facts: [test.user_impact, facts.filter(Boolean).join(' · ')].filter(Boolean).join(' '),
           moved: (test.moved || []).map(item => `${item.traffic_class} moved off ${item.wan} in ${item.seconds} s`)};
       }),
       insights: (summary.insights || []).map(item => ({text: item.text, tone: ['pass', 'warn', 'fail'].includes(item.tone) ? item.tone : 'pass'})),
@@ -566,22 +567,23 @@
     if (group.scoring_complete !== false) return group.text;
     if (!number(group.score)) return 'Application checks are running.';
     if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
-    return 'Latest measured application performance. Monitoring continues.';
+    return 'Observed application performance. Monitoring continues.';
   }
 
   // Detailed confidence belongs with the expandable measurements, not in every headline.
   function groupCards(groups, live) {
-    return (Array.isArray(groups) ? groups : []).filter(group => group.requests || (group.applications || []).length).map(group => {
+    return (Array.isArray(groups) ? groups : []).filter(group => group.keep_visible || group.requests || (group.applications || []).length).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
       card.dataset.group = group.key || group.label;
-      const score = live && group.score != null ? group.score + ' / 100' + (group.previous_phase ? ' · previous phase' : group.scoring_complete === false ? ' · observed' : '') : '—';
-      card.append(element('span', '', group.label), element('strong', '', score), element('p', '', groupHeadline(group)));
-      if (group.applications && group.applications.length) {
+      const score = live && number(group.score) ? group.score + ' / 100' : '—';
+      card.append(element('span', '', group.label), element('strong', '', score), element('p', 'group-status', live ? groupHeadline(group) : 'Application checks are collecting measurements.'));
+      {
         const details = element('details');
         details.append(element('summary', '', 'Application measurements'));
         if (group.score_adjusted) details.append(element('p', '', `Measured group average: ${group.average_score}/100. Confirmed critical target misses keep the headline below the passing band.`));
         if (group.scoring_complete === false) details.append(element('p', '', group.text));
-        for (const app of group.applications) {
+        if (!(group.applications || []).length) details.append(element('p', '', 'Application measurements will appear as checks complete.'));
+        for (const app of group.applications || []) {
           const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
           const confidence = app.scoring_complete === false ? (app.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · incomplete evidence') : '';
           details.append(element('p', '', `${app.label}: ${measurement}${confidence} · ${app.requests} transactions${number(app.age_s) ? ' · latest ' + Math.round(app.age_s) + ' s ago' : ''}${number(app.p95_ms) ? ' · ' + (app.class === 'realtime' ? 'operation timing' : 'completion P95') + ' ' + Math.round(app.p95_ms) + ' ms' : ''}`));
@@ -641,13 +643,22 @@
       setText(timingNode, `Target round-trip time · P95 ${format(timing.p95_ms)} ms${timing.no_reply ? ' · ' + timing.no_reply + ' unanswered checks' : ''}`);
     }
     if (groupHolder) {
-      const expanded = new Set(Array.from(groupHolder.children).filter(card => card.querySelector('details[open]')).map(card => card.dataset.group));
-      const cards = groupCards(experience.groups, live);
-      for (const card of cards) {
+      // Keep card, score and disclosure elements alive so colours can transition
+      // and an open/focused disclosure stays open while measurements refresh.
+      const groups = experience.groups && experience.groups.length ? experience.groups
+        : Array.from(groupHolder.children).map(card => ({key: card.dataset.group,
+          label: card.querySelector('span').textContent, score: null, tone: 'unknown', scoring_complete: false, keep_visible: true}));
+      const visibleGroups = new Set(Array.from(groupHolder.children).map(card => card.dataset.group));
+      const cards = groupCards(groups.map(group => ({...group, keep_visible: group.keep_visible ||
+        !latest.experience.available && visibleGroups.has(group.key || group.label)})), live);
+      reconcile(groupHolder, cards, card => card.dataset.group, card => card, (card, next) => {
+        if (card === next) return;
+        card.className = next.className;
+        for (const selector of ['span', 'strong', '.group-status']) setText(card.querySelector(selector), next.querySelector(selector).textContent);
         const details = card.querySelector('details');
-        if (details) details.open = expanded.has(card.dataset.group);
-      }
-      groupHolder.replaceChildren(...cards);
+        for (const child of [...details.children]) if (child.tagName !== 'SUMMARY') child.remove();
+        details.append(...Array.from(next.querySelector('details').children).filter(child => child.tagName !== 'SUMMARY'));
+      });
     }
     const traffic = latest.traffic || {};
     const monitoring = traffic.monitoring || {};
@@ -660,6 +671,13 @@
         (monitoring.worker_errors ? ' · monitoring needs operator attention' : ''));
     }
     const story = latest.story || {};
+    setText(document.getElementById('user-impact'), !online ? 'Connection lost; current user impact cannot be confirmed.'
+      : latest.experience && latest.experience.user_impact ? latest.experience.user_impact
+        : latest.experience && latest.experience.business_acceptance === 'pass' && latest.experience.scoring_complete === true
+          && !latest.experience.at_risk && !latest.experience.live_paused && !(latest.experience.evidence_issues || []).length
+          && Object.values(latest.experience.verdicts || {}).length && Object.values(latest.experience.verdicts).every(value => value === 'pass')
+          ? 'Application checks met the configured targets; no user impact was detected in this measurement window.'
+          : 'Application checks are measuring the effect on users; the current impact is not yet confirmed.');
     setText(document.getElementById('story-status'), online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
     reconcile(document.getElementById('impacts'), story.impacts || [], item => `${item.impact}|${item.cause}`,
       () => { const card = element('article', 'impact'); card.append(element('strong'), element('span')); return card; },
@@ -832,6 +850,7 @@
         text('session-progress-name', (latest.session || {}).name || 'Current session');
         text('session-progress-latest', view.latest);
         text('session-progress-conclusion', view.conclusion);
+        text('session-progress-observation', view.observation);
         text('session-requirement-counts', view.details.counts);
         text('session-measurement-details', view.details.measurement);
         if (changed('session-requirement-details', view.details.tests)) {

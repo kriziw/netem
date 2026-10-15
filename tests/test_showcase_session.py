@@ -28,6 +28,38 @@ class SessionShowcaseTests(unittest.TestCase):
         self.assertEqual(facts['latest']['outcome'], 'unknown')
         self.assertEqual(facts['execution'], {'completed': 3, 'attention': 0, 'stopped': 1})
 
+    def test_user_impact_requires_measured_application_misses_and_survives_summary(self):
+        dem = {'applications': {
+            'voice': {'class': 'realtime', 'requests': 30, 'scoring_complete': True, 'target_violations': ['loss']},
+            'erp': {'class': 'interactive', 'requests': 30, 'scoring_complete': True, 'target_violations': ['success']},
+            'backup': {'class': 'bulk', 'requests': 30, 'scoring_complete': True, 'target_violations': ['throughput_up']}}}
+        messages = netem.showcase_summary.application_impact(dem)
+        self.assertEqual(len(messages), 3)
+        self.assertIn('calls may break up', messages[0])
+        self.assertIn('retry a task', messages[1])
+        self.assertIn('uploads and downloads', messages[2])
+        outcome = netem.showroom_outcome({'traffic_generator': {'connected': True, 'status': {'dem': dem}}}, None)
+        self.assertEqual(outcome['experience']['user_impact'], ' '.join(messages))
+        phase_dem = dict(dem, requests=90, experience=39, success=42, interactive_p95_ms=50, scoring_complete=True)
+        recorded = netem.summarize_test({'name': 'Brownout', 'started_at': 1, 'phases': ['Flapping'],
+            'phase_marks': [{'name': 'Flapping', 'at': 1}],
+            'phase_ends': [{'name': 'Flapping', 'dem': phase_dem}]}, 'passed', None, ended_at=20)
+        self.assertEqual(recorded['user_impact'], ' '.join(messages))
+        self.assertEqual(netem.showroom_summary(recorded)['user_impact'], ' '.join(messages))
+        summary = {'name': 'Brownout', 'experience_result': 'fail', 'result': 'passed', 'ended_at': 10,
+                   'phases': [{'name': 'Brownout', 'reached': True, 'user_impact': messages},
+                              {'name': 'Recovery', 'reached': True, 'experience_verdict': 'unknown'}]}
+        facts = session_facts([summary], str)
+        self.assertEqual(facts['latest']['user_impact'], ' '.join(messages))
+        self.assertEqual(facts['recovery']['unknown'], 1)
+        self.assertIn('retry a task', facts['demonstration_results'][0]['user_impact'])
+        for invalid in ('row_limit', 'configuration_changed_in_window', 'persistence_unhealthy'):
+            self.assertEqual(netem.showcase_summary.application_impact(dict(dem, evidence_issues=[invalid])), [])
+        self.assertEqual(netem.showcase_summary.application_impact(dict(dem, truncated=True)), [])
+        for item in dem['applications'].values():
+            item['scoring_complete'] = False
+        self.assertEqual(netem.showcase_summary.application_impact(dem), [])
+
     def test_demonstration_completion_impact_and_recovery_are_independent(self):
         summary = {'name': 'Brownout', 'execution_result': 'passed', 'experience_result': 'fail',
                    'ended_at': 10, 'phases': [

@@ -493,7 +493,8 @@ test('phase transitions retain labelled neutral outcomes until new measurements 
     assert.equal(value('interactive'), '45 ms');
     assert.equal(doc.getElementById('result-experience').className, 'result unknown');
     assert.match(doc.getElementById('outcome-transition').textContent, /from Baseline while Brownout starts/);
-    assert.match(doc.querySelector('.subscore').textContent, /85 \/ 100 · previous phase/);
+    assert.equal(doc.querySelector('.subscore strong').textContent, '85 / 100');
+    assert.match(doc.querySelector('.subscore .group-status').textContent, /Previous phase/);
     assert.equal(doc.querySelector('.subscore').className, 'subscore unknown');
     assert.equal(data.experience.available, false); // Presentation does not rewrite evidence.
   }
@@ -504,7 +505,7 @@ test('phase transitions retain labelled neutral outcomes until new measurements 
   assert.doesNotMatch(doc.querySelector('#result-experience [data-target]').textContent, /Previous phase/);
   assert.equal(value('interactive'), '45 ms');
   assert.match(doc.querySelector('#result-interactive [data-target]').textContent, /Previous phase · Baseline/);
-  assert.match(doc.querySelector('.subscore').textContent, /previous phase/);
+  assert.match(doc.querySelector('.subscore').textContent, /Previous phase/i);
   data.experience = {available: true, experience_score: 0, success_pct: 0, interactive_p95_ms: null,
     business_acceptance: 'fail', verdicts: {experience: 'fail', success: 'fail'}, groups: []};
   await nextPoll();
@@ -546,7 +547,7 @@ test('customer display separates monitoring, keeps confidence in details and sho
   const doc = win.document;
   assert.match(doc.getElementById('measurement-note').textContent, /2 simulated users \+ continuous application monitoring/);
   assert.match(doc.getElementById('outcome-window').textContent, /includes 20 application checks/);
-  assert.match(doc.querySelector('.subscore > p').textContent, /Latest measured application performance/);
+  assert.match(doc.querySelector('.subscore > p').textContent, /Observed application performance/);
   assert.match(doc.querySelector('.subscore details').textContent, /Limited sample/);
   assert.equal(doc.getElementById('routes').parentElement.hidden, true);
   assert.equal(doc.getElementById('network-timing').hidden, true);
@@ -597,6 +598,58 @@ test('critical failure headline names the target and keeps measured average in d
   dom.window.close();
 });
 
+
+test('outcome cards keep their elements, disclosures and score formatting across status changes', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  let poll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) poll = fn; return 1; };
+  win.clearTimeout = () => {}; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true, started_at: 100}, session: {active: true}, links: [],
+    experience: {available: true, scoring_complete: false, experience_score: 80, verdicts: {}, groups: [
+      {key: 'realtime', label: 'Voice and video', score: 80, tone: 'unknown', requests: 12,
+       scoring_complete: false, applications: [{label: 'Voice', requests: 12, score: 80}]}]}};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  const card = win.document.querySelector('.subscore');
+  const score = card.querySelector('strong'), details = card.querySelector('details'), toggle = details.querySelector('summary');
+  details.open = true; toggle.focus();
+  assert.equal(score.textContent, '80 / 100');
+  for (const tone of ['good', 'bad', 'unknown']) {
+    data.experience.groups[0].tone = tone;
+    data.experience.groups[0].scoring_complete = tone !== 'unknown';
+    data.experience.groups[0].score = tone === 'bad' ? 40 : 80;
+    await poll();
+    assert.equal(win.document.querySelector('.subscore'), card);
+    assert.equal(card.querySelector('strong'), score);
+    assert.equal(card.querySelector('details'), details);
+    assert.equal(details.open, true);
+    assert.equal(win.document.activeElement, toggle);
+    assert.doesNotMatch(score.textContent, /observed|previous|waiting/i);
+  }
+  data.experience.user_impact = 'Some business requests failed; users may need to retry a task.';
+  await poll();
+  assert.match(win.document.getElementById('user-impact').textContent, /retry a task/);
+  data.experience = {available: false, groups: [], verdicts: {experience: 'unknown'}};
+  await poll();
+  assert.equal(win.document.querySelector('.subscore'), card);
+  assert.equal(score.textContent, '—');
+  assert.match(win.document.getElementById('user-impact').textContent, /not yet confirmed/);
+  dom.window.close();
+});
+
+test('recorded user impact explains both summary views without inventing recovery', () => {
+  const impact = 'Business applications responded slowly; users may wait longer for a task to finish.';
+  const view = ui.sessionProgressView({latest: {name: 'Brownout', outcome: 'fail', execution: 'passed',
+    recovery: 'unknown', user_impact: impact}});
+  assert.equal(view.observation, impact);
+  assert.doesNotMatch(view.conclusion, /Recovery met/);
+  const report = ui.reportView({user_impact: impact});
+  assert.equal(report.conclusion[0], impact);
+  const plan = ui.planSummaryView({tests: [{name: 'Brownout', user_impact: impact}]});
+  assert.match(plan.tests[0].facts, /responded slowly/);
+});
 
 test('interruption is separate from measured resilience failures in session and report', () => {
   const view = ui.sessionProgressView({execution: {attention: 1}, outcomes: {fail: 1}, recovery: {unknown: 1},
