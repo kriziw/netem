@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.3.5](https://github.com/kriziw/netem/compare/v1.3.4...v1.3.5) (2026-10-15)
+
+
+### Bug Fixes
+
+* focus session summaries on the demonstration ([#140](https://github.com/kriziw/netem/issues/140)) ([2653e90](https://github.com/kriziw/netem/commit/2653e90537968033b2116f3d0a52520f6c118bad))
+* retain labelled outcomes during phase transitions ([#139](https://github.com/kriziw/netem/issues/139)) ([c6ed8cd](https://github.com/kriziw/netem/commit/c6ed8cd31aadd9b2a7bc7496bb5379119a2e2c2f))
+
 ## [1.3.4](https://github.com/kriziw/netem/compare/v1.3.3...v1.3.4) (2026-10-15)
 
 
