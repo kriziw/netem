@@ -37,16 +37,18 @@
 <p>While this happens, a progress screen steps through <strong>Installing update</strong>, <strong>Restarting NetEm</strong> and <strong>Reconnecting</strong>, then reloads the page on the new version. It knows the restart has finished when a new NetEm process answers, so it also works when an update does not change the version number. If the update is refused, for example because of local changes, the screen says why and nothing restarts. If NetEm takes more than two minutes to come back, it suggests checking <code>journalctl -u netem -n 50</code> on the appliance.</p>
 
 <h2 id="permissions">Repository ownership</h2>
-<p>The service runs as <code>techkarma</code>, so that user must be able to write the repository when the in-app updater fetches and fast-forwards. If manual Git commands are run as root, root-owned objects can be created under <code>.git/objects</code> and later block the service user.</p>
+<p>The configured service account must be able to write the repository when the in-app updater fetches and fast-forwards. Running manual Git commands as a different account can create objects under <code>.git/objects</code> that block the service user. Examples use the <code>netem</code> service and <code>/opt/netem</code> directory from the README; substitute the configured names on an existing appliance.</p>
 <p>Preferred manual Git pattern:</p>
-<pre>runuser -u techkarma -- git -C /opt/techkarma-netem status
-runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin</pre>
+<pre>NETEM_USER=$(systemctl show netem -p User --value)
+NETEM_USER=${NETEM_USER:-root}
+runuser -u "$NETEM_USER" -- git -C /opt/netem status
+runuser -u "$NETEM_USER" -- git -C /opt/netem fetch --prune origin</pre>
 <p>If ownership has already become inconsistent:</p>
-<pre>systemctl stop techkarma-netem
-chown -R techkarma:techkarma /opt/techkarma-netem
-runuser -u techkarma -- git -C /opt/techkarma-netem status
-runuser -u techkarma -- git -C /opt/techkarma-netem fetch --prune origin
-systemctl start techkarma-netem</pre>
+<pre>systemctl stop netem
+chown -R "$NETEM_USER" /opt/netem
+runuser -u "$NETEM_USER" -- git -C /opt/netem status
+runuser -u "$NETEM_USER" -- git -C /opt/netem fetch --prune origin
+systemctl start netem</pre>
 <div class="docs-note"><strong>Design principle:</strong> system administration can be done as root, but repository/application-file operations should be performed as the service owner.</div>
 
 <h2 id="release-please">Release Please</h2>
@@ -62,4 +64,4 @@ systemctl start techkarma-netem</pre>
 <p>After qualifying changes reach <code>main</code>, Release Please prepares/updates a release PR. Merging that release PR updates the version/changelog and creates the corresponding tag/GitHub release.</p>
 
 <h2 id="manual-preview">Testing an unmerged feature branch</h2>
-<p>The in-app updater intentionally follows <code>main</code>, so it will not install an unmerged feature branch. For a one-time preview, stop the service and switch branches manually as <code>techkarma</code>, then restart the service. Return to <code>main</code> when testing is complete.</p>
+<p>The in-app updater intentionally follows <code>main</code>, so it will not install an unmerged feature branch. For a one-time preview, stop the service and switch branches manually as the configured service account, then restart the service. Return to <code>main</code> when testing is complete.</p>

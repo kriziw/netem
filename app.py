@@ -6920,7 +6920,7 @@ DOCS_PAGES = [
         "category": "Configure",
         "summary": "Stable origin/main updates, fast-forward safety, versioning and Release Please.",
         "template": "docs/articles/updates_releases.html",
-        "keywords": "git update release version main release please permissions techkarma",
+        "keywords": "git update release version main release please permissions service account",
     },
     {
         "slug": "troubleshooting",
