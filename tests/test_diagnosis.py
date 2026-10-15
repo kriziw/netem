@@ -400,14 +400,67 @@ class SteeringTests(unittest.TestCase):
 
 
 class PressureEvidenceTests(unittest.TestCase):
-    def test_drops_without_sustained_saturation_are_queue_pressure(self):
+    def test_isolated_drops_at_light_load_are_diagnostic_activity(self):
         signal = netem.path_signals(state(down=42, up=42), [sample(
             down_mbps=7.5, up_mbps=18, down_util_pct=18, up_util_pct=43)])
-        self.assertEqual(signal['health'], 'queue_pressure')
-        self.assertEqual(signal['full'], ['up'])
-        self.assertIn('not established', signal['health_reason'])
+        self.assertEqual(signal['health'], 'healthy')
+        self.assertEqual(signal['full'], [])
+        activity = next(cause for cause in signal['causes'] if cause['kind'] == 'queue_activity')
+        self.assertEqual(activity['severity'], 'info')
+        self.assertIn('not established', activity['text'])
+        self.assertEqual(signal['directions']['up']['queue_drops_ps'], 120)
         saturated = netem.path_signals(state(down=42, up=42), [sample(up_util_pct=95)])
         self.assertEqual(saturated['health'], 'congested')
+
+    def rows(self):
+        return [sample(timestamp=100 + offset, up_mbps=12.44, up_util_pct=24.88,
+                       up_pps=500, up_queue_drops_ps=1.38, up_backlog_bytes=18000)
+                for offset in range(12)]
+
+    def test_repeated_small_aqm_drops_do_not_make_a_lightly_loaded_wan_unhealthy(self):
+        rows = self.rows()
+        signal = netem.path_signals(state(down=50, up=50), rows)
+        self.assertEqual(signal['health'], 'healthy')
+        self.assertFalse(signal['directions']['up']['pressure_sustained'])
+        self.assertEqual(signal['full'], [])
+        # Application failures remain visible, without falsely attributing them to a full queue.
+        findings = netem.correlate_findings({'findings': [{'id': 'media_loss', 'severity': 'bad',
+            'title': 'Video packet loss', 'by_egress': {'198.18.2.2': 10}}]}, [signal],
+            {'wan_links': [{'id': 'wan2', 'appliance_addresses': ['198.18.2.2']}]})
+        impact = next(item for item in findings if item['source'] == 'experience')
+        self.assertEqual(impact['severity'], 'bad')
+        self.assertNotIn('queue_drops', impact['wans'][0]['cause_kinds'])
+
+    def test_sustained_backlog_or_material_repeated_loss_still_warns(self):
+        for backlog, drops in ((200000, 2), (0, 20)):
+            rows = self.rows()
+            for row in rows:
+                row.update(up_backlog_bytes=backlog, up_queue_drops_ps=drops)
+            signal = netem.path_signals(state(down=50, up=50), rows)
+            self.assertEqual(signal['health'], 'queue_pressure')
+            self.assertTrue(signal['directions']['up']['pressure_sustained'])
+            self.assertEqual(signal['full'], [])  # Pressure does not prove capacity saturation.
+
+    def test_one_large_burst_missing_evidence_and_stalled_samples_do_not_prove_persistence(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(up_queue_drops_ps=0, up_backlog_bytes=0)
+        rows[-1].update(up_queue_drops_ps=500, up_backlog_bytes=2000000)
+        self.assertEqual(netem.path_signals(state(up=50), rows)['health'], 'healthy')
+        for invalid in ('rate', 'timestamp', 'gap'):
+            rows = self.rows()
+            for offset, row in enumerate(rows):
+                row.update(up_queue_drops_ps=100)
+                if invalid == 'rate': row['rate_valid'] = 0
+                if invalid == 'timestamp': row.pop('timestamp')
+                if invalid == 'gap': row['timestamp'] = offset * 5
+            self.assertFalse(netem.path_signals(state(up=50), rows)['directions']['up']['pressure_sustained'])
+
+    def test_injected_loss_is_not_counted_as_queue_loss(self):
+        rows = self.rows()
+        for row in rows:
+            row.update(up_drop_pct=80, up_injected_drops_ps=500)
+        self.assertFalse(netem.path_signals(state(up=50), rows)['directions']['up']['pressure_sustained'])
 
     def test_previous_profile_and_invalid_rate_samples_do_not_claim_saturation(self):
         previous = sample(delay_ms=5, jitter_ms=0, loss_pct=0, up_util_pct=99, up_queue_drops_ps=50)
