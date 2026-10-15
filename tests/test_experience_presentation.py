@@ -26,7 +26,7 @@ class HeadlineTests(unittest.TestCase):
         self.assertEqual(result["experience_score"], 74)
         self.assertEqual(result["average_experience_score"], 97)
         self.assertEqual(result["verdicts"]["experience"], "fail")
-        self.assertIn("413 ms P95 (target ≤ 400)", result["target_failures"][0])
+        self.assertIn("413 ms P95 (target ≤ 400 ms)", result["target_failures"][0])
         self.assertEqual(dem, original)
         self.assertEqual(display_score(dem, 97, minimum=70)["score"], 69)
 
@@ -69,5 +69,5 @@ class HeadlineTests(unittest.TestCase):
         self.assertEqual(result["experience_result"], "fail")
         text = " ".join(result["conclusion"])
         self.assertIn("fell to 74 during Severe brownout", text)
-        self.assertIn("Severe brownout missed targets: Erp: 413 ms P95 (target ≤ 400)", text)
+        self.assertIn("Severe brownout missed targets: Erp: 413 ms P95 (target ≤ 400 ms)", text)
         self.assertIn("measured application average was 97/100", text)

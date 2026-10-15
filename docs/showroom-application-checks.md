@@ -40,3 +40,29 @@ appear when there is evidence identifying a WAN.
 The monitoring schedule supplies regular samples in a healthy small-site lab.
 Outages, missing target metadata, unknown WAN mapping and host overload still
 require operator action; the display does not invent measurements or green results.
+
+## Explaining missed application targets
+
+Target-violation findings name each application, its measured value and the exact
+configured threshold, including units: for example, `Voice: 3% packet loss
+(target ≤ 1%)` or `ERP: 720 ms P95 (target ≤ 400 ms)`. Separate applications in the
+same traffic group retain separate findings. Hard deadlines show the late count,
+zero-late requirement and deadline; missing measurements or thresholds are stated
+explicitly rather than replaced with invented values.
+
+The platform recovers each application's full-window egress counts instead of
+using the generic target finding's unknown path. A declared direct NetEm path or
+one fully mapped WAN can support a **Likely contributor** when independent current
+path evidence matches the violated requirement. Loss/success misses can match
+injected loss of a meaningful magnitude; timing misses can match added delay or
+variation accounting for at least a quarter of the measured timing. Transfer
+misses can match same-direction saturation or sustained queue pressure. An
+isolated queue-management drop does not establish a contributor.
+
+These are causal hypotheses, not independently proven root causes. Mixed or
+partly unknown paths, a path inferred only from aggregate traffic, unverified
+shaping, invalid measurement windows and windows crossing a known impairment
+change do not receive a likely-cause claim. The measured target miss remains
+visible when its cause cannot be established. Packet delivery loss retains the
+simulator's bounded-collection semantics; it can include packets arriving too
+late, so it is not proof of physical packet loss.

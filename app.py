@@ -31,7 +31,7 @@ from urllib import request as urllib_request
 
 import calibration
 from experience_groups import attach_experience_groups
-from experience_presentation import display_score
+from experience_presentation import INVALID_EVIDENCE, display_score, target_details
 import bottlenecks
 import calibration_log
 import calibration_trace
@@ -3893,19 +3893,72 @@ def single_carrier(signals):
     return carriers[0] if len(carriers) == 1 else None
 
 
-def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
+def correlate_findings(dem_diagnosis, signals: list, cfg: dict, dem=None):
     """Attach each simulator symptom to the WANs that carried it and the path conditions there."""
     by_link = {item["link_id"]: item for item in signals}
+    applications = (dem or {}).get("applications") or {}
+    invalid_evidence = (dem or {}).get("truncated") or INVALID_EVIDENCE.intersection((dem or {}).get("evidence_issues") or [])
     findings, explained = [], set()
+    symptoms = []
     for symptom in (dem_diagnosis or {}).get("findings") or []:
+        if symptom.get("id") != "target_violation":
+            symptoms.append(symptom)
+            continue
+        for app_name in symptom.get("applications") or [None]:
+            evidence = symptom.get("evidence") or {}
+            item = applications.get(app_name) or {}
+            item = dict(item, quality=item.get("quality") or evidence.get("quality") or {},
+                        experience_targets=item.get("experience_targets") or evidence.get("targets") or {})
+            violations = item.get("target_violations") or [key.strip() for key in symptom.get("detail", "").split(";")[0].split(",") if key.strip()]
+            # The simulator's generic target finding uses unknown egress. Recover
+            # this application's own full-window path counts when available.
+            egress = {address: {"requests": app["requests"]} for address, entry in (dem_diagnosis.get("egress") or {}).items()
+                      if (app := (entry.get("applications") or {}).get(app_name)) and app.get("requests")}
+            expected = item.get("requests") or symptom.get("affected")
+            symptoms.append(dict(symptom, applications=[app_name] if app_name else [],
+                                 by_egress=egress or symptom.get("by_egress") or {},
+                                 path_incomplete=bool(egress and expected is not None and sum(entry['requests'] for entry in egress.values()) != expected),
+                                 target_item=item, target_violations=violations,
+                                 target_detail=target_details(item, violations)))
+    for symptom in symptoms:
         relevant = SYMPTOM_CAUSES.get(symptom.get("id"), ())
         direction = {"download": "down", "upload": "up"}.get(symptom.get("direction"))
+        target_violation = symptom.get("id") == "target_violation"
+        violations = symptom.get("target_violations") or []
+        if target_violation:
+            kinds = {
+                "loss": ("fault", "injected_loss", "queue_drops"),
+                "success": ("fault", "injected_loss", "queue_drops"),
+                "deadline": ("fault", "injected_delay", "injected_loss", "queue_drops"),
+                "jitter": ("injected_delay", "queue_drops"),
+                "throughput_down": ("fault", "saturated", "queue_drops", "injected_loss"),
+                "throughput_up": ("fault", "saturated", "queue_drops", "injected_loss"),
+                "sustained_down": ("fault", "saturated", "queue_drops", "injected_loss"),
+                "sustained_up": ("fault", "saturated", "queue_drops", "injected_loss"),
+            }
+            relevant = {kind for key in violations for kind in kinds.get(key, ())}
+            directions = {key.rsplit('_', 1)[-1] for key in violations if key.startswith(('throughput_', 'sustained_'))}
+            if len(directions) == 1 and all(key.startswith(('throughput_', 'sustained_')) for key in violations):
+                direction = next(iter(directions))
         waits = [value.get("p95_wait_ms") for value in (symptom.get("by_egress") or {}).values()
                  if isinstance(value, dict) and value.get("p95_wait_ms")]
 
         def explains(link, cause):
             if cause["kind"] not in relevant or (direction and cause["direction"] not in (None, direction)):
                 return False
+            if target_violation and cause["kind"] == "injected_loss":
+                # Slow completion/transfer alone cannot establish retransmission.
+                item = symptom["target_item"]
+                measured_loss = (item.get("quality") or {}).get("udp_loss_pct") if 'loss' in violations else None
+                if measured_loss is None and 'success' in violations and item.get("availability_pct") is not None:
+                    measured_loss = 100 - item["availability_pct"]
+                return measured_loss is not None and measured_loss > 0 and link["injected"]["loss_pct"] >= DELAY_SHARE * measured_loss
+            if target_violation and cause["kind"] == "injected_delay":
+                item = symptom["target_item"]
+                quality = item.get("quality") or {}
+                actual = quality.get("udp_rtt_variation_p95_ms") if 'jitter' in violations else quality.get("packet_rtt_p95_upper_ms", item.get("p95_ms"))
+                added = link["injected"]["jitter_ms"] if 'jitter' in violations else link["injected"]["delay_ms"] + link["injected"]["jitter_ms"]
+                return actual is not None and added > 0 and added >= DELAY_SHARE * actual
             if cause["kind"] == "injected_delay" and waits:
                 added = link["injected"]["delay_ms"] + link["injected"]["jitter_ms"] + sum(
                     item.get("queue_delay_ms") or 0 for item in link["directions"].values())
@@ -3916,7 +3969,7 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
             link = by_link.get(link_id)
             return [cause for cause in link["causes"] if explains(link, cause)] if link else []
 
-        per_link, unattributed = {}, 0
+        per_link, unattributed, inferred = {}, 0, False
         for address, value in (symptom.get("by_egress") or {}).items():
             mapped = resolve_egress(address, cfg) if address != "unknown" or cfg.get("_direct_wan_id") else None
             if mapped and mapped.get("link_id") in by_link:
@@ -3929,9 +3982,15 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
             if carrier:
                 per_link[carrier] = unattributed
                 unattributed = 0
+                inferred = True
         wans = []
         for link_id, affected in sorted(per_link.items(), key=lambda item: -item[1]):
-            causes = matching(link_id)
+            applied = RUNTIME_EFFECTIVE.get(link_id, {}).get("updated_at")
+            since = (dem or {}).get("since")
+            changed_in_window = applied is not None and since is not None and applied > since
+            eligible = (len(per_link) == 1 and not unattributed and not inferred and not invalid_evidence
+                        and not symptom.get("path_incomplete") and by_link[link_id].get("health") != "unknown" and not changed_in_window)
+            causes = matching(link_id) if not target_violation or eligible else []
             explained.update((link_id, cause["kind"], cause["direction"]) for cause in causes)
             # A full queue is the saturation's effect, so the saturation is explained with it.
             explained.update((link_id, "saturated", cause["direction"]) for cause in causes if cause["kind"] == "queue_drops")
@@ -3939,15 +3998,19 @@ def correlate_findings(dem_diagnosis, signals: list, cfg: dict):
                          "causes": [cause["text"] for cause in causes], "cause_kinds": [cause["kind"] for cause in causes]})
         candidates = [item["label"] for item in signals if matching(item["link_id"])] if unattributed else []
         hint = None
-        if symptom.get("id") == "http_errors":
+        if target_violation and not any(wan["causes"] for wan in wans):
+            hint = "Target miss measured; the path or a matching contributor could not be established from this window."
+        elif symptom.get("id") == "http_errors":
             hint = "Returned by the appliance or the target, not caused by network quality."
         elif relevant and not any(wan["causes"] for wan in wans) and not candidates:
             hint = "NetEm's impairment does not explain this. Check the appliance (policy, inspection, CPU) or the target."
         findings.append({
             "source": "experience", "id": symptom.get("id"), "severity": symptom.get("severity", "warn"),
-            "title": symptom.get("title", ""), "detail": symptom.get("detail", ""), "wans": wans,
+            "title": symptom.get("title", ""), "detail": symptom["target_detail"] if target_violation else symptom.get("detail", ""), "wans": wans,
             "unattributed": unattributed, "candidates": candidates, "hint": hint,
             "applications": list(symptom.get("applications") or []),
+            **({"target_detail": symptom["target_detail"], "path_inferred": inferred,
+                "path_incomplete": symptom.get("path_incomplete", False)} if target_violation else {}),
         })
     for item in signals:
         for cause in item["causes"]:
@@ -4255,7 +4318,7 @@ def build_diagnosis():
             baseline = STEERING_STATE.get("baseline", {}) if previous_identity and previous_identity[:3] == identity[:3] else {}
             STEERING_STATE.update(identity=identity, links={}, classes={}, baseline=baseline)
     signals = [path_signals(state, recent_telemetry_samples(state["id"])) for state in build_link_states(cfg)]
-    findings = correlate_findings(dem_diagnosis, signals, cfg)
+    findings = correlate_findings(dem_diagnosis, signals, cfg, dem)
     steering = assess_steering(dem, signals, cfg) if traffic_mode == "appliance" else None
     findings.extend(steering_findings(steering))
     for finding in findings:
@@ -9831,7 +9894,7 @@ SHOWROOM_STATE = {"values": {}, "impacts": {}}
 STORY_LOCK = threading.Lock()
 CLASS_NAMES = {"realtime": "Voice and video", "interactive": "Web and business apps", "bulk": "File transfers"}
 CLASS_SHORT = {"realtime": "voice and video", "interactive": "web and apps", "bulk": "file transfers"}
-IMPACT_VERBS = {"target_violation": "missing a configured application target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
+IMPACT_VERBS = {"target_violation": "not meeting its performance target", "media_loss": "breaking up", "media_no_reply": "calls dropping", "timeouts": "timing out",
                 "connection_errors": "cannot connect", "slow_wait": "responding slowly",
                 "bandwidth_bound": "transferring slowly", "http_errors": "getting errors"}
 HEALTH_WORDS = {"healthy": "Healthy", "congested": "Busy", "queue_pressure": "Queue pressure", "degraded": "Degraded", "failed": "Down"}
@@ -9893,6 +9956,10 @@ def current_impacts(diagnosis, by_id, by_label):
         classes = sorted({DEFAULT_APP_CLASSES.get(app) for app in finding.get("applications") or []} - {None},
                          key=list(CLASS_NAMES).index)
         subject = ", ".join(CLASS_NAMES[item] for item in classes) if classes else "Users"
+        target_violation = finding.get("id") == "target_violation"
+        applications = finding.get("applications") or []
+        if target_violation:
+            subject = ", ".join(APPLICATION_LABELS.get(app) or showroom_app_label(app) for app in applications) or "Application"
         wans = [wan for wan in finding.get("wans") or [] if wan.get("affected")]
         top = wans[0] if wans else None
         link = by_id.get(top["link_id"]) if top else None
@@ -9901,8 +9968,20 @@ def current_impacts(diagnosis, by_id, by_label):
         else:
             cause = (cause_text(top.get("cause_kinds") or [], link) if link else None) or \
                 f"observed on {top['label']}; cause not established"
-        impacts[("experience", finding["id"], subject)] = {
-            "impact": f"{subject}: {verb}", "cause": cause, "wan": top["label"] if top else None,
+        if target_violation and top:
+            if top.get("causes") and len(wans) == 1 and not finding.get("unattributed") and not finding.get("path_inferred"):
+                cause = f"Likely contributor on {top['label']}: " + "; ".join(top["causes"])
+            elif len(wans) > 1:
+                cause = "Traffic used " + ", ".join(wan['label'] for wan in wans) + "; the failing path is not isolated"
+            elif finding.get("path_inferred"):
+                cause = f"Traffic likely used {top['label']}; cause not established"
+            elif finding.get("unattributed") or finding.get("path_incomplete"):
+                cause = f"Some traffic observed on {top['label']}; remaining path and cause not established"
+        key = tuple(applications) if target_violation else subject
+        impact = f"{subject}: {finding.get('target_detail') or 'Performance target not met; measurement details unavailable'}" if target_violation else f"{subject}: {verb}"
+        impacts[("experience", finding["id"], key)] = {
+            "impact": showroom_text(impact, 600) if target_violation else impact,
+            "cause": showroom_text(cause, 600) if target_violation else cause, "wan": top["label"] if top else None,
             "severity": "bad" if finding.get("severity") == "bad" else "warn"}
     for item in (diagnosis.get("steering") or {}).get("classes") or []:
         if item.get("verdict") != "stuck_impact":
