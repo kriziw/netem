@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.4](https://github.com/kriziw/netem/compare/v1.3.3...v1.3.4) (2026-10-15)
+
+
+### Bug Fixes
+
+* explain application target misses and likely contributors ([#137](https://github.com/kriziw/netem/issues/137)) ([0353fc1](https://github.com/kriziw/netem/commit/0353fc1e5897d7064b0b725184d66a096f811a28))
+
 ## [1.3.3](https://github.com/kriziw/netem/compare/v1.3.2...v1.3.3) (2026-10-15)
 
 
