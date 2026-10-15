@@ -36,6 +36,10 @@
 <p>On success, NetEm fast-forwards to the release commit (<code>git merge --ff-only &lt;release commit&gt;</code>), then exits intentionally. A correctly configured systemd unit with <code>Restart=on-failure</code> starts the updated application again.</p>
 <p>While this happens, a progress screen steps through <strong>Installing update</strong>, <strong>Restarting NetEm</strong> and <strong>Reconnecting</strong>, then reloads the page on the new version. It knows the restart has finished when a new NetEm process answers, so it also works when an update does not change the version number. If the update is refused, for example because of local changes, the screen says why and nothing restarts. If NetEm takes more than two minutes to come back, it suggests checking <code>journalctl -u netem -n 50</code> on the appliance.</p>
 
+<h2 id="component-checks">Check all components</h2>
+<p>On <strong>Settings → Updates</strong>, press the shared <strong>Check for updates</strong> button to check NetEm, the Traffic Simulator and the controlled target together. Each card's status and latest release refresh automatically when its check finishes. Available <strong>Install update</strong> buttons become usable when the checks finish. Errors appear on the affected card; the other components are still checked.</p>
+<p>Wait for the checks to finish, then install each available update from its own card. Simulator and target task messages follow automatically on this page. A disconnected or unconfigured component shows its connection message.</p>
+
 <h2 id="permissions">Repository ownership</h2>
 <p>The configured service account must be able to write the repository when the in-app updater fetches and fast-forwards. Running manual Git commands as a different account can create objects under <code>.git/objects</code> that block the service user. Examples use the <code>netem</code> service and <code>/opt/netem</code> directory from the README; substitute the configured names on an existing appliance.</p>
 <p>Preferred manual Git pattern:</p>

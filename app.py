@@ -39,6 +39,7 @@ import platform_test
 import test_records
 import site_catalog
 import application_monitoring
+from component_updates import ComponentChecks
 import showcase_summary
 from showroom import create_showroom_app
 import branding
@@ -8929,12 +8930,39 @@ def simulator_update_state():
         return {}, str(exc)
 
 
+COMPONENT_CHECKS = ComponentChecks(sys.modules[__name__])
+
+
+def component_update_context():
+    simulator, simulator_error = simulator_update_state()
+    return dict(update_status=git_update_status(fetch=False), simulator=simulator,
+                simulator_error=simulator_error, component_checks=COMPONENT_CHECKS.snapshot(),
+                restarting=False, process_instance=PROCESS_INSTANCE)
+
+
+@app.get('/updates/components')
+def update_components():
+    context = component_update_context()
+    response = jsonify(html=render_template('_update_cards.html', **context), checks=context['component_checks'])
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+
 @app.route("/updates", methods=["GET", "POST"])
 def updates():
     restarting = False
 
     if request.method == "POST":
         action = request.form.get("action") or "check"
+        if action == 'check':
+            supplied, expected = request.form.get('integration_csrf', ''), session.get('integration_csrf', '')
+            if not supplied or not expected or not hmac.compare_digest(supplied.encode(), expected.encode()):
+                abort(400, 'Invalid form token. Reload the page and retry.')
+            COMPONENT_CHECKS.start()
+            return redirect(url_for('updates'))
+        if action == 'update' and COMPONENT_CHECKS.snapshot()['running']:
+            flash('Release checks are still running. Wait for them to finish before installing.', 'error')
+            return redirect(url_for('updates'))
         status = git_update_status(fetch=True)
 
         if not status["ok"]:
@@ -8985,6 +9013,7 @@ def updates():
         process_instance=PROCESS_INSTANCE,
         simulator=simulator,
         simulator_error=simulator_error,
+        component_checks=COMPONENT_CHECKS.snapshot(),
     )
 
 
