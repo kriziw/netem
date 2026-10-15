@@ -3606,6 +3606,11 @@ DIAGNOSIS_WINDOW_SECONDS = 12
 DIAGNOSIS_INTERVAL_SECONDS = 1.0
 DIAGNOSIS_CLEAR_SECONDS = 30
 SATURATION_PCT = 90.0
+# Queue-management drops alone do not establish sustained WAN pressure.
+QUEUE_PRESSURE_MIN_SECONDS = 5.0
+QUEUE_PRESSURE_MIN_SAMPLES = 4
+QUEUE_PRESSURE_DELAY_MS = 20.0
+QUEUE_PRESSURE_DROP_PCT = 1.0
 EGRESS_LEARN_INTERVAL_SECONDS = 60
 DIAGNOSIS_LOCK = threading.Lock()
 # "checked" is monotonic: after the wall clock steps back, a wall-clock age turns negative
@@ -3649,6 +3654,35 @@ def _mean(values):
     return sum(values) / len(values) if values else None
 
 
+def sustained_queue_pressure(samples, direction, limit_mbit):
+    """Corroborate drops with persistent backlog or repeated material queue loss.
+
+    Use queue-only loss, excluding injected random loss. A short burst or one
+    sampled drop cannot change WAN health or imply that its capacity is full.
+    """
+    rows = sorted((row for row in samples if row.get("rate_valid")
+                   and isinstance(row.get("timestamp"), (int, float))
+                   and row.get(f"{direction}_queue_drops_ps") is not None), key=lambda row: row["timestamp"])
+    if len(rows) < QUEUE_PRESSURE_MIN_SAMPLES or rows[-1]["timestamp"] - rows[0]["timestamp"] < QUEUE_PRESSURE_MIN_SECONDS:
+        return False
+    # A sparse/stalled sampler cannot establish persistence between observations.
+    if any(right["timestamp"] - left["timestamp"] > 3 * TELEMETRY_SAMPLE_SECONDS for left, right in zip(rows, rows[1:])):
+        return False
+    drops = [row[f"{direction}_queue_drops_ps"] for row in rows]
+    if _mean(drops) < 1:
+        return False
+    backlog = sum(row.get(f"{direction}_backlog_bytes") is not None and bool(limit_mbit)
+                  and row[f"{direction}_backlog_bytes"] * 8 / (limit_mbit * 1000) >= QUEUE_PRESSURE_DELAY_MS for row in rows)
+    if backlog >= len(rows) / 2:
+        return True
+    sent = [row.get(f"{direction}_pps") for row in rows]
+    if any(value is None for value in sent):
+        return False
+    offered = sum(sent) + sum(drops)
+    return (offered > 0 and 100 * sum(drops) / offered >= QUEUE_PRESSURE_DROP_PCT
+            and sum(value > 0 for value in drops) >= len(rows) / 2)
+
+
 def path_signals(state: dict, samples: list):
     """Summarize one WAN's recent path measurements and the conditions they show."""
     effective = state.get("effective") or {}
@@ -3681,14 +3715,19 @@ def path_signals(state: dict, samples: list):
             info[key] = _mean(sample.get(f"{direction}_{key}") for sample in (valid if key == "util_pct" else samples))
         info["queue_delay_ms"] = (info["backlog_bytes"] * 8 / (info["limit_mbit"] * 1000)
                                   if info["backlog_bytes"] is not None and info["limit_mbit"] else None)
+        info["pressure_sustained"] = sustained_queue_pressure(samples, direction, info["limit_mbit"])
         signals["directions"][direction] = info
         if info["util_pct"] is not None and info["util_pct"] >= SATURATION_PCT:
             signals["causes"].append({"kind": "saturated", "direction": direction, "severity": "warn",
                                       "text": f"{name} at {info['util_pct']:.0f}% of {info['limit_mbit']:g} Mbit/s"})
         if (info["queue_drops_ps"] or 0) >= 1:
+            pressure = info["pressure_sustained"] or (info["util_pct"] or 0) >= SATURATION_PCT
             signals["causes"].append({
-                "kind": "queue_drops", "direction": direction, "severity": "warn",
-                "text": f"{name} queue drops: {info['queue_drops_ps']:.0f} packets/s dropped ({info['drop_pct'] or 0:.1f}%)",
+                "kind": "queue_drops" if pressure else "queue_activity", "direction": direction,
+                "severity": "warn" if pressure else "info",
+                "text": f"{name} queue drops: {info['queue_drops_ps']:.0f} packets/s"
+                        + ("; sustained pressure measured" if info["pressure_sustained"] else
+                           "; high utilization measured" if pressure else "; sustained pressure not established"),
             })
     loss = signals["injected"]["loss_pct"]
     if loss > 0 and fault == "normal":
@@ -3704,7 +3743,7 @@ def path_signals(state: dict, samples: list):
             "text": f"{delay:g} ms" + (f" ± {jitter:g} ms" if jitter else "") + " delay added to every round trip",
         })
     signals["full"] = sorted({cause["direction"] for cause in signals["causes"]
-                              if cause["kind"] in ("saturated", "queue_drops")})
+                              if cause["kind"] == "saturated"})
     # Health decides where a well-behaved SD-WAN appliance should steer traffic.
     sla = state.get("sla") or {}
     failing = [name for name, ok in (sla.get("checks") or {}).items() if not ok and name != "data_plane"]
@@ -3720,7 +3759,7 @@ def path_signals(state: dict, samples: list):
                                              if cause["kind"] in ("saturated", "queue_drops"))
     elif any(cause["kind"] == "queue_drops" for cause in signals["causes"]):
         signals["health"] = "queue_pressure"
-        signals["health_reason"] = "Queue drops measured; sustained high utilization is not established"
+        signals["health_reason"] = "Queue drops corroborated by sustained backlog or material queue loss; sustained high utilization is not established"
     else:
         signals["health"], signals["health_reason"] = "healthy", None
     return signals

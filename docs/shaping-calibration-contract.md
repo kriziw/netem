@@ -40,3 +40,22 @@ Each shaped direction scales its resource guards from one second of its configur
 The previous memory guard reused 25 ms of payload bytes as kernel allocation bytes (65,536 bytes at 18 Mbit/s; 131,250 at 42 Mbit/s). This could constrain bursts independently of average link utilization. The namespace regression compares those old memory guards with the generous guards at both rates and at 160/1,500-byte packet sizes.
 
 Telemetry now records fair-queue memory-limit drops, packet-limit drops excluding memory-limit drops, and remaining drops (AQM/other). Linux counts memory-limit drops within its overlimit counter; they are not added twice. Missing kernel counters remain unknown. Remaining drops are not proof of a particular CoDel decision. Injected loss remains a separate counter-difference estimate.
+
+## WAN queue-pressure diagnosis
+
+Queue drops alone are operator diagnostic activity, not proof of an unhealthy or
+full WAN. Within the existing 12-second diagnosis window, a queue-pressure warning
+requires at least four valid rate samples spanning five seconds, without sampling
+gaps exceeding three seconds. Drops must average at least one packet per second,
+corroborated by either rate-queue backlog equivalent to at least 20 ms in half the
+samples, or estimated queue-only loss of at least 1% with drops in half the samples.
+Queue-only loss uses sent packets plus queue drops; injected random loss is excluded.
+Missing timing/rate evidence does not establish persistence. A single large burst
+does not satisfy the repeated-loss/backlog criterion.
+
+Raw counters and uncorroborated drops remain visible in operator diagnostics as
+information, without claiming to explain an application symptom. Measured
+application failures remain visible independently. The existing high-utilization,
+configured SLA failure and outage rules retain priority; `full` directions now
+require measured high utilization, not drops alone. These are diagnostic policy
+thresholds, not changes to queues, rate limits, CoDel, or simulator burst scheduling.
