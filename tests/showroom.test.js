@@ -398,6 +398,46 @@ test('baseline preparation yields immediately to failures and ends when evidence
   assert.equal(ui.stageMode(data), 'intro');
 });
 
+test('baseline screen stays dismissed after live display and resets for the next test', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  let nextPoll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) nextPoll = fn; return 1; };
+  win.clearTimeout = () => {}; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true, started_at: 100}, session: {active: true}, links: [],
+    traffic: {monitoring: {enabled: true, preparing: true}},
+    experience: {available: false, verdicts: {experience: 'unknown'}}};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  const doc = win.document;
+  assert.equal(doc.body.dataset.mode, 'preparing');
+  data.traffic.monitoring.preparing = false;
+  await nextPoll();
+  assert.equal(doc.body.dataset.mode, 'live');
+  for (const changes of [{}, {phase_index: 1}, {paused: true}, {paused: false}, {started_at: null}]) {
+    Object.assign(data.scenario, changes);
+    data.traffic.monitoring.preparing = true;
+    await nextPoll();
+    assert.equal(doc.body.dataset.mode, 'live');
+    assert.equal(doc.getElementById('stage').hidden, true);
+  }
+  // Consecutive tests may arrive without an inactive snapshot between them.
+  Object.assign(data.scenario, {started_at: 200, intro: true});
+  await nextPoll();
+  assert.equal(doc.body.dataset.mode, 'intro');
+  data.scenario.intro = false;
+  await nextPoll();
+  assert.equal(doc.body.dataset.mode, 'preparing');
+  data.experience.verdicts.experience = 'fail';
+  await nextPoll();
+  assert.equal(doc.body.dataset.mode, 'live');
+  data.experience.verdicts.experience = 'unknown';
+  await nextPoll();
+  assert.equal(doc.body.dataset.mode, 'live');
+  dom.window.close();
+});
+
 test('customer display separates monitoring, keeps confidence in details and shows only attributed routes', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;

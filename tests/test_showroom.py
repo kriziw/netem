@@ -104,6 +104,13 @@ class SnapshotTests(unittest.TestCase):
         with patch.object(netem, "load_config", return_value={"time_format": "12h"}):
             self.assertEqual(self.snapshot(None)["time_format"], "12h")
 
+    def test_test_start_timestamp_identifies_the_run_without_exposing_internal_ids(self):
+        with patch.object(netem, "scenario_snapshot", return_value={
+                "active": True, "started_at": 1234.5, "run_id": "private-run"}):
+            scenario = self.snapshot(None)["scenario"]
+        self.assertEqual(scenario["started_at"], 1234.5)
+        self.assertNotIn("run_id", scenario)
+
     def test_finished_test_report_is_published_only_between_tests(self):
         summary = {"name": "Brownout", "link": "WAN1", "result": "failed", "ended_at": 90, "duration_s": 240,
                    "link_id": "internal-link", "scenario_id": "internal-id",

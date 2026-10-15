@@ -9588,7 +9588,7 @@ def showroom_session_snapshot():
         "showcase_video": showcase_video_public(cfg),
         "appliance": {key: value for key, value in (lab_session.get("appliance") or {}).items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
-            "active", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
+            "active", "started_at", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
             "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s", "preparing_workload")},
             link=showroom_link_label(cfg, scenario.get("link_id")),
             # Shown while a test is announced: what each phase does and what is checked.

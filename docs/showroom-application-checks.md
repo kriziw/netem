@@ -22,6 +22,13 @@ always take precedence. This is presentation only: tests keep their existing pha
 timing and evidence boundaries; previous-phase samples are never reused to fill a
 current-phase gap. Preparation is not repeated at every phase transition.
 
+Once the main test screen has appeared, that display keeps preparation dismissed
+for the rest of that test, including evidence gaps, phase changes and pause/resume.
+A confirmed failure also dismisses preparation immediately and permanently for
+that test. The next test can establish its own initial baseline. The public test
+start timestamp identifies consecutive tests even when no idle snapshot arrives
+between them; no internal run identifiers are exposed.
+
 Observed scores keep neutral verdicts until acceptance is established. Confidence
 explanations and individual sample counts remain in expandable application
 measurements; the main cards lead with measured performance or observed impact.

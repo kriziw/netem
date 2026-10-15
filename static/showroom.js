@@ -209,15 +209,33 @@
 
   // What fills the screen: a waiting screen before the session, a test's announcement for the
   // few seconds before it starts, a run sequence's results, and otherwise the live dashboard.
-  function stageMode(data) {
+  function stageMode(data, baselineDismissed = false) {
     const scenario = (data && data.scenario) || {};
     if (scenario.active && scenario.intro) return 'intro';
-    if (scenario.active && ((data && data.traffic || {}).monitoring || {}).preparing &&
+    if (scenario.active && !baselineDismissed && ((data && data.traffic || {}).monitoring || {}).preparing &&
         ((data && data.experience || {}).verdicts || {}).experience !== 'fail') return 'preparing';
     if (!scenario.active && (data && data.session || {}).active) return 'session';
     if (showPlanSummary(data)) return 'summary';
     if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
     return 'live';
+  }
+
+  // Preparation is an initial screen, never a replacement for a test already shown live.
+  function createStageController() {
+    let active = false, startedAt = null, intro = false, liveShown = false;
+    return data => {
+      const scenario = (data && data.scenario) || {};
+      const identity = scenario.started_at ?? null;
+      if (!scenario.active || !active || (identity !== null && identity !== startedAt) || (scenario.intro && !intro)) {
+        liveShown = false;
+      }
+      active = Boolean(scenario.active);
+      if (identity !== null || !active) startedAt = identity;
+      intro = Boolean(scenario.intro);
+      const mode = stageMode(data, liveShown);
+      if (active && mode === 'live') liveShown = true;
+      return mode;
+    };
   }
 
   function waitingView(site) {
@@ -320,6 +338,7 @@
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
   let latest = null, online = false, page = 0, receivedAt = 0;
+  const selectStage = createStageController();
   const text = (id, value) => setText(document.getElementById(id), value);
   const element = (tag, className, content) => {
     const node = document.createElement(tag);
@@ -680,7 +699,7 @@
   }
 
   function renderStage() {
-    const mode = stageMode(latest);
+    const mode = selectStage(latest);
     document.body.dataset.mode = mode;
     document.getElementById('stage').hidden = mode === 'live';
     document.getElementById('waiting').hidden = !['waiting', 'session', 'preparing'].includes(mode);
