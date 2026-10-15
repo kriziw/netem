@@ -1,42 +1,32 @@
-<h2 id="implemented">Implemented in this development line</h2>
-<p>The first measurement/evidence milestone is now in place:</p>
-<div class="docs-table"><table><thead><tr><th>Capability</th><th>Status</th><th>What is now available</th></tr></thead><tbody>
-<tr><td>Active measurement engine</td><td><span class="status good">Implemented</span></td><td>ICMP, TCP, HTTP/HTTPS and DNS probes with persisted results and state-transition events.</td></tr>
-<tr><td>Persistent telemetry</td><td><span class="status good">Implemented</span></td><td>SQLite WAN/probe time series, ~2s WAN sampling, 7-day retention and historical API/chart ranges.</td></tr>
-<tr><td>Session reports + assertions</td><td><span class="status good">Implemented</span></td><td>PASS/FAIL/UNSCORED session reports, test/assertion summaries, WAN telemetry and probe statistics, HTML + JSON evidence.</td></tr>
-<tr><td>Conditional scenarios</td><td><span class="status good">Implemented</span></td><td>State-driven wait/assert stages using expected SLA, active probes or measured traffic.</td></tr>
+<p>This page separates features already in the application from improvements still planned. SQLite data storage is available now.</p>
+<h2 id="implemented">Available now</h2>
+<div class="docs-table"><table><thead><tr><th>Capability</th><th>Status</th><th>What you can use today</th></tr></thead><tbody>
+<tr><td>Persistent history</td><td><span class="status good">Available</span></td><td>SQLite stores WAN, host and probe measurements across restarts, with seven-day rolling retention. Session reports and downloadable test records are also saved on disk.</td></tr>
+<tr><td>Application traffic and experience</td><td><span class="status good">Available</span></td><td>The Traffic Simulator runs simulated users and continuous application checks through a configured path to the controlled target. Tests and the showroom display measured application outcomes.</td></tr>
+<tr><td>Active measurements</td><td><span class="status good">Available</span></td><td>ICMP, TCP, HTTP/HTTPS and DNS probes with saved results and failure/recovery events.</td></tr>
+<tr><td>Conditional tests and reports</td><td><span class="status good">Available</span></td><td>Timed stages, condition-based waits, assertions, workload controls, named phases, saved session reports and per-test evidence downloads.</td></tr>
+<tr><td>Appliance inventory and FortiGate monitoring</td><td><span class="status good">Available</span></td><td>Saved device inventory, FortiGate management health and licence observations, alerts and test-start checks. Other vendors can be inventoried and selected as traffic paths.</td></tr>
+<tr><td>Verified paths and controlled target</td><td><span class="status good">Available</span></td><td>Workload route verification, source-bound path health checks and controlled-target application measurements.</td></tr>
+<tr><td>Shaping diagnostics</td><td><span class="status good">Available</span></td><td>Injected conditions beside kernel-reported shaping, queue/drop measurements and host health.</td></tr>
+<tr><td>Component updates</td><td><span class="status good">Available</span></td><td>One check for NetEm, Traffic Simulator and controlled-target updates, with separate installs. NetEm checks for local changes and requires a fast-forward update.</td></tr>
 </tbody></table></div>
+<p>Use <a href="{{ url_for('documentation_page', slug='analytics-sla') }}">Analytics &amp; SLA</a> for measurement history, <a href="{{ url_for('documentation_page', slug='sessions') }}">Lab Sessions</a> for saved reports, and <a href="{{ url_for('documentation_page', slug='appliances') }}">Appliances</a> for monitoring and path setup.</p>
 
-<h2 id="next">Recommended next features</h2>
-<p>With measurement, persistence, assertions and reports available, the highest-value next step is to correlate NetEm with the appliance under test and expand orchestration.</p>
-
-<h3 id="vendor">1. Vendor adapter framework + Fortinet first</h3>
-<p>Define a normalized adapter contract for WAN-member health, observed latency/jitter/loss, SLA state and selected path. Implement Fortinet first so session reports can calculate real detection and failover timing in the current lab, then reuse the contract for other vendors.</p>
-
-<h3 id="parallel">2. Parallel multi-WAN scenarios</h3>
-<p>Allow a test to manipulate multiple WANs at once: primary outage while backup degrades, staggered recovery, dual brownout and bounded chaos profiles.</p>
-
-<h3 id="traffic">3. Bounded traffic generator</h3>
-<p>Add a guarded iperf3 workflow with allowlisted/configured targets, hard bandwidth/PPS/duration limits, constant/burst/microburst modes, emergency stop and Lab Session correlation.</p>
-
-<h3 id="comparison">4. Session comparison analytics</h3>
-<p>Compare two completed validation runs: assertion outcomes, fail/recovery timing, probe percentiles, throughput behavior and later vendor-observed response. This is especially useful for before/after tuning and vendor/config comparisons.</p>
-
-<h3 id="preflight">5. qdisc and updater self-verification</h3>
-<p>After applying shaping, compare requested state with the kernel qdisc state and surface partial failures. Before an in-app update, verify Git/service-user permissions, working-tree cleanliness, fast-forward eligibility and restart policy.</p>
-
-<h3 id="agent">6. Remote probe agent</h3>
-<p>Add a lightweight probe agent that can run behind the appliance under test. This removes the current transparent-bridge limitation of host-routed probes and gives true appliance-side path measurements without adding L3 addresses to NetEm's WAN bridge ports.</p>
-
-<h3 id="platform">7. Shared-lab platform features</h3>
-<ul>
-<li>authentication and scoped API tokens;</li>
-<li>configuration/profile/session backup and restore;</li>
-<li>dynamic WAN count beyond two links;</li>
-<li>additional vendor adapters.</li>
-</ul>
-
-<h2 id="metrics">Resilience metrics unlocked by the next adapter phase</h2>
-<p>Once vendor-observed events exist beside injected and measured state, session reports can calculate detection time, failover convergence, service interruption, recovery convergence and discrepancies between expected, measured and appliance-observed SLA state.</p>
-
-<div class="docs-tip"><strong>Recommended next implementation:</strong> the Fortinet adapter framework is now the logical next milestone. The measurement/evidence foundation it depends on is already present.</div>
+<h2 id="next">Planned improvements</h2>
+<p>The items below describe additional work, rather than features that need enabling. They are not release-date commitments.</p>
+<h3 id="vendor">Appliance-reported SD-WAN behaviour</h3>
+<p>Extend vendor integrations with the appliance's own WAN SLA measurements, selected paths and transition events. FortiGate health/licence monitoring already exists; detailed SD-WAN observations and additional monitoring adapters remain planned.</p>
+<h3 id="parallel">Parallel WAN actions and richer orchestration</h3>
+<p>Add simultaneous impairment of several WANs, branching and capture triggers. Sequential condition-based waits and pass/fail assertions are already available.</p>
+<h3 id="comparison">Session comparison and evidence management</h3>
+<p>Add side-by-side comparisons of completed sessions, configurable retention and a guided backup/restore workflow. Existing SQLite history, saved session reports and test-record downloads provide the evidence foundation.</p>
+<h3 id="traffic">Additional traffic and fault tools</h3>
+<p>Add a guarded iperf3 workflow and PCAP replay alongside the existing application simulator. Dedicated PMTUD-blackhole simulation also remains planned; temporary MTU changes and directional/bidirectional outages already exist.</p>
+<h3 id="preflight">Stronger shaping and update checks</h3>
+<p>Build on the current shaping readback and Git update checks with comprehensive requested-versus-installed validation and service-permission/restart-policy preflight.</p>
+<h3 id="agent">Additional remote probe locations</h3>
+<p>Add independently deployed probe-only agents at other locations. Simulator-to-controlled-target checks already exist. NetEm host-routed probes still cannot prove that traffic crossed a particular transparent WAN.</p>
+<h3 id="platform">Shared-lab access and scale</h3>
+<ul><li>Operator sign-in, roles and scoped NetEm API access;</li><li>dynamic WAN setup beyond the current two-WAN setup form;</li><li>more vendor monitoring adapters and report attachments for packet captures.</li></ul>
+<h2 id="metrics">What the next observation layer adds</h2>
+<p>Appliance-reported path changes would let reports compare injected conditions, measured application impact and the appliance's own failure-detection and recovery decisions. Current traffic/application measurements and inferred steering remain separate from those future vendor observations.</p>

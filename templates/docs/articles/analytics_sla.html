@@ -9,7 +9,7 @@
 </tbody></table></div>
 
 <h2 id="persistent">Persistent SQLite telemetry</h2>
-<p>A background worker samples each configured WAN approximately every two seconds and stores server-side time series in <code>runtime/telemetry.db</code>. The default retention window is 168 hours (7 days). Browser reloads therefore no longer erase historical WAN charts.</p>
+<p>A background worker samples each configured WAN approximately once per second and stores server-side time series in <code>runtime/telemetry.db</code>. The default retention window is 168 hours (7 days). Browser reloads therefore no longer erase historical WAN charts.</p>
 <p>Stored WAN samples include downstream/upstream Mbit/s, downstream/upstream PPS, injected latency/jitter/loss/quality, expected SLA state, runtime fault and active Lab Session ID.</p>
 
 <h2 id="range">Historical range</h2>
@@ -32,7 +32,7 @@
 <tr><td>DNS</td><td>UDP A-query response time via the configured resolver.</td></tr>
 </tbody></table></div>
 <p>Probe intervals are limited to 2–3600 seconds and timeouts to 0.2–10 seconds. Up to 20 probes can be configured.</p>
-<div class="docs-warning"><strong>Transparent-path limitation:</strong> the WAN bridge ports normally carry no L3 address. A probe using <strong>Automatic</strong> source follows the NetEm host's routing table and is associated with the WAN for correlation, but it does not prove the selected transparent path was crossed. Inner/outer binding is available when that interface has a usable L3 route/source address. True appliance-side path probes require a remote probe agent or vendor observation, which remains a future extension.</div>
+<div class="docs-warning"><strong>Transparent-path limitation:</strong> the WAN bridge ports normally carry no L3 address. A probe using <strong>Automatic</strong> source follows the NetEm host's routing table and is associated with the WAN for correlation, but it does not prove the selected transparent path was crossed. Inner/outer binding is available when that interface has a usable L3 route/source address. The Traffic Simulator already offers source-bound path checks and application measurements to the controlled target. Independently deployed probe-only agents at additional locations and appliance-reported SD-WAN observations remain planned.</div>
 
 <h2 id="probe-events">Probe state transitions</h2>
 <p>Every probe sample is stored, but the event timeline is not flooded with routine successes. A <code>probe</code> runtime event is written only when the probe changes between success and failure/recovery.</p>

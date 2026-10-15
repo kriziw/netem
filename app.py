@@ -7102,9 +7102,9 @@ DOCS_PAGES = [
     },
     {
         "slug": "roadmap",
-        "title": "Product roadmap",
+        "title": "Capabilities & roadmap",
         "category": "Reference",
-        "summary": "Prioritized next capabilities for measurement, evidence, vendor correlation, orchestration and scale.",
+        "summary": "Available now, including saved SQLite history, and planned improvements to observation, orchestration and evidence.",
         "template": "docs/articles/roadmap.html",
         "keywords": "roadmap future active probes sqlite reports adapter assertions conditional traffic generator scale",
     },
