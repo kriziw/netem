@@ -566,12 +566,12 @@
     if (group.scoring_complete !== false) return group.text;
     if (!number(group.score)) return 'Application checks are running.';
     if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
-    return 'Latest measured application performance. Monitoring continues.';
+    return 'Observed application performance. Monitoring continues.';
   }
 
   // Detailed confidence belongs with the expandable measurements, not in every headline.
   function groupCards(groups, live) {
-    return (Array.isArray(groups) ? groups : []).map(group => {
+    return (Array.isArray(groups) ? groups : []).filter(group => group.keep_visible || group.requests || (group.applications || []).length).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
       card.dataset.group = group.key || group.label;
       const score = live && number(group.score) ? group.score + ' / 100' : '—';
@@ -646,8 +646,11 @@
       // and an open/focused disclosure stays open while measurements refresh.
       const groups = experience.groups && experience.groups.length ? experience.groups
         : Array.from(groupHolder.children).map(card => ({key: card.dataset.group,
-          label: card.querySelector('span').textContent, score: null, tone: 'unknown', scoring_complete: false}));
-      reconcile(groupHolder, groupCards(groups, live), card => card.dataset.group, card => card, (card, next) => {
+          label: card.querySelector('span').textContent, score: null, tone: 'unknown', scoring_complete: false, keep_visible: true}));
+      const visibleGroups = new Set(Array.from(groupHolder.children).map(card => card.dataset.group));
+      const cards = groupCards(groups.map(group => ({...group, keep_visible: group.keep_visible ||
+        !latest.experience.available && visibleGroups.has(group.key || group.label)})), live);
+      reconcile(groupHolder, cards, card => card.dataset.group, card => card, (card, next) => {
         if (card === next) return;
         card.className = next.className;
         for (const selector of ['span', 'strong', '.group-status']) setText(card.querySelector(selector), next.querySelector(selector).textContent);

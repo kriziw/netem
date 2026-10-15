@@ -547,7 +547,7 @@ test('customer display separates monitoring, keeps confidence in details and sho
   const doc = win.document;
   assert.match(doc.getElementById('measurement-note').textContent, /2 simulated users \+ continuous application monitoring/);
   assert.match(doc.getElementById('outcome-window').textContent, /includes 20 application checks/);
-  assert.match(doc.querySelector('.subscore > p').textContent, /Latest measured application performance/);
+  assert.match(doc.querySelector('.subscore > p').textContent, /Observed application performance/);
   assert.match(doc.querySelector('.subscore details').textContent, /Limited sample/);
   assert.equal(doc.getElementById('routes').parentElement.hidden, true);
   assert.equal(doc.getElementById('network-timing').hidden, true);
