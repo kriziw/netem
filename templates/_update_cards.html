@@ -1,0 +1,132 @@
+{% set system = simulator.get('system') or {} %}
+{% set target = system.get('target') or {} %}
+{% set agent_release = system.get('release') or {} %}
+{% set target_release = target.get('release') or {} %}
+{% set checks = component_checks.components %}
+<div class="grid grid-3" data-update-cards data-components-url="{{ url_for('update_components') }}">
+  <section class="card" data-component="netem">
+    <div class="card-head">
+      <div><div class="card-title">NetEm</div><div class="card-sub">Operator interface, tests and showroom · releases from origin/{{ update_status.target_branch or "main" }}</div></div>
+      {% set check = checks.get('netem') or {} %}
+      {% if check.get('state') == 'checking' %}<span class="status info">Checking…</span>
+      {% elif check.get('state') == 'error' %}<span class="status bad">Check failed</span>
+      {% elif update_status.ok %}
+        {% if update_status.dirty %}<span class="status warn">Local changes</span>
+        {% elif update_status.update_available and not update_status.release_reachable %}<span class="status bad">Diverged</span>
+        {% elif update_status.update_available %}<span class="status warn">Update available</span>
+        {% else %}<span class="status good">Up to date</span>{% endif %}
+      {% else %}<span class="status bad">Unavailable</span>{% endif %}
+    </div>
+    <div class="card-pad">
+      {% if check.get('message') %}<p role="status">{{ check.message }}</p>{% endif %}
+      <div class="kv">
+        <div class="k">Installed</div><div class="v"><span class="mono">v{{ update_status.installed_version or app_version }}</span>{% if update_status.commit %} · <span class="mono">{{ update_status.commit }}</span>{% endif %}</div>
+        <div class="k">Latest release</div><div class="v">{% if update_status.remote_version %}<span class="mono">v{{ update_status.remote_version }}</span>{% else %}—{% endif %}{% if update_status.release_commit %} · <span class="mono">{{ update_status.release_commit }}</span>{% endif %}</div>
+        <div class="k">Unreleased commits</div><div class="v">{{ update_status.unreleased or 0 }} · merged on main, installed with the next release</div>
+        <div class="k">Working tree</div><div class="v">{{ "Modified" if update_status.dirty else "Clean" }}</div>
+      </div>
+
+      <details class="traffic-advanced" style="margin-top:12px">
+        <summary>Git details</summary>
+        <div class="kv" style="margin-top:10px">
+          <div class="k">Local branch</div><div class="v mono">{{ update_status.branch or "unknown" }}</div>
+          <div class="k">Remote</div><div class="v mono">{{ update_status.remote_url or "unknown" }}</div>
+          <div class="k">Installed commit</div><div class="v"><span class="mono">{{ update_status.commit or "unknown" }}</span>{% if update_status.subject %} · {{ update_status.subject }}{% endif %}</div>
+          <div class="k">Release commits to install</div><div class="v">{{ update_status.release_behind if update_status.update_available else 0 }}</div>
+          <div class="k">Local-only commits</div><div class="v">{{ update_status.ahead or 0 }}</div>
+        </div>
+      </details>
+
+      {% if update_status.error %}
+        <div class="flash error" style="margin-top:14px">{{ update_status.error }}</div>
+      {% endif %}
+
+      <div class="actions" style="margin-top:15px">
+
+        <form method="post" action="{{ url_for('updates') }}" data-update-form
+              data-from="{{ update_status.installed_version or app_version }}" data-to="{{ update_status.remote_version or '' }}"
+              data-mark="{{ branding.mark }}" data-instance="{{ process_instance }}" data-status-url="{{ url_for('updates_status') }}">
+          <input type="hidden" name="action" value="update">
+          <button class="btn btn-primary" type="submit"
+            {% if component_checks.running or check.get('state') == 'error' or not update_status.ok or update_status.dirty or not update_status.update_available or not update_status.release_reachable %}disabled{% endif %}>
+            Install update
+          </button>
+        </form>
+      </div>
+      <p class="field-help">Installing restarts NetEm. Its configuration, telemetry and test history are kept.</p>
+    </div>
+  </section>
+
+  <section class="card" data-component="simulator">
+    <div class="card-head">
+      <div><div class="card-title">Traffic Simulator</div><div class="card-sub">Simulated users and their measured experience</div></div>
+      {% set check = checks.get('simulator') or {} %}
+      {% if check.get('state') == 'checking' %}<span class="status info">Checking…</span>
+      {% elif check.get('state') == 'error' %}<span class="status bad">Check failed</span>
+      {% elif simulator_error %}<span class="status bad">Not connected</span>
+      {% elif system.get('busy') and (system.get('job') or {}).get('action') == 'install_update' %}<span class="status info">Installing…</span>
+      {% elif agent_release.available %}<span class="status warn">Update available</span>
+      {% elif agent_release.tag %}<span class="status good">Up to date</span>
+      {% else %}<span class="status info">Not checked</span>{% endif %}
+    </div>
+    <div class="card-pad">
+      {% if check.get('message') %}<p role="status">{{ check.message }}</p>{% endif %}
+      <p role="status">{{ (system.get('job') or {}).get('message', '') }}</p>
+      {% if simulator_error %}
+        <p class="field-help">{{ simulator_error }}</p>
+      {% endif %}
+      <div class="kv">
+        <div class="k">Installed</div><div class="v mono">{{ simulator.get('version') or "unknown" }}</div>
+        <div class="k">Latest release</div><div class="v mono">{{ agent_release.get('display_tag') or agent_release.get('tag') or "not checked" }}</div>
+      </div>
+      <div class="actions" style="margin-top:15px">
+
+        <form method="post" action="{{ url_for('traffic_settings_command', section='maintenance', command='system') }}">
+          <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+          <input type="hidden" name="return_to" value="updates">
+          <input type="hidden" name="action" value="install_update">
+          <input type="hidden" name="tag" value="{{ agent_release.get('tag', '') }}">
+          <button class="btn btn-primary" type="submit" {% if component_checks.running or check.get('state') == 'error' or simulator_error or not agent_release.get('available') or system.get('busy') or system.get('workload_active') %}disabled{% endif %}>Install update</button>
+        </form>
+      </div>
+      <p class="field-help">Installing restarts the simulator and keeps its configuration and run history. Stop any running test first.</p>
+    </div>
+  </section>
+
+  <section class="card" data-component="target">
+    <div class="card-head">
+      <div><div class="card-title">Controlled target</div><div class="card-sub">Target on the ISP router, updated over its management connection</div></div>
+      {% set check = checks.get('target') or {} %}
+      {% if check.get('state') == 'checking' %}<span class="status info">Checking…</span>
+      {% elif check.get('state') == 'error' %}<span class="status bad">Check failed</span>
+      {% elif simulator_error or not target.get('connected') %}<span class="status warn">Not connected</span>
+      {% elif system.get('busy') and (system.get('job') or {}).get('action') == 'target_install' %}<span class="status info">Installing…</span>
+      {% elif target_release.get('available') %}<span class="status warn">Update available</span>
+      {% elif target.get('version_match') is sameas false %}<span class="status warn">Version mismatch</span>
+      {% elif target_release.get('tag') %}<span class="status good">Up to date</span>
+      {% else %}<span class="status info">Not checked</span>{% endif %}
+    </div>
+    <div class="card-pad">
+      {% if check.get('message') %}<p role="status">{{ check.message }}</p>{% endif %}
+      <div class="kv">
+        <div class="k">Management</div><div class="v mono">{{ target.get('host') or "No management address" }}</div>
+        <div class="k">Installed</div><div class="v mono">{{ target.get('version') or "unknown" }}</div>
+        <div class="k">Latest release</div><div class="v mono">{{ target_release.get('display_tag') or target_release.get('tag') or "not checked" }}</div>
+      </div>
+      <p data-executor-target role="status">{{ (target.get('job') or {}).get('message', '') }}</p>
+      {% if target.get('version_match') is sameas false %}<p class="docs-warning">The simulator and the target run different versions. Install matching releases.</p>{% endif %}
+      <div class="actions" style="margin-top:15px">
+
+
+        <form method="post" action="{{ url_for('traffic_settings_command', section='maintenance', command='system') }}">
+          <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+          <input type="hidden" name="return_to" value="updates">
+          <input type="hidden" name="action" value="target_install">
+          <input type="hidden" name="tag" value="{{ target_release.get('tag', '') }}">
+          <button class="btn btn-primary" type="submit" {% if component_checks.running or check.get('state') == 'error' or simulator_error or not target.get('connected') or not target_release.get('available') or target.get('busy') or system.get('busy') or system.get('workload_active') %}disabled{% endif %}>Install update</button>
+        </form>
+      </div>
+      <p class="field-help">Connect or change the target's management connection under Settings → Agent &amp; target.</p>
+    </div>
+  </section>
+</div>

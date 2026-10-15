@@ -62,6 +62,9 @@ def install(app, netem):
         destination = url_for('updates') if return_to == 'updates' else url_for('traffic_settings', section=section)
         try:
             with netem.APPLIANCE_PLATFORM.operations:
+                if (command == 'system' and raw.get('action') in ('install_update', 'target_install')
+                        and netem.COMPONENT_CHECKS.snapshot()['running']):
+                    raise ValueError('Release checks are still running. Wait for them to finish before installing.')
                 if netem.scenario_snapshot().get('active'):
                     raise ValueError('This test controls traffic. Stop & restore the test before changing configuration.')
                 if command == 'experience':

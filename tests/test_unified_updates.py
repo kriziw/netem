@@ -44,14 +44,16 @@ class UpdatesPageTests(unittest.TestCase):
             self.assertIn(name, page)
         self.assertIn('0.17.0', page)
         self.assertIn('0.9.2', page)
-        self.assertIn('New release', page)
+        self.assertIn('Update available', page)
 
     def test_simulator_and_target_actions_go_through_the_simulator_command_and_return_here(self):
         page = self.page(copy.deepcopy(SIMULATOR))
-        for action in ('check_update', 'install_update', 'target_status', 'target_check', 'target_install'):
+        for action in ('install_update', 'target_install'):
             with self.subTest(action=action):
                 self.assertIn(f'name="action" value="{action}"', page)
-        self.assertEqual(page.count('name="return_to" value="updates"'), 5)
+        self.assertEqual(page.count('name="return_to" value="updates"'), 2)
+        self.assertEqual(page.count('>Check for updates</button>'), 1)
+        self.assertIn('data-all-update-check', page)
         self.assertIn('action="/settings/traffic/maintenance/system"', page)
         self.assertIn('name="tag" value="v0.17.0"', page)
 
@@ -60,7 +62,7 @@ class UpdatesPageTests(unittest.TestCase):
         self.assertIn('not configured', page)
         self.assertIn('Not connected', page)
         simulator = page.split('>Traffic Simulator<', 1)[1].split('>Controlled target<', 1)[0]
-        self.assertEqual(simulator.count('disabled'), 2)
+        self.assertEqual(simulator.count('disabled'), 1)
 
     def test_the_netem_install_keeps_its_progress_form(self):
         page = self.page(copy.deepcopy(SIMULATOR))

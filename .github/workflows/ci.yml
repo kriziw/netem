@@ -280,6 +280,8 @@ jobs:
           node --test tests/showcase-groups.test.js
           node --check static/site-scenarios.js
           node --test tests/update-screen.test.js
+          node --test tests/component-updates.test.js
+          node --check static/component-updates.js
           node --check static/update-screen.js
           node --check static/simulator-dialog.js
           node --test tests/actions.test.js
