@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.0](https://github.com/kriziw/netem/compare/v1.3.7...v1.4.0) (2026-10-16)
+
+
+### Features
+
+* add RBAC, Authentik OIDC and test phase controls ([#149](https://github.com/kriziw/netem/issues/149)) ([fd5905b](https://github.com/kriziw/netem/commit/fd5905be832832e758ab994052d0446a4187cae9))
+
 ## [1.3.7](https://github.com/kriziw/netem/compare/v1.3.6...v1.3.7) (2026-10-16)
 
 
