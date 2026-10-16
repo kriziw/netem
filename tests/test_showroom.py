@@ -363,3 +363,58 @@ class EvidenceStoryRegressionTests(unittest.TestCase):
         story = netem.showroom_story(diagnosis, self.links(), self.outcome, now=20)
         self.assertEqual(story["impacts"][0]["impact"], "File transfers: transferring slowly")
         self.assertEqual(story["impacts"][0]["cause"], "observed on WAN1; cause not established")
+
+
+class OverdueNarrationTests(unittest.TestCase):
+    def setUp(self):
+        replacement = patch.object(netem, 'SHOWROOM_STATE', {'values': {}, 'impacts': {}})
+        replacement.start()
+        self.addCleanup(replacement.stop)
+
+    def present(self, now, risk=False, acceptance='pass', **dem):
+        experience = {'available': True, 'scoring_complete': not risk,
+                      'business_acceptance': acceptance, 'user_impact': ''}
+        story = {'status': 'Users are meeting targets.' if acceptance == 'pass' else 'Users are below target.'}
+        netem.showroom_evidence_story(story, experience, dict(dem, at_risk=risk), now=now)
+        return story, experience
+
+    def test_brief_overdue_retains_explicitly_historical_observation_without_changing_verdict(self):
+        self.present(100)
+        story, experience = self.present(102, risk=True, acceptance='unknown',
+                                         evidence_issues=['outstanding_overdue_operations'])
+        self.assertEqual(story['status'], 'Last confirmed observation: Users are meeting targets.')
+        self.assertTrue(experience['user_impact'].startswith('Last confirmed observation:'))
+        self.assertEqual(experience['business_acceptance'], 'unknown')
+        self.assertFalse(experience['scoring_complete'])
+        self.assertEqual(self.present(104)[0]['status'], 'Users are meeting targets.')
+        # A separate blip receives its own settling period.
+        self.assertNotIn('remain overdue', self.present(110, risk=True, acceptance='unknown')[0]['status'])
+
+    def test_persistent_overdue_expires_and_does_not_extend_on_each_poll(self):
+        self.present(100)
+        self.present(102, risk=True, acceptance='unknown')
+        self.present(106, risk=True, acceptance='unknown')
+        story, experience = self.present(110, risk=True, acceptance='unknown')
+        self.assertIn('remain overdue', story['status'])
+        self.assertEqual(experience['user_impact'], '')
+
+    def test_failure_pending_and_invalid_evidence_bypass_retention(self):
+        for dem in ({'live_paused': True}, {'truncated': True},
+                    {'evidence_issues': ['dropped_transactions']}):
+            self.present(100)
+            story, _ = self.present(102, risk=True, acceptance='unknown', **dem)
+            self.assertNotIn('Last confirmed', story['status'])
+        self.present(100)
+        self.assertEqual(self.present(102, risk=True, acceptance='fail')[0]['status'], 'Users are below target.')
+        self.assertEqual(self.present(103, risk=True, acceptance='fail',
+                         evidence_issues=['live_phase_pending'])[0]['status'], 'Users are below target.')
+        self.present(100)
+        self.assertEqual(self.present(102, risk=True, acceptance='unknown',
+                         evidence_issues=['live_phase_pending'])[0]['status'], 'Collecting current-phase evidence.')
+        # Once a phase changes, its previous confirmation cannot return.
+        self.assertNotIn('Last confirmed', self.present(104, risk=True, acceptance='unknown')[0]['status'])
+
+    def test_startup_without_confirmation_uses_neutral_monitoring_text(self):
+        story, experience = self.present(100, risk=True, acceptance='unknown')
+        self.assertEqual(story['status'], 'Application monitoring is collecting measurements.')
+        self.assertEqual(story['status'], experience['user_impact'])
