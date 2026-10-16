@@ -3707,6 +3707,7 @@ QUEUE_PRESSURE_DELAY_MS = 20.0
 QUEUE_PRESSURE_DROP_PCT = 1.0
 EGRESS_LEARN_INTERVAL_SECONDS = 60
 DIAGNOSIS_LOCK = threading.Lock()
+DIAGNOSIS_BUILD_LOCK = threading.Lock()
 # "checked" is monotonic: after the wall clock steps back, a wall-clock age turns negative
 # and the cache would never refresh.
 DIAGNOSIS_CACHE = {"timestamp": 0.0, "checked": None, "payload": None}
@@ -4486,10 +4487,13 @@ def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1, cached=False):
     context = test_live_context()
     source = (presentation_source(), context['phase_id'], context['paused'], bool(SCENARIO_STATE.get('active')))
     def load():
-        payload = build_diagnosis()
-        with DIAGNOSIS_LOCK:
-            DIAGNOSIS_CACHE.update(timestamp=time.time(), checked=time.monotonic(), payload=payload, source=source)
-        return payload
+        # Phase/source changes may leave an older read finishing. Serialize builders
+        # across scopes: steering history and detected/cleared events are shared.
+        with DIAGNOSIS_BUILD_LOCK:
+            payload = build_diagnosis()
+            with DIAGNOSIS_LOCK:
+                DIAGNOSIS_CACHE.update(timestamp=time.time(), checked=time.monotonic(), payload=payload, source=source)
+            return payload
     if cached:
         fallback = {'links': [], 'findings': [], 'traffic_generator': traffic_generator_empty_snapshot(),
                     'simulator': {'diagnosis_available': False, 'media_mode': None, 'interactive_p95_ms': None},
