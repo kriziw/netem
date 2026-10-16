@@ -239,7 +239,10 @@ class AccessTests(unittest.TestCase):
         with patch.object(self.store, 'path', empty), patch.dict(netem.app.config, NETEM_AUTH_REQUIRED=True):
             self.assertEqual(self.client.get('/').location, '/setup/admin')
             self.assertEqual(self.client.get('/login').location, '/setup/admin')
-            self.assertEqual(self.client.get('/setup/admin').status_code, 200)
+            page = self.client.get('/setup/admin')
+            self.assertEqual(page.status_code, 200)
+            self.assertIn(str(Path(access.__file__).absolute()).encode(), page.data)
+            self.assertIn(b'access_control.py setup-code', page.data)
             code = self.store.setup_code()
             self.assertEqual(code, access.AccessStore(empty).setup_code())
             self.assertNotIn(code.encode(), self.client.get('/setup/admin').data)

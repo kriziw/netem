@@ -563,7 +563,7 @@ ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping
 
 ### Users, roles and Authentik
 
-See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. After updating, installations without accounts open a first-administrator setup page. Retrieve the one-time setup code on the host with `.venv/bin/python access_control.py setup-code`, choose and confirm your administrator password in the browser, and NetEm signs you in. Existing accounts keep their passwords. Authentication is required by default; explicit `NETEM_AUTH_REQUIRED=0` retains trusted-lab anonymous operation only until an account is provisioned.
+See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. After updating, installations without accounts open a first-administrator setup page. Run the absolute command displayed on that page to retrieve the one-time setup code on the host (root shells automatically use the runtime account), choose and confirm your administrator password in the browser, and NetEm signs you in. Existing accounts keep their passwords. Authentication is required by default; explicit `NETEM_AUTH_REQUIRED=0` retains trusted-lab anonymous operation only until an account is provisioned.
 
 ### Phase navigation and unsaved tests
 

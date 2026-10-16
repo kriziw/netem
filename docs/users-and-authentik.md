@@ -4,11 +4,13 @@
 
 After updating, open the operator interface. If no account exists, NetEm takes you to **Set up your administrator**. The operator interface and APIs require authentication by default, including before setup.
 
-1. On the NetEm host, run as the service account from the installation directory:
+1. On the NetEm host, copy and run the full command displayed on the setup page. It uses the installation’s absolute paths, so it also works from `/root`. For example, a community-script installation uses:
 
    ```bash
-   .venv/bin/python access_control.py setup-code
+   /opt/techkarma-netem/.venv/bin/python /opt/techkarma-netem/access_control.py setup-code
    ```
+
+   The CLI supports root shells: it adopts the owner of `runtime/session.secret` before opening SQLite, falling back to the database directory owner for fresh/manual deployments. This keeps the database owned by the runtime account with private `0600` permissions. It also repairs root-owned access database files left by an earlier CLI run. For custom deployments, run the command as the NetEm service account if these runtime files have not yet been created with the correct ownership. This applies to `setup-code`, `create-admin` and `reset-password`.
 
 2. Copy the one-time code into the setup page, choose the administrator username, and enter and confirm a password of 12–256 characters.
 3. Select **Create administrator and sign in**. You are signed in immediately. Future visits use the normal login page.
