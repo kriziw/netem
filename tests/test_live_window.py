@@ -43,7 +43,7 @@ class LiveWindowTests(unittest.TestCase):
             dem = netem.traffic_generator_snapshot()['status']['dem']
             self.assertEqual(dem['requests'], 0)
             self.assertIn('live_phase_pending', dem['evidence_issues'])
-            self.assertNotIn('experience_score', dem)
+            self.assertIsNone(dem.get('experience_score'))
 
     def test_short_live_window_does_not_change_full_phase_report_boundaries(self):
         recorder = dict(active=True, live_window_seconds=15,

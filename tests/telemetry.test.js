@@ -296,3 +296,14 @@ test('a stalled live poll times out and retries instead of freezing the dashboar
   assert.deepEqual(statuses, [false, true]);
   client.stop();
 });
+
+test('pending status is checking, a recent stopped status stays stopped, and real failure is disconnected', () => {
+  const pending=ui.simulatorConnection({configured:true,connected:false,connection_state:'checking'});
+  assert.equal(pending.label,'CHECKING'); assert.equal(pending.tone,'info');
+  const recent=ui.simulatorConnection({configured:true,connected:true,connection_state:'refreshing',status:{status:'stopped'}});
+  assert.equal(recent.label,'STOPPED'); assert.equal(recent.tone,'info');
+  assert.match(recent.title,/Last confirmed/);
+  const failed=ui.simulatorConnection({configured:true,connected:false,connection_state:'disconnected',error:'TLS failed'});
+  assert.equal(failed.label,'DISCONNECTED'); assert.equal(failed.tone,'bad');
+  assert.equal(failed.title,'TLS failed');
+});

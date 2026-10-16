@@ -161,3 +161,14 @@ test('a real action still prevents duplicate submission and navigation until ack
   await new Promise(resolve => setImmediate(resolve));
   screen.win.close();
 });
+
+test('the update screen prevents automatic page replacement while an install is in flight', async () => {
+  const screen = open({version:'v1'}, next);
+  screen.change('v2');
+  screen.doc.body.classList.add('update-active');
+  await screen.tick();
+  await screen.win.NetEmActions.refresh();
+  assert.equal(screen.calls.length,0);
+  assert.equal(screen.doc.querySelector('main.page').dataset.uiVersion,'v1');
+  screen.win.close();
+});

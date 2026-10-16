@@ -45,7 +45,7 @@ class UiLatencyTests(unittest.TestCase):
                     with concurrent.futures.ThreadPoolExecutor() as pool:
                         for path in ('/', '/tests', '/api/v1/traffic-generator', '/api/v1/traffic-generator/path', '/api/v1/diagnosis'):
                             with self.subTest(path=path):
-                                self.assertIn(pool.submit(get, path).result(1), (200, 503))
+                                self.assertIn(pool.submit(get, path).result(1), (200, 202, 503))
                         viewer = pool.submit(lambda: netem.showroom_app.test_client().get('/api/snapshot'))
                         self.assertEqual(viewer.result(1).status_code, 200)
                     self.assertFalse(release.is_set())
@@ -80,6 +80,81 @@ class UiLatencyTests(unittest.TestCase):
                 patch.object(netem, 'SCENARIO_STATE', dict(active=True, workload_supervised=True, workload_run_id='run')):
             result = netem.traffic_generator_snapshot(cached=True)
         self.assertFalse(result['status']['dem']['scoring_complete'])
-        self.assertNotIn('experience_score', result['status']['dem'])
+        self.assertIsNone(result['status']['dem']['experience_score'])
         # The shared raw snapshot is intact for another caller; filtering uses a copy.
         self.assertEqual(cache.read('status', 'source', lambda: {}, {})['status']['dem']['experience_score'], 100)
+
+    def test_status_connection_outlives_evidence_but_not_forever(self):
+        now = [0.0]
+        cache = PresentationCache(clock=lambda: now[0])
+        raw = {'configured': True, 'connected': True, 'status': {'status': 'stopped', 'users': 0,
+               'dem': {'experience_score': 100, 'scoring_complete': True}}}
+        cache.fresh('status', 'source', lambda: raw)
+        release = threading.Event()
+        def stalled():
+            release.wait(2)
+            return raw
+        with patch.object(netem, 'PRESENTATION_READS', cache), \
+                patch.object(netem, 'presentation_source', return_value='source'), \
+                patch.object(netem, 'traffic_generator_empty_snapshot', return_value={'configured': True, 'connected': False, 'error': None}), \
+                patch.object(netem, '_traffic_generator_snapshot', side_effect=stalled), \
+                patch.object(netem, 'SCENARIO_STATE', {'active': False}):
+            try:
+                now[0] = 4
+                status = netem.traffic_generator_snapshot(cached=True)
+                self.assertTrue(status['connected'])
+                self.assertEqual(status['connection_state'], 'refreshing')
+                self.assertEqual(status['status']['status'], 'stopped')
+                self.assertIsNone(status['status']['users'])
+                self.assertIsNone(status['status']['dem']['experience_score'])
+                now[0] = 16
+                status = netem.traffic_generator_snapshot(cached=True)
+                self.assertEqual(status['connection_state'], 'checking')
+                self.assertFalse(status['connected'])
+                self.assertIsNone(status.get('status'))
+            finally:
+                release.set()
+                with cache.lock:
+                    done = cache.entries['status']['done']
+                self.assertTrue(done.wait(2))
+
+    def test_expired_diagnosis_uses_independent_connection_state(self):
+        with patch.object(netem.PRESENTATION_READS, 'read', return_value={'links': [], 'findings': [], 'poll': {'expired': True}}), \
+                patch.object(netem, 'traffic_generator_snapshot', return_value={
+                    'connected': True, 'connection_state': 'connected', 'status': {'status': 'stopped'}}):
+            snapshot = netem.current_diagnosis(cached=True)
+        self.assertTrue(snapshot['traffic_generator']['connected'])
+        self.assertEqual(snapshot['traffic_generator']['status']['status'], 'stopped')
+
+    def test_pending_measurements_render_and_inline_page_scripts_are_valid(self):
+        import json
+        import re
+        import shutil
+        import subprocess
+        cfg = {'mgmt_interface': 'lo', 'wan_links': [{'id': 'wan1', 'inner': 'lo', 'outer': 'lo', 'preset': 'dia'}]}
+        snapshot = {'configured': True, 'connected': True, 'connection_state': 'refreshing',
+                    'integration': {'host': 'simulator.invalid', 'instance_name': 'Simulator'},
+                    'status': {'status': 'stopped', 'users': None, 'dem': netem.pending_simulator_dem('status_refresh_pending')},
+                    'catalog': None}
+        with patch.object(netem, 'load_config', return_value=cfg), \
+                patch.object(netem, 'traffic_generator_snapshot', return_value=snapshot), \
+                patch.object(netem, 'traffic_path_readiness', return_value={}), \
+                patch.object(netem, 'appliance_under_test', return_value={}):
+            for route in ('/', '/tests'):
+                with self.subTest(route=route):
+                    response = netem.app.test_client().get(route)
+                    self.assertEqual(response.status_code, 200)
+                    self.assertNotIn('>None<', response.text)
+                    if shutil.which('node'):
+                        scripts = re.findall(r'<script>(.*?)</script>', response.text, re.S)
+                        check = subprocess.run(['node', '-e',
+                            'for (const source of JSON.parse(require("fs").readFileSync(0,"utf8"))) new Function(source);'],
+                            input=json.dumps(scripts), capture_output=True, text=True)
+                        self.assertEqual(check.returncode, 0, check.stderr)
+
+    def test_background_status_budget_exceeds_the_simulator_aggregation_wait(self):
+        with patch.object(netem, 'traffic_generator_empty_snapshot', return_value={'configured': True}), \
+                patch.object(netem, 'traffic_generator_request', return_value={'status': 'stopped'}) as api:
+            snapshot = netem._traffic_generator_snapshot()
+        self.assertTrue(snapshot['connected'])
+        api.assert_called_once_with('/api/v1/status', timeout=7.0)

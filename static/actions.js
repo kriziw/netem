@@ -291,7 +291,7 @@ window.NetEmActions = (() => {
   });
   window.addEventListener('scroll', () => { if (!busy) rememberScroll(); }, {passive: true});
   async function refresh() {
-    if (busy || refreshController) return;
+    if (document.body.classList.contains('update-active') || busy || refreshController) return;
     const controller = refreshController = new AbortController();
     const token = ++refreshGeneration;
     const revision = editRevision;
@@ -349,6 +349,7 @@ window.NetEmActions = (() => {
     page.prepend(notice);
   }
   async function check() {
+    if (document.body.classList.contains('update-active')) return;
     const current = document.querySelector('main.page')?.dataset.uiVersion;
     if (!current || busy || document.visibilityState === 'hidden') return;
     const response = await fetch('/api/v1/ui-version', {cache:'no-store'});

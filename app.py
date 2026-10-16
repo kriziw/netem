@@ -48,6 +48,8 @@ from showroom import create_showroom_app
 import branding
 import appliance_platform
 
+from markupsafe import escape
+
 from flask import (
     Flask,
     render_template,
@@ -55,6 +57,7 @@ from flask import (
     redirect,
     url_for,
     flash,
+    get_flashed_messages,
     jsonify,
     Response,
     send_file,
@@ -380,6 +383,10 @@ def get_app_version():
         return "dev"
 
 
+# A file can be updated before this process restarts; status must name the running code.
+PROCESS_VERSION = get_app_version()
+
+
 def load_config():
     if CONFIG_PATH.exists():
         try:
@@ -540,6 +547,16 @@ def presentation_source():
     return hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
 
 
+def pending_simulator_dem(issue, window=15):
+    # Keep the same nullable fields as a valid status response, including during
+    # phase transitions; templates must not format undefined measurements.
+    dem = {key: None for key in ('experience_score', 'availability_pct', 'p50_ms', 'p95_ms',
+                                 'interactive_p95_ms', 'requests_per_second', 'failures_per_second')}
+    dem.update(requests=0, scoring_complete=False, business_acceptance='unknown',
+               evidence_issues=[issue], collecting_evidence=True, configured_window_seconds=window)
+    return dem
+
+
 def traffic_generator_snapshot(include_catalog=False, cached=False):
     source = presentation_source()
     fallback = traffic_generator_empty_snapshot()
@@ -547,18 +564,26 @@ def traffic_generator_snapshot(include_catalog=False, cached=False):
         return fallback
     loader = _traffic_generator_snapshot
     if cached:
-        result = PRESENTATION_READS.read('status', source, loader, fallback)
+        result = PRESENTATION_READS.read('status', source, loader, fallback, max_age=1, max_stale=15)
     else:
         result = PRESENTATION_READS.fresh('status', source, loader)
+    if cached:
+        poll = result.get('poll') or {}
+        result['connection_state'] = ('connected' if result.get('connected') else
+            'disconnected' if result.get('error') else 'checking')
+        # Retain a recent connection/run label while refreshing; live measurements
+        # expire sooner. Cache age is not evidence that the connection failed.
+        if result.get('connected') and (poll.get('age_seconds') or 0) > 3:
+            result['connection_state'] = 'refreshing'
+            result['status']['users'] = None
+            result['status']['dem'] = pending_simulator_dem('status_refresh_pending')
     if result.get('connected') and result.get('status'):
         with RUNTIME_LOCK:
             expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
         if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
                          (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
                          bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
-            result['status']['dem'] = {'requests': 0, 'scoring_complete': False, 'business_acceptance': 'unknown',
-                'evidence_issues': ['live_phase_pending'], 'collecting_evidence': True,
-                'configured_window_seconds': SCENARIO_STATE.get('live_window_seconds', 15)}
+            result['status']['dem'] = pending_simulator_dem('live_phase_pending', SCENARIO_STATE.get('live_window_seconds', 15))
         attach_experience_groups((result["status"] or {}).get("dem"), showroom_app_label)
     if include_catalog and result.get('connected'):
         result['catalog'] = simulator_catalog(cached=cached)
@@ -592,7 +617,9 @@ def _traffic_generator_snapshot():
     if not result['configured']:
         return result
     try:
-        result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
+        # The simulator may wait up to five seconds for its DEM aggregation job.
+        # This read runs off the UI request path; leave time for that valid reply.
+        result["status"] = traffic_generator_request("/api/v1/status", timeout=7.0)
         result["connected"] = True
     except RuntimeError as exc:
         result["error"] = str(exc)
@@ -4498,7 +4525,11 @@ def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1, cached=False):
         fallback = {'links': [], 'findings': [], 'traffic_generator': traffic_generator_empty_snapshot(),
                     'simulator': {'diagnosis_available': False, 'media_mode': None, 'interactive_p95_ms': None},
                     'steering': None, 'traffic_path': None, 'egress': {}, 'unattributed_experience': {}}
-        return PRESENTATION_READS.read('diagnosis', source, load, fallback, max_age=1, max_stale=3)
+        result = PRESENTATION_READS.read('diagnosis', source, load, fallback, max_age=1, max_stale=3)
+        # Connection status has its own freshness. Missing diagnosis evidence must
+        # not manufacture a simulator disconnect on the dashboard/showcase.
+        result['traffic_generator'] = traffic_generator_snapshot(cached=True)
+        return result
     with DIAGNOSIS_LOCK:
         previous = dict(DIAGNOSIS_CACHE)
     if (previous.get('source') == source and previous['payload'] is not None and previous.get('checked') is not None
@@ -7989,7 +8020,7 @@ def api_traffic_path():
 @app.route("/api/v1/traffic-generator")
 def api_traffic_generator():
     snapshot = traffic_generator_snapshot(include_catalog=False, cached=True)
-    code = 200 if snapshot.get("connected") or not snapshot.get("configured") else 503
+    code = 202 if snapshot.get("connection_state") == "checking" else 200 if snapshot.get("connected") or not snapshot.get("configured") else 503
     return jsonify(snapshot), code
 
 
@@ -9400,6 +9431,7 @@ def update_components():
 @app.route("/updates", methods=["GET", "POST"])
 def updates():
     restarting = False
+    wants_json = request.accept_mimetypes.best == "application/json"
 
     if request.method == "POST":
         action = request.form.get("action") or "check"
@@ -9410,6 +9442,8 @@ def updates():
             COMPONENT_CHECKS.start()
             return redirect(url_for('updates'))
         if action == 'update' and COMPONENT_CHECKS.snapshot()['running']:
+            if wants_json:
+                return jsonify(update_state='rejected', message='Release checks are still running. Wait for them to finish before installing.'), 409
             flash('Release checks are still running. Wait for them to finish before installing.', 'error')
             return redirect(url_for('updates'))
         status = git_update_status(fetch=True)
@@ -9438,21 +9472,36 @@ def updates():
                     timeout=90,
                 )
                 if rc == 0:
-                    status = git_update_status(fetch=False)
-                    restarting = True
-                    flash(
-                        "Update installed. The application is restarting.",
-                        "success",
-                    )
+                    installed_version = get_app_version()
+                    # Acknowledge before slow simulator reads, git status or changed templates.
+                    # The old browser client understands the minimal HTML marker as well.
+                    if wants_json:
+                        response = jsonify(update_state='restarting', instance=PROCESS_INSTANCE,
+                                           version=installed_version)
+                        response.status_code = 202
+                    else:
+                        # Do not load templates that the merge may just have replaced.
+                        response = Response(
+                            '<!doctype html><html lang="en"><head><title>NetEm update installed</title></head><body>'
+                            f'<div id="update-restarting" data-instance="{escape(PROCESS_INSTANCE)}" '
+                            f'data-version="{escape(installed_version)}" hidden></div>'
+                            '<p>Update installed. NetEm is restarting. '
+                            '<a href="/updates">Return to updates</a> after it reconnects.</p></body></html>',
+                            mimetype='text/html')
+                    response.headers['Cache-Control'] = 'no-store'
                     threading.Thread(
                         target=restart_after_update,
                         daemon=True,
                     ).start()
+                    return response
                 else:
                     flash(err or out or "Git fast-forward update failed.", "error")
     else:
         status = git_update_status(fetch=False)
 
+    if request.method == 'POST' and action == 'update' and wants_json:
+        messages = get_flashed_messages()
+        return jsonify(update_state='rejected', message=' '.join(messages) or 'Update was not accepted.'), 409
     simulator, simulator_error = simulator_update_state()
     return render_template(
         "updates.html",
@@ -9469,7 +9518,7 @@ def updates():
 @app.route("/updates/status")
 def updates_status():
     """Which NetEm process answers and its version, polled while an update restarts the service."""
-    response = jsonify({"version": get_app_version(), "instance": PROCESS_INSTANCE})
+    response = jsonify({"version": PROCESS_VERSION, "instance": PROCESS_INSTANCE})
     response.headers["Cache-Control"] = "no-store"
     return response
 
