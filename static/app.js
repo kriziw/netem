@@ -242,6 +242,7 @@ window.NetEmUI = (() => {
     let previousTelemetry = saved.previousTelemetry;
     let timer = null;
     let stopped = false;
+    let activeRequest = null;
 
     function bucket(id) {
       if (!history[id]) {
@@ -260,10 +261,12 @@ window.NetEmUI = (() => {
 
     async function sample() {
       if (stopped) return;
+      const controller = activeRequest = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 5000);
       try {
         const [telemetryResponse, stateResponse] = await Promise.all([
-          fetch("/api/v1/telemetry", {cache: "no-store"}),
-          fetch("/api/v1/state", {cache: "no-store"})
+          fetch("/api/v1/telemetry", {cache: "no-store", signal: controller.signal}),
+          fetch("/api/v1/state", {cache: "no-store", signal: controller.signal})
         ]);
         if (!telemetryResponse.ok || !stateResponse.ok) throw new Error("Live API unavailable");
 
@@ -301,6 +304,9 @@ window.NetEmUI = (() => {
       } catch (error) {
         if (!stopped && options.onStatus) options.onStatus(false, error);
       } finally {
+        clearTimeout(deadline);
+        controller.abort();
+        if (activeRequest === controller) activeRequest = null;
         if (!stopped) timer = setTimeout(sample, interval);
       }
     }
@@ -309,6 +315,7 @@ window.NetEmUI = (() => {
     const client = {
       stop() {
         stopped = true;
+        activeRequest?.abort();
         if (timer) clearTimeout(timer);
       },
       history

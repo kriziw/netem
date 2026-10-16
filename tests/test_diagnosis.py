@@ -235,6 +235,7 @@ class ApiTests(unittest.TestCase):
         snapshot = {"configured": True, "connected": status is not None, "status": status, "error": None}
         with patch.object(netem, "traffic_generator_snapshot", return_value=snapshot):
             netem.DIAGNOSIS_CACHE.update(timestamp=0.0, payload=None)
+            netem.current_diagnosis(max_age=0)  # Worker publishes; HTTP reads never wait for simulator I/O.
             return self.client.get("/api/v1/diagnosis").get_json()
 
     def test_diagnosis_api_with_old_and_new_simulators(self):

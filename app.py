@@ -43,6 +43,7 @@ import application_monitoring
 import access_control
 from component_updates import ComponentChecks
 import showcase_summary
+from presentation_cache import PresentationCache
 from showroom import create_showroom_app
 import branding
 import appliance_platform
@@ -529,7 +530,42 @@ def simulator_controller(panel_path):
     return redirect(url_for('traffic_settings', section=destination))
 
 
-def traffic_generator_snapshot(include_catalog=False):
+PRESENTATION_READS = PresentationCache()
+
+
+def presentation_source():
+    # Credentials and endpoint changes cannot reuse another simulator's data.
+    integration = traffic_generator_config()
+    raw = [str(CONFIG_PATH), integration, hashlib.sha256(traffic_generator_api_key().encode()).hexdigest()]
+    return hashlib.sha256(json.dumps(raw, sort_keys=True).encode()).hexdigest()
+
+
+def traffic_generator_snapshot(include_catalog=False, cached=False):
+    source = presentation_source()
+    fallback = traffic_generator_empty_snapshot()
+    if not fallback['configured']:
+        return fallback
+    loader = _traffic_generator_snapshot
+    if cached:
+        result = PRESENTATION_READS.read('status', source, loader, fallback)
+    else:
+        result = PRESENTATION_READS.fresh('status', source, loader)
+    if result.get('connected') and result.get('status'):
+        with RUNTIME_LOCK:
+            expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
+        if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
+                         (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
+                         bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
+            result['status']['dem'] = {'requests': 0, 'scoring_complete': False, 'business_acceptance': 'unknown',
+                'evidence_issues': ['live_phase_pending'], 'collecting_evidence': True,
+                'configured_window_seconds': SCENARIO_STATE.get('live_window_seconds', 15)}
+        attach_experience_groups((result["status"] or {}).get("dem"), showroom_app_label)
+    if include_catalog and result.get('connected'):
+        result['catalog'] = simulator_catalog(cached=cached)
+    return result
+
+
+def traffic_generator_empty_snapshot():
     cfg = load_config()
     integration = traffic_generator_config(cfg)
     configured = bool(integration.get("host")) and bool(traffic_generator_api_key())
@@ -548,24 +584,16 @@ def traffic_generator_snapshot(include_catalog=False):
         "catalog": None,
         "error": None,
     }
-    if not configured:
+    return result
+
+
+def _traffic_generator_snapshot():
+    result = traffic_generator_empty_snapshot()
+    if not result['configured']:
         return result
     try:
         result["status"] = traffic_generator_request("/api/v1/status", timeout=2.0)
-        with RUNTIME_LOCK:
-            expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
-        if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
-                         (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
-                         bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
-            result['status']['dem'] = {'requests': 0, 'scoring_complete': False, 'business_acceptance': 'unknown',
-                'evidence_issues': ['live_phase_pending'], 'collecting_evidence': True,
-                'configured_window_seconds': SCENARIO_STATE.get('live_window_seconds', 15)}
-        attach_experience_groups((result["status"] or {}).get("dem"), showroom_app_label)
         result["connected"] = True
-        if include_catalog:
-            result["catalog"] = traffic_generator_request(
-                "/api/v1/catalog", timeout=2.0
-            )
     except RuntimeError as exc:
         result["error"] = str(exc)
     return result
@@ -622,9 +650,18 @@ def traffic_path_summary(path):
     return text
 
 
-def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS):
+def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS, cached=False):
     """Whether the simulator's traffic reaches the target through the appliance (cached briefly)."""
+    source = presentation_source()
+    if cached:
+        fallback = dict(configured=bool(traffic_generator_config().get('host')), available=False,
+                        ready=None, repairable=False, message='Traffic path check is pending.',
+                        summary='Traffic path check is pending.')
+        return PRESENTATION_READS.read('path', source, lambda: traffic_path_readiness(max_age=0),
+                                       fallback, max_age=15, max_stale=30)
     cached = dict(TRAFFIC_PATH_CACHE)
+    if cached.get('source') != source:
+        cached = dict(checked=None, payload=None)
     if max_age and cached["payload"] is not None and cached["checked"] is not None and time.monotonic() - cached["checked"] <= max_age:
         return cached["payload"]
     if not (traffic_generator_config(load_config()).get("host") and traffic_generator_api_key()):
@@ -647,7 +684,7 @@ def traffic_path_readiness(max_age=TRAFFIC_PATH_CACHE_SECONDS):
     payload["wan_bridges"] = [{key: problem[key] for key in ("link_id", "label", "issues")} for problem in wan_bridge_snapshot()]
     payload["summary"] = traffic_path_summary(payload)
     payload["checked_at"] = time.time()
-    TRAFFIC_PATH_CACHE.update(checked=time.monotonic(), payload=payload)
+    TRAFFIC_PATH_CACHE.update(checked=time.monotonic(), payload=payload, source=source)
     return payload
 
 
@@ -764,7 +801,7 @@ def appliance_view(vendor, model=None, name=None, source=None, label=None):
             "name": str(name)[:60] if name else None, "source": source}
 
 
-def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
+def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS, cached=False):
     """The SD-WAN appliance being tested: from Settings, else the simulator's selected appliance."""
     if "APPLIANCE_PLATFORM" in globals():
         selection = APPLIANCE_PLATFORM.store.state("selection")
@@ -778,7 +815,13 @@ def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
     setting = cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {}
     if setting.get("vendor") in SDWAN_VENDORS:
         return appliance_view(setting["vendor"], setting.get("model"), None, "setting")
+    source = presentation_source()
+    if cached:
+        return PRESENTATION_READS.read('appliance', source, lambda: appliance_under_test(max_age=0),
+                                       appliance_view(None), max_age=60, max_stale=120)
     cached = dict(APPLIANCE_CACHE)
+    if cached.get('source') != source:
+        cached = dict(checked=None, payload=None)
     if cached["payload"] is not None and cached["checked"] is not None and time.monotonic() - cached["checked"] <= max_age:
         return cached["payload"]
     payload = appliance_view(None)
@@ -793,7 +836,7 @@ def appliance_under_test(max_age=APPLIANCE_CACHE_SECONDS):
                                          match.get("name"), "simulator", label=match.get("vendor"))
         except RuntimeError:
             pass
-    APPLIANCE_CACHE.update(checked=time.monotonic(), payload=payload)
+    APPLIANCE_CACHE.update(checked=time.monotonic(), payload=payload, source=source)
     return payload
 
 
@@ -4435,19 +4478,29 @@ def build_diagnosis():
             "interactive_p95_ms": dem.get("interactive_p95_ms"),
         },
         "traffic_generator": snapshot,
-        "traffic_path": traffic_path_readiness() if snapshot.get("configured") else None,
+        "traffic_path": traffic_path_readiness(cached=True) if snapshot.get("configured") else None,
     }
 
 
-def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1):
+def current_diagnosis(max_age=DIAGNOSIS_INTERVAL_SECONDS + 1, cached=False):
+    context = test_live_context()
+    source = (presentation_source(), context['phase_id'], context['paused'], bool(SCENARIO_STATE.get('active')))
+    def load():
+        payload = build_diagnosis()
+        with DIAGNOSIS_LOCK:
+            DIAGNOSIS_CACHE.update(timestamp=time.time(), checked=time.monotonic(), payload=payload, source=source)
+        return payload
+    if cached:
+        fallback = {'links': [], 'findings': [], 'traffic_generator': traffic_generator_empty_snapshot(),
+                    'simulator': {'diagnosis_available': False, 'media_mode': None, 'interactive_p95_ms': None},
+                    'steering': None, 'traffic_path': None, 'egress': {}, 'unattributed_experience': {}}
+        return PRESENTATION_READS.read('diagnosis', source, load, fallback, max_age=1, max_stale=3)
     with DIAGNOSIS_LOCK:
-        cached = dict(DIAGNOSIS_CACHE)
-    if cached["payload"] is not None and cached.get("checked") is not None and time.monotonic() - cached["checked"] <= max_age:
-        return cached["payload"]
-    payload = build_diagnosis()
-    with DIAGNOSIS_LOCK:
-        DIAGNOSIS_CACHE.update(timestamp=time.time(), checked=time.monotonic(), payload=payload)
-    return payload
+        previous = dict(DIAGNOSIS_CACHE)
+    if (previous.get('source') == source and previous['payload'] is not None and previous.get('checked') is not None
+            and 0 <= time.monotonic() - previous['checked'] <= max_age and max_age):
+        return copy.deepcopy(previous['payload'])
+    return PRESENTATION_READS.fresh('diagnosis', source, load)
 
 
 def diagnosis_worker():
@@ -7318,9 +7371,9 @@ def overview():
         session_state=session_snapshot(),
         presets=get_presets(cfg),
         quality_curves=QUALITY_CURVES,
-        traffic_generator=traffic_generator_snapshot(),
-        traffic_path=traffic_path_readiness() if traffic_generator_config(cfg).get("host") else None,
-        appliance=appliance_under_test(),
+        traffic_generator=traffic_generator_snapshot(cached=True),
+        traffic_path=traffic_path_readiness(cached=True) if traffic_generator_config(cfg).get("host") else None,
+        appliance=appliance_under_test(cached=True),
         site_plan=active_site_plan(cfg),
         site_state=site_plan_snapshot(),
         session_tests=session_site_tests(),
@@ -7356,7 +7409,7 @@ def lab_tools():
 def tests():
     cfg = load_config()
     scenario_id = request.args.get("scenario")
-    traffic_generator = traffic_generator_snapshot(include_catalog=True)
+    traffic_generator = traffic_generator_snapshot(include_catalog=True, cached=True)
     return render_template(
         "tests.html",
         page="tests",
@@ -7369,7 +7422,7 @@ def tests():
         selected_scenario=scenario_id,
         traffic_generator=traffic_generator,
         site_options=site_catalog.catalog(),
-        traffic_path=traffic_path_readiness() if traffic_generator.get("configured") else None,
+        traffic_path=traffic_path_readiness(cached=True) if traffic_generator.get("configured") else None,
         site_plan=active_site_plan(cfg, traffic_generator.get("catalog")),
         site_state=site_plan_snapshot(),
         last_test=LAST_TEST_SUMMARY,
@@ -7680,7 +7733,7 @@ def integrations():
     return render_template(
         "integrations.html",
         page="integrations",
-        traffic_generator=traffic_generator_snapshot(include_catalog=False),
+        traffic_generator=traffic_generator_snapshot(include_catalog=False, cached=True),
         traffic_generator_discovered=discovered,
         traffic_generator_has_key=bool(traffic_generator_api_key()),
     )
@@ -7877,7 +7930,7 @@ def traffic_generator_stop():
 
 @app.route("/api/v1/diagnosis")
 def api_diagnosis():
-    return jsonify(current_diagnosis())
+    return jsonify(current_diagnosis(cached=True))
 
 
 @app.route("/wan/egress", methods=["POST"])
@@ -7926,12 +7979,12 @@ def traffic_generator_repair():
 
 @app.route("/api/v1/traffic-generator/path")
 def api_traffic_path():
-    return jsonify(traffic_path_readiness())
+    return jsonify(traffic_path_readiness(cached=True))
 
 
 @app.route("/api/v1/traffic-generator")
 def api_traffic_generator():
-    snapshot = traffic_generator_snapshot(include_catalog=False)
+    snapshot = traffic_generator_snapshot(include_catalog=False, cached=True)
     code = 200 if snapshot.get("connected") or not snapshot.get("configured") else 503
     return jsonify(snapshot), code
 
@@ -7951,7 +8004,7 @@ def settings():
         clock_status=platform_clock_status(),
         brand_packs=BRAND_STORE.describe(),
         active_brand=BRAND_STORE.active_id(),
-        appliance=appliance_under_test(),
+        appliance=appliance_under_test(cached=True),
         appliance_setting=cfg.get("appliance") if isinstance(cfg.get("appliance"), dict) else {},
         showcase_video=cfg.get("showcase_video"),
         vendors=SDWAN_VENDORS,
@@ -8270,9 +8323,13 @@ SIMULATOR_CATALOG_CACHE = {"timestamp": 0.0, "checked": None, "catalog": None}
 SITE_FIELDS = ("industry", "sub_industry", "function", "size", "criticality")
 
 
-def simulator_catalog(max_age=60):
+def simulator_catalog(max_age=60, cached=False):
     """The connected simulator's catalog, briefly cached; None when unavailable."""
-    if SIMULATOR_CATALOG_CACHE.get("checked") is not None and time.monotonic() - SIMULATOR_CATALOG_CACHE["checked"] <= max_age:
+    source = presentation_source()
+    if cached:
+        return PRESENTATION_READS.read('catalog', source, lambda: simulator_catalog(max_age=0),
+                                       None, max_age=60, max_stale=120)
+    if SIMULATOR_CATALOG_CACHE.get('source') == source and SIMULATOR_CATALOG_CACHE.get("checked") is not None and time.monotonic() - SIMULATOR_CATALOG_CACHE["checked"] <= max_age:
         return SIMULATOR_CATALOG_CACHE["catalog"]
     catalog = None
     if traffic_generator_config().get("host") and traffic_generator_api_key():
@@ -8280,7 +8337,7 @@ def simulator_catalog(max_age=60):
             catalog = traffic_generator_request("/api/v1/catalog", timeout=2.0)
         except RuntimeError:
             catalog = None
-    SIMULATOR_CATALOG_CACHE.update(timestamp=time.time(), checked=time.monotonic(), catalog=catalog)
+    SIMULATOR_CATALOG_CACHE.update(timestamp=time.time(), checked=time.monotonic(), catalog=catalog, source=source)
     return catalog
 
 
@@ -9080,6 +9137,7 @@ def ui_state_version():
         parts.append(CONFIG_PATH.stat().st_mtime_ns)
     except OSError:
         parts.append(None)
+    parts.append(PRESENTATION_READS.version(("catalog", "path", "appliance")))
     simulator = ((DIAGNOSIS_CACHE.get("payload") or {}).get("traffic_generator") or {})
     status = simulator.get("status") or {}
     parts.append([simulator.get("connected"), status.get("status"), (status.get("run") or {}).get("run_id")])
@@ -9876,7 +9934,7 @@ def showroom_session_snapshot():
     scenario = scenario_snapshot()
     lab_session = session_snapshot()
     try:
-        diagnosis = current_diagnosis()
+        diagnosis = current_diagnosis(cached=True)
     except Exception:
         diagnosis = {}
     # A running session names the site it validates; otherwise show the active site profile.
