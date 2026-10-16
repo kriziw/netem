@@ -28,7 +28,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Regress root admin CLI against a non-root runtime
-        run: sudo "$(command -v python)" -m unittest discover -s tests -p test_access_cli.py -v
+        run: sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python)" -m unittest discover -s tests -p test_access_cli.py -v
 
       - name: Compile Python
         run: python -m py_compile app.py appliance_inventory.py appliance_platform.py branding.py host_health.py netem_core.py showroom.py site_catalog.py experience_groups.py test_records.py
