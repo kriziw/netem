@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.1](https://github.com/kriziw/netem/compare/v1.4.0...v1.4.1) (2026-10-16)
+
+
+### Bug Fixes
+
+* preserve runtime ownership in admin setup commands ([#151](https://github.com/kriziw/netem/issues/151)) ([b797b63](https://github.com/kriziw/netem/commit/b797b63da1e2ff2e07d652dfe0519bd56e7edbc6))
+
 ## [1.4.0](https://github.com/kriziw/netem/compare/v1.3.7...v1.4.0) (2026-10-16)
 
 
