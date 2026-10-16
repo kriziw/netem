@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.2](https://github.com/kriziw/netem/compare/v1.4.1...v1.4.2) (2026-10-16)
+
+
+### Bug Fixes
+
+* keep UI navigation responsive during simulator polling ([#153](https://github.com/kriziw/netem/issues/153)) ([25561f4](https://github.com/kriziw/netem/commit/25561f421916c7c0c5e11d202c5f731d4078786d))
+
 ## [1.4.1](https://github.com/kriziw/netem/compare/v1.4.0...v1.4.1) (2026-10-16)
 
 
