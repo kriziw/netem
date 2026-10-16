@@ -7,7 +7,7 @@ const form = '<form data-update-form method="post" action="/updates" data-from="
 
 function setup(post, statuses) {
   const dom = new JSDOM('<body>' + form + '</body>', {url: 'https://netem.test/updates', runScripts: 'outside-only'});
-  const win = dom.window, timers = [], requests = [];
+  const win = dom.window, timers = [], requests = [], posts = [];
   let tick = null;
   win.setTimeout = (fn, ms) => { timers.push({fn, ms}); return timers.length; };
   win.clearTimeout = () => {};
@@ -15,7 +15,7 @@ function setup(post, statuses) {
   win.clearInterval = () => { tick = null; };
   win.fetch = async (url, options = {}) => {
     requests.push([String(url), options.method || 'GET']);
-    if (options.method === 'POST') return post;
+    if (options.method === 'POST') { posts.push(options); return post; }
     const next = statuses.shift();
     if (next instanceof Error) throw next;
     return {ok: true, headers: {get: () => 'application/json'}, json: async () => next};
@@ -29,7 +29,7 @@ function setup(post, statuses) {
     const [timer] = timers.splice(index, 1);
     await timer.fn();
   };
-  return {dom, win, doc, steps, poll, timers, requests, tick: () => tick && tick()};
+  return {dom, win, doc, steps, poll, timers, requests, posts, tick: () => tick && tick()};
 }
 
 const page = body => ({ok: true, status: 200, text: async () => '<html><body><main class="page">' + body + '</main></body></html>'});
@@ -94,5 +94,87 @@ test('a slow restart points at the service log', async () => {
   ui.win.Date.now = () => started + 130000;
   ui.tick();
   assert.match(ui.doc.querySelector('.update-meta').textContent, /^Elapsed 2:\d\d · taking longer than usual; on the appliance run journalctl -u netem -n 50$/);
+  ui.dom.window.close();
+});
+
+const jsonReply = (value, status = 202) => ({ok: status < 400, status, headers: {get: () => 'application/json'}, json: async () => value});
+
+test('JSON install acknowledgement starts verification and requests the JSON protocol', async () => {
+  const ui = setup(jsonReply({update_state:'restarting',instance:'old',version:'0.13.0'}), []);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  assert.equal(ui.posts[0].headers.Accept, 'application/json');
+  assert.equal(ui.doc.getElementById('update-title').textContent, 'Restarting NetEm');
+  ui.dom.window.close();
+});
+
+test('502 after a successful install verifies the new version instead of falsely failing', async () => {
+  const ui = setup({ok:false,status:502,text:async()=>'<h1>Bad Gateway</h1>'}, [
+    {instance:'old',version:'0.12.0'}, {instance:'new',version:'0.13.0'}, {instance:'new',version:'0.13.0'}]);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  assert.equal(ui.doc.getElementById('update-title').textContent, 'Confirming update');
+  assert.doesNotMatch(ui.doc.body.textContent, /Nothing was restarted/);
+  await ui.poll(); await ui.poll(); await ui.poll();
+  assert.equal(ui.doc.getElementById('update-title').textContent, 'Update complete');
+  assert.equal(ui.requests.filter(([,method])=>method==='POST').length,1);
+  ui.dom.window.close();
+});
+
+test('unacknowledged 400 ends as unconfirmed without claiming that nothing restarted', async () => {
+  const ui = setup({ok:false,status:400,text:async()=>'<h1>Bad Request</h1>'}, [{instance:'old',version:'0.12.0'}]);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  const now = ui.win.Date.now(); ui.win.Date.now = () => now + 31000;
+  await ui.poll();
+  assert.equal(ui.doc.getElementById('update-title').textContent, 'Update not confirmed');
+  assert.match(ui.doc.querySelector('.update-message').textContent, /HTTP 400/);
+  assert.doesNotMatch(ui.doc.body.textContent, /Nothing was restarted/);
+  ui.dom.window.close();
+});
+
+test('an interrupted acknowledgement body still follows the restart', async () => {
+  const ui = setup({ok:true,status:200,text:async()=>{throw new Error('Connection reset');}}, [
+    {instance:'new',version:'0.13.0'}, {instance:'new',version:'0.13.0'}]);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  await ui.poll(); await ui.poll();
+  assert.equal(ui.doc.getElementById('update-title').textContent,'Update complete');
+  ui.dom.window.close();
+});
+
+test('two different restarted processes do not count as two stable confirmations', async () => {
+  const ui = setup(jsonReply({update_state:'restarting',instance:'old',version:'0.13.0'}), [
+    {instance:'new-a',version:'0.13.0'}, {instance:'new-b',version:'0.13.0'}, {instance:'new-b',version:'0.13.0'}]);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  await ui.poll(); await ui.poll();
+  assert.equal(ui.doc.getElementById('update-title').textContent,'Finishing update');
+  await ui.poll();
+  assert.equal(ui.doc.getElementById('update-title').textContent,'Update complete');
+  ui.dom.window.close();
+});
+
+test('a restarted process with the old version cannot confirm an update', async () => {
+  const ui = setup(jsonReply({update_state:'restarting',instance:'old',version:'0.13.0'}), [
+    {instance:'new',version:'0.12.0'}, {instance:'new',version:'0.12.0'}]);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  await ui.poll(); await ui.poll();
+  assert.notEqual(ui.doc.getElementById('update-title').textContent,'Update complete');
+  ui.dom.window.close();
+});
+
+test('an authentication wall offers sign-in rather than polling indefinitely', async () => {
+  const ui = setup(jsonReply({update_state:'restarting',instance:'old',version:'0.13.0'}), []);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('form'));
+  ui.win.fetch = async () => ({ok:false,status:401,url:'https://netem.test/updates/status'});
+  await ui.poll();
+  assert.match(ui.doc.getElementById('update-title').textContent,/Sign in/);
+  assert.equal(ui.doc.querySelector('.update-actions a').getAttribute('href'),'/login?next=%2Fupdates');
+  ui.dom.window.close();
+});
+
+test('old live cards recover their missing token from the check form without bypassing CSRF', async () => {
+  const ui = setup(jsonReply({update_state:'rejected',message:'Invalid form token'},400), []);
+  const check=ui.doc.createElement('form'); check.setAttribute('data-all-update-check','');
+  check.innerHTML='<input name="integration_csrf" value="csrf-from-page">';ui.doc.body.append(check);
+  await ui.win.NetEmUpdate.run(ui.doc.querySelector('[data-update-form]'));
+  assert.equal(ui.posts[0].body.get('integration_csrf'),'csrf-from-page');
+  assert.equal(ui.doc.getElementById('update-title').textContent,'Update not installed');
   ui.dom.window.close();
 });

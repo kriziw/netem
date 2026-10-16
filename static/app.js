@@ -232,6 +232,16 @@ window.NetEmUI = (() => {
             rxpps: deltas[2], txpps: deltas[3]};
   }
 
+  function simulatorConnection(snapshot) {
+    const checking = snapshot.connection_state === 'checking';
+    const status = snapshot.status || {};
+    return {label: checking ? 'CHECKING' : snapshot.connected ? String(status.status || 'idle').toUpperCase()
+        : snapshot.configured === false ? 'NOT CONFIGURED' : 'DISCONNECTED',
+      tone: checking ? 'info' : snapshot.connected ? (['starting','running'].includes(status.status) ? 'good' : 'info') : 'bad',
+      title: snapshot.connection_state === 'refreshing' ? 'Last confirmed state; refreshing status. Live measurements are unavailable until refreshed.'
+        : checking ? 'Waiting for a status response; a disconnected simulator has not been confirmed.' : snapshot.error || ''};
+  }
+
   function createLiveClient(options = {}) {
     const interval = Math.max(500, options.interval || 1500);
     const maxPoints = Math.max(20, options.maxPoints || 180);
@@ -555,5 +565,5 @@ window.NetEmUI = (() => {
     if (repair) repair.hidden = Boolean(path.ready) || !path.repairable;
   }
 
-  return {renderTrafficPath, trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml, phaseTimeline, phaseCountdown, renderRunningTest};
+  return {simulatorConnection, renderTrafficPath, trafficRates, formatRate, formatPps, formatAge, formatNumber, statusClass, setPath, renderSeries, createLiveClient, eventTime, renderDemSummary, diagnosisFindingsHtml, linkBottleneck, steeringHtml, phaseTimeline, phaseCountdown, renderRunningTest};
 })();

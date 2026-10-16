@@ -46,6 +46,7 @@
         <form method="post" action="{{ url_for('updates') }}" data-update-form
               data-from="{{ update_status.installed_version or app_version }}" data-to="{{ update_status.remote_version or '' }}"
               data-mark="{{ branding.mark }}" data-instance="{{ process_instance }}" data-status-url="{{ url_for('updates_status') }}">
+          <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
           <input type="hidden" name="action" value="update">
           <button class="btn btn-primary" type="submit"
             {% if component_checks.running or check.get('state') == 'error' or not update_status.ok or update_status.dirty or not update_status.update_available or not update_status.release_reachable %}disabled{% endif %}>

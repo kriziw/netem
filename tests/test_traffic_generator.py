@@ -129,6 +129,9 @@ class SimulatorIntegrationTests(unittest.TestCase):
 
     def test_forms_require_csrf_and_invalid_urls_do_not_change_configuration(self):
         self.assertEqual(self.client.post("/traffic-generator/stop").status_code, 400)
+        # First-use TLS pinning is a legitimate background read side effect;
+        # complete it before comparing configuration changes from invalid forms.
+        netem.traffic_generator_snapshot()
         self.client.get("/integrations")
         before = netem.load_config()
         with self.client.session_transaction() as state:

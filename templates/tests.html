@@ -49,6 +49,9 @@
     <div style="margin-top:10px"><a class="btn btn-primary" data-simulator-modal="integration" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Configure Traffic Simulator</a></div>
   </div>
 </section>
+{% elif traffic_generator.connection_state|default('') == 'checking' %}
+<section class="card"><div class="empty-state"><strong data-tg-status class="status info">CHECKING</strong>
+<p>Waiting for the simulator status. A disconnect has not been confirmed.</p></div></section>
 {% elif not traffic_generator.connected %}
 <section class="card">
   <div class="card-head">
@@ -76,7 +79,7 @@
     <div class="grid grid-4">
       <div class="metric-box">
         <div class="metric-label">Virtual users</div>
-        <div class="metric-value" data-tg-users>{{ tg.users }}</div>
+        <div class="metric-value" data-tg-users>{{ tg.users if tg.users is not none else '—' }}</div>
       </div>
       <div class="metric-box">
         <div class="metric-label">DEM score</div>
@@ -357,8 +360,9 @@ async function refreshTrafficGenerator() {
   try {
     const response=await fetch("{{ url_for('api_traffic_generator') }}",{cache:"no-store"});
     const snapshot=await response.json();
+    const connection = NetEmUI.simulatorConnection(snapshot);
+    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent=connection.label;el.className="status "+connection.tone;el.title=connection.title;});
     if(!snapshot.connected || !snapshot.status) {
-      document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
       document.querySelectorAll("[data-tg-users],[data-tg-score],[data-tg-availability],[data-tg-p95]").forEach(el=>el.textContent="—");
       return;
     }
@@ -370,7 +374,7 @@ async function refreshTrafficGenerator() {
       el.textContent=String(status.status||"unknown").toUpperCase();
       el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
     });
-    document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
+    document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??"—");
     document.querySelectorAll("[data-tg-score]").forEach(el=>el.textContent=dem.experience_score??"—");
     document.querySelectorAll("[data-tg-availability]").forEach(el=>el.textContent=dem.availability_pct==null?"—":Number(dem.availability_pct).toFixed(2)+"%");
     const p95=dem.interactive_p95_ms??dem.p95_ms;

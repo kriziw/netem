@@ -101,6 +101,8 @@
         </div>
         {% if traffic_generator.connected %}
           <span class="status {{ 'good' if traffic_generator.status.status in ('starting','running') else 'info' }}" data-tg-status>{{ traffic_generator.status.status|upper }}</span>
+        {% elif traffic_generator.connection_state|default('') == 'checking' %}
+          <span class="status info" data-tg-status>CHECKING</span>
         {% elif traffic_generator.configured %}
           <span class="status bad" data-tg-status>DISCONNECTED</span>
         {% else %}
@@ -111,7 +113,7 @@
         {% if traffic_generator.connected %}
           {% set tg_dem = traffic_generator.status.dem or {} %}
           {{ metric_help("dem-overview", "Digital experience", "Colors describe measured simulator transactions in the displayed window. Green is good, amber degraded, red poor, and gray unknown. Open How to read these indicators for the exact lab thresholds.") }}
-          <div class="dem-users">Simulated users: <strong data-tg-users>{{ traffic_generator.status.users }}</strong></div>
+          <div class="dem-users">Simulated users: <strong data-tg-users>{{ traffic_generator.status.users if traffic_generator.status.users is not none else '—' }}</strong></div>
           {% with return_to='overview' %}{% include "_traffic_path.html" %}{% endwith %}
           <div class="dem-summary" id="overview-dem">
             <p class="card-sub" data-dem-window>Waiting for measurements…</p>
@@ -146,7 +148,7 @@
           <div class="empty-state"><strong>Simulator unavailable</strong>{{ traffic_generator.error or "Check the integration settings." }}</div>
           <a class="btn btn-sm" data-simulator-modal="integration" href="{{ url_for('integrations') }}#traffic-simulator">Review integration</a>
         {% else %}
-          <div class="empty-state"><strong>No simulator connected</strong>Connect a Corporate Traffic Simulator to see employee experience during WAN tests.</div>
+          <div class="empty-state">{% if traffic_generator.connection_state|default('') == 'checking' %}<strong>Checking simulator status</strong>Waiting for a status response. A disconnect has not been confirmed.{% else %}<strong>No simulator connected</strong>Connect a Corporate Traffic Simulator to see employee experience during WAN tests.{% endif %}</div>
           <a class="btn btn-sm" data-simulator-modal="integration" href="{{ url_for('integrations', discover=1) }}#traffic-simulator">Detect simulator</a>
         {% endif %}
       </div>
@@ -638,14 +640,11 @@ function renderDiagnosisCard(payload) {
 function renderTrafficGeneratorOverview(snapshot) {
   const status=snapshot.status || {};
   const dem=status.dem || {};
+  const connection = NetEmUI.simulatorConnection(snapshot);
   document.querySelectorAll("[data-tg-status]").forEach(el=>{
-    if(!snapshot.connected){
-      el.textContent="DISCONNECTED";
-      el.className="status bad";
-    }else{
-      el.textContent=String(status.status||"idle").toUpperCase();
-      el.className="status "+(["starting","running"].includes(status.status)?"good":"info");
-    }
+    el.textContent=connection.label;
+    el.className="status "+connection.tone;
+    el.title=connection.title;
   });
   if(!snapshot.connected) {
     document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent="—");
@@ -653,7 +652,7 @@ function renderTrafficGeneratorOverview(snapshot) {
     return;
   }
   if(!document.querySelector("[data-tg-users]")) { window.NetEmActions.refresh(); return; }
-  document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??0);
+  document.querySelectorAll("[data-tg-users]").forEach(el=>el.textContent=status.users??"—");
   NetEmUI.renderDemSummary(document.getElementById("overview-dem"),dem,true,siteTargets);
 }
 {% if traffic_generator.connected %}NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{{ (traffic_generator.status.dem or {})|tojson }},true,siteTargets);{% endif %}
@@ -672,7 +671,7 @@ async function refreshDiagnosisOverview() {
     document.querySelectorAll("[data-diag-status]").forEach(el=>{el.textContent="Unavailable";el.className="status bad";});
     {% if traffic_generator.configured %}
     NetEmUI.renderDemSummary(document.getElementById("overview-dem"),{},false);
-    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="DISCONNECTED";el.className="status bad";});
+    document.querySelectorAll("[data-tg-status]").forEach(el=>{el.textContent="CHECKING";el.className="status info";});
     {% endif %}
   }
 }

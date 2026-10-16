@@ -561,6 +561,8 @@ Run regression coverage with `NETEM_AUTH_REQUIRED=0 python -m unittest discover 
 Counter semantics: [Linux interface statistics](https://www.kernel.org/doc/html/latest/networking/statistics.html).
 ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping.8.html).
 
+See the [1.4.2 stability review](docs/stability-review-1.4.2.md) for update confirmation and simulator connection-state regressions and their fixes.
+
 ### Users, roles and Authentik
 
 See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. After updating, installations without accounts open a first-administrator setup page. Run the absolute command displayed on that page to retrieve the one-time setup code on the host (root shells automatically use the runtime account), choose and confirm your administrator password in the browser, and NetEm signs you in. Existing accounts keep their passwords. Authentication is required by default; explicit `NETEM_AUTH_REQUIRED=0` retains trusted-lab anonymous operation only until an account is provisioned.

@@ -81,11 +81,48 @@ class UpdateScreenTests(unittest.TestCase):
     def test_installed_update_marks_the_process_that_restarts(self):
         with patch.object(netem, "git_update_status", side_effect=[STATUS, dict(STATUS, behind=0, installed_version="0.13.0")]), \
              patch.object(netem, "run_process", return_value=(0, "", "")) as run, \
-             patch.object(netem.threading, "Thread") as restart:
+             patch.object(netem.threading, "Thread") as restart, \
+             patch.object(netem, "get_app_version", return_value="0.13.0"):
             page = self.client.post("/updates", data={"action": "update"}).text
         self.assertEqual(run.call_args.args[0][1:], ["merge", "--ff-only", "f00d123"])
         restart.return_value.start.assert_called_once()
         self.assertIn(f'id="update-restarting" data-instance="{netem.PROCESS_INSTANCE}" data-version="0.13.0"', page)
+
+    def test_json_install_acknowledges_before_any_remote_or_template_work(self):
+        with patch.object(netem, 'git_update_status', return_value=STATUS) as git_status, \
+                patch.object(netem, 'run_process', return_value=(0, '', '')), \
+                patch.object(netem, 'get_app_version', return_value='0.13.0'), \
+                patch.object(netem, 'simulator_update_state', side_effect=AssertionError('Must not delay acknowledgement')), \
+                patch.object(netem.threading, 'Thread') as restart:
+            response = self.client.post('/updates', data={'action': 'update'}, headers={'Accept': 'application/json'})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json, dict(update_state='restarting', instance=netem.PROCESS_INSTANCE, version='0.13.0'))
+        git_status.assert_called_once_with(fetch=True)
+        restart.return_value.start.assert_called_once()
+
+    def test_legacy_ack_does_not_read_templates_replaced_by_the_update(self):
+        with patch.object(netem, 'git_update_status', return_value=STATUS), \
+                patch.object(netem, 'run_process', return_value=(0, '', '')), \
+                patch.object(netem, 'render_template', side_effect=AssertionError('Updated templates must not be loaded')), \
+                patch.object(netem, 'simulator_update_state', side_effect=AssertionError('No remote reads after merge')), \
+                patch.object(netem.threading, 'Thread'):
+            response = self.client.post('/updates', data={'action': 'update'})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('id="update-restarting"', response.text)
+
+    def test_restart_status_reports_running_code_even_after_files_change(self):
+        with patch.object(netem, 'get_app_version', return_value='999.0.0'):
+            self.assertEqual(self.client.get('/updates/status').json['version'], netem.PROCESS_VERSION)
+
+    def test_json_refusal_is_explicit_and_does_not_restart(self):
+        with patch.object(netem, 'git_update_status', return_value=dict(STATUS, dirty=True)), \
+                patch.object(netem, 'run_process') as run, patch.object(netem.threading, 'Thread') as restart:
+            response = self.client.post('/updates', data={'action': 'update'}, headers={'Accept': 'application/json'})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(response.json['update_state'], 'rejected')
+        self.assertIn('local changes', response.json['message'])
+        run.assert_not_called()
+        restart.assert_not_called()
 
     def test_refused_update_has_no_restart_marker_and_says_why(self):
         with patch.object(netem, "git_update_status", return_value=dict(STATUS, dirty=True)), \
@@ -103,6 +140,45 @@ class UpdateScreenTests(unittest.TestCase):
                           f'data-instance="{netem.PROCESS_INSTANCE}"', 'data-status-url="/updates/status"'):
             self.assertIn(attribute, page)
         self.assertNotIn("onsubmit=", page)
+
+
+class AuthenticatedUpdateTests(unittest.TestCase):
+    def test_live_cards_keep_csrf_and_authenticated_install_is_acknowledged(self):
+        import re
+        import time
+        with tempfile.TemporaryDirectory() as tmp, \
+                patch.object(netem.ACCESS_STORE, 'path', Path(tmp) / 'access.sqlite3'), \
+                patch.dict(netem.app.config, NETEM_AUTH_REQUIRED=True), \
+                patch.object(netem, 'git_update_status', return_value=STATUS), \
+                patch.object(netem, 'simulator_update_state', return_value=({}, None)), \
+                patch.object(netem.COMPONENT_CHECKS, 'snapshot', return_value={'running': False, 'components': {}}), \
+                patch.object(netem, 'run_process', return_value=(0, '', '')) as merge, \
+                patch.object(netem.threading, 'Thread') as restart:
+            admin = netem.ACCESS_STORE.create('update-admin', 'update-admin-password', 'admin')
+            user = netem.ACCESS_STORE.get(admin)
+            client = netem.app.test_client()
+            with client.session_transaction() as state:
+                state['access_identity'] = dict(id=admin, version=user['version'], at=time.time())
+                state['integration_csrf'] = 'stable-update-token'
+            # The live API is JSON, so the HTML response token injector never runs here.
+            fragment = client.get('/updates/components').json['html']
+            install = re.search(r'<form[^>]*data-update-form.*?</form>', fragment, re.S).group()
+            token = re.search(r'name="integration_csrf" value="([^"]+)"', install).group(1)
+            self.assertEqual(token, 'stable-update-token')
+            self.assertEqual(client.post('/updates', data={'action': 'update'}).status_code, 400)
+            merge.assert_not_called()
+            response = client.post('/updates', data={'action': 'update', 'integration_csrf': token},
+                                   headers={'Accept': 'application/json'})
+            self.assertEqual(response.status_code, 202)
+            self.assertEqual(response.json['update_state'], 'restarting')
+            merge.assert_called_once()
+            restart.return_value.start.assert_called_once()
+            viewer = netem.ACCESS_STORE.create('update-viewer', 'update-viewer-password', 'viewer')
+            with client.session_transaction() as state:
+                state['access_identity'] = dict(id=viewer, version=1, at=time.time())
+            self.assertEqual(client.get('/updates/components').status_code, 403)
+            self.assertEqual(client.post('/updates', data={'action': 'update', 'integration_csrf': token}).status_code, 403)
+            merge.assert_called_once()
 
 
 class TelemetryReadTests(unittest.TestCase):
