@@ -5,6 +5,8 @@ window.NetEmActions = (() => {
   let dirty = false;
   let editRevision = 0;
   let watching = false;
+  let refreshController = null;
+  let refreshGeneration = 0;
   let navigationController = null;
   let navigationGeneration = 0;
   let historyIndex = history.state?.netemIndex || 0;
@@ -87,11 +89,11 @@ window.NetEmActions = (() => {
     if (url.origin !== location.origin) throw new Error('Navigation must stay within this NetEm instance.');
     const next = new DOMParser().parseFromString(await response.text(), 'text/html');
     // The clock format is a page-wide setting: a saved change applies here at once, not on the next reload.
-    const format = next.body?.dataset.timeFormat;
-    if (format) { document.body.dataset.timeFormat = format; window.NetEmTime?.setFormat(format); }
     if (options.isCurrent && !options.isCurrent()) return false;
     if (options.beforeCommit && !(await options.beforeCommit())) return false;
     if (options.isCurrent && !options.isCurrent()) return false;
+    const format = next.body?.dataset.timeFormat;
+    if (format) { document.body.dataset.timeFormat = format; window.NetEmTime?.setFormat(format); }
     const page = next.querySelector('main.page');
     if (!response.ok && !page?.querySelector('[data-native-traffic]')) throw new Error('Action failed (' + response.status + ').');
     const scripts = next.getElementById('page-scripts');
@@ -186,9 +188,15 @@ window.NetEmActions = (() => {
   }
   document.querySelector('#navigation-confirm-dialog [data-navigation-stay]')?.addEventListener('click', () => document.getElementById('navigation-confirm-dialog').close('stay'));
   document.querySelector('#navigation-confirm-dialog [data-navigation-leave]')?.addEventListener('click', () => document.getElementById('navigation-confirm-dialog').close('leave'));
+  function cancelRefresh() {
+    refreshController?.abort();
+    refreshController = null;
+    refreshGeneration++;
+  }
   async function navigate(destination, options = {}) {
     const url = new URL(destination, location.href);
     if (!isAppPage(url)) return;
+    cancelRefresh();
     const current = new URL(renderedURL);
     if (url.pathname === current.pathname && url.search === current.search) {
       if (navigationController) {
@@ -283,11 +291,22 @@ window.NetEmActions = (() => {
   });
   window.addEventListener('scroll', () => { if (!busy) rememberScroll(); }, {passive: true});
   async function refresh() {
-    if (busy) return;
-    busy = true;
-    try { await update(await fetch(location.href, {cache:'no-store'})); }
-    catch (error) { displayError(error.message); }
-    finally { busy = false; }
+    if (busy || refreshController) return;
+    const controller = refreshController = new AbortController();
+    const token = ++refreshGeneration;
+    const revision = editRevision;
+    try {
+      const response = await fetch(location.href, {cache: 'no-store', signal: controller.signal});
+      if (token !== refreshGeneration) return;
+      await update(response, {
+        isCurrent: () => token === refreshGeneration,
+        beforeCommit: () => !busy && !dirty && revision === editRevision,
+      });
+    } catch (error) {
+      if (token === refreshGeneration && error.name !== 'AbortError') displayError(error.message);
+    } finally {
+      if (token === refreshGeneration) refreshController = null;
+    }
   }
   // A short message that outlives the page refresh an action triggers.
   function notify(message, tone = 'success') {
@@ -344,7 +363,7 @@ window.NetEmActions = (() => {
     if (watching) return;
     watching = true;
     rememberScroll();
-    const edited = event => { if (event.target.closest?.('main.page form')) { dirty = true; editRevision++; } };
+    const edited = event => { if (event.target.closest?.('main.page form')) { dirty = true; editRevision++; cancelRefresh(); } };
     document.addEventListener('input', edited);
     document.addEventListener('change', edited);
     // Submitting is the end of an edit, whichever script handles the form.
@@ -374,6 +393,7 @@ window.NetEmActions = (() => {
     if (action.origin !== location.origin || form.target === '_blank') return;
     event.preventDefault();
     if (busy) return;
+    cancelRefresh();
     busy = true;
     const data = new FormData(form);
     if (event.submitter?.name) data.append(event.submitter.name, event.submitter.value);

@@ -107,3 +107,57 @@ test('a saved clock format applies to the open page at once', async () => {
   assert.equal(page.win.NetEmTime.format(), '12h');
   assert.equal(page.win.NetEmTime.clock(new Date(2026, 9, 13, 14, 5)), '2:05:00 PM');
 });
+
+test('a slow background refresh does not block navigation or overwrite its destination', async () => {
+  const screen = open({version: 'v1'}, next);
+  let finish;
+  let refreshSignal;
+  screen.win.fetch = (url, options) => {
+    if (String(url).endsWith('/tests')) {
+      refreshSignal = options.signal;
+      return new Promise(resolve => { finish = resolve; });
+    }
+    return Promise.resolve({ok: true, url: 'http://netem.test/sessions', text: async () => page({version: 'sessions'})});
+  };
+  const refreshing = screen.win.NetEmActions.refresh();
+  await screen.win.NetEmActions.navigate('/sessions');
+  assert.equal(refreshSignal.aborted, true);
+  assert.equal(screen.win.location.pathname, '/sessions');
+  assert.equal(screen.doc.querySelector('main.page').dataset.uiVersion, 'sessions');
+  assert.doesNotMatch(screen.doc.body.textContent, /An action is still completing/);
+  finish({ok: true, url: 'http://netem.test/tests', text: async () => page(next)});
+  await refreshing;
+  assert.equal(screen.doc.querySelector('main.page').dataset.uiVersion, 'sessions');
+  screen.win.close();
+});
+
+test('edits made during a background refresh are retained', async () => {
+  const screen = open({version: 'v1', body: '<form method="post"><input name="name" value="original"></form>'}, next);
+  let finish;
+  screen.win.fetch = () => new Promise(resolve => { finish = resolve; });
+  const refreshing = screen.win.NetEmActions.refresh();
+  const input = screen.doc.querySelector('input');
+  input.value = 'my edit';
+  input.dispatchEvent(new screen.win.Event('input', {bubbles: true}));
+  finish({ok: true, url: 'http://netem.test/tests', text: async () => page(next)});
+  await refreshing;
+  assert.equal(screen.doc.querySelector('input').value, 'my edit');
+  assert.equal(screen.doc.querySelector('main.page').dataset.uiVersion, 'v1');
+  screen.win.close();
+});
+
+test('a real action still prevents duplicate submission and navigation until acknowledgement', async () => {
+  const screen = open({version: 'v1', body: '<form method="post" action="/change"><button>Apply</button></form>'}, next);
+  let finish;
+  let posts = 0;
+  screen.win.fetch = () => { posts++; return new Promise(resolve => { finish = resolve; }); };
+  const form = screen.doc.querySelector('form');
+  form.dispatchEvent(new screen.win.Event('submit', {bubbles: true, cancelable: true}));
+  form.dispatchEvent(new screen.win.Event('submit', {bubbles: true, cancelable: true}));
+  await screen.win.NetEmActions.navigate('/sessions');
+  assert.equal(posts, 1);
+  assert.match(screen.doc.body.textContent, /An action is still completing/);
+  finish({ok: true, url: 'http://netem.test/tests', text: async () => page(next)});
+  await new Promise(resolve => setImmediate(resolve));
+  screen.win.close();
+});

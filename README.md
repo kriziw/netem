@@ -526,7 +526,7 @@ Custom scenarios execute `traffic_generator` actions (`start`, `adjust`, `stop`)
 
 For the dual-NIC simulator, controlled target routing, FortiGate policy/SNAT and verification steps, see the [Traffic Simulator deployment guide](https://github.com/kriziw/netem-traffic-simulator#installation--controlled-target). Simulator API keys are stored separately from `config.json`; the browser controls require session form tokens. NetEm remains a management-network lab application and has no general user authentication layer.
 
-Run regression coverage with `NETEM_AUTH_REQUIRED=0 python -m unittest discover -s tests -v`.
+Run regression coverage with `NETEM_AUTH_REQUIRED=0 python -m unittest discover -s tests -v`. See the [UI responsiveness review](docs/ui-responsiveness-review.md) for simulator polling behavior, known latency limits and the controlled before/after benchmark.
 
 ### Telemetry accuracy and measurement scope
 

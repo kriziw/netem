@@ -60,7 +60,7 @@ test('missing readings display as unknown and charts retain gaps', () => {
 });
 test('live client propagates gaps and valid samples through polling', async () => {
   const series=[sample(),sample(12,250100,125200,210,120),sample(14)];
-  const liveContext={window:{},setTimeout:()=>1,clearTimeout:()=>{}};
+  const liveContext={window:{},AbortController,setTimeout:()=>1,clearTimeout:()=>{}};
   let turn=0;
   liveContext.fetch=async (url)=>({ok:true,json:async()=>url.includes('telemetry')
     ? {timestamp:series[turn].timestamp,sampler_id:'one',links:[series[turn]]}
@@ -95,8 +95,8 @@ test('chart animation reaches exact samples and preserves missing-data gaps', ()
 
 test('a stopped page client cannot report a late connection error on the next page', async () => {
   let reject, statuses = 0, timers = 0;
-  const ctx = {window: {}, fetch: () => new Promise((resolve, failure) => { reject = failure; }),
-    setTimeout: () => { timers++; }, clearTimeout() {}};
+  const ctx = {window: {}, AbortController, fetch: () => new Promise((resolve, failure) => { reject = failure; }),
+    setTimeout: () => { timers++; }, clearTimeout() { timers--; }};
   vm.createContext(ctx); vm.runInContext(fs.readFileSync('static/app.js', 'utf8'), ctx);
   const client = ctx.window.NetEmUI.createLiveClient({onStatus: () => { statuses++; }});
   client.stop(); reject(new Error('Late failure'));
@@ -269,4 +269,30 @@ test('phase controls follow live run identity, phase boundaries and pending tran
   ui.renderRunningTest(root, {...scenario, preparing_workload: true});
   assert.equal(next.disabled, true);
   dom.window.close();
+});
+
+test('a stalled live poll times out and retries instead of freezing the dashboard', async () => {
+  const timers = new Map();
+  let serial = 0, stalled = true;
+  const statuses = [];
+  const ctx = {window: {}, AbortController,
+    setTimeout(fn, ms) { const id = ++serial; timers.set(id, {fn, ms}); return id; },
+    clearTimeout(id) { timers.delete(id); },
+    fetch(url, options) {
+      if (stalled) return new Promise((resolve, reject) => options.signal.addEventListener('abort', () => reject(new Error('Timed out')), {once: true}));
+      return Promise.resolve({ok: true, json: async () => url.includes('telemetry') ? {links: []} : {links: []}});
+    }};
+  vm.createContext(ctx); vm.runInContext(fs.readFileSync('static/app.js', 'utf8'), ctx);
+  const client = ctx.window.NetEmUI.createLiveClient({onStatus: status => statuses.push(status)});
+  const deadline = [...timers.values()].find(timer => timer.ms === 5000);
+  assert.ok(deadline);
+  deadline.fn();
+  await new Promise(resolve => setImmediate(resolve));
+  assert.deepEqual(statuses, [false]);
+  const retry = [...timers.values()].find(timer => timer.ms === 1500);
+  assert.ok(retry);
+  stalled = false;
+  await retry.fn();
+  assert.deepEqual(statuses, [false, true]);
+  client.stop();
 });
