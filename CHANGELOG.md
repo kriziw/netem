@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.3](https://github.com/kriziw/netem/compare/v1.4.2...v1.4.3) (2026-10-16)
+
+
+### Bug Fixes
+
+* stabilize update confirmation and simulator connection status ([#155](https://github.com/kriziw/netem/issues/155)) ([1a32b7b](https://github.com/kriziw/netem/commit/1a32b7bf7c5cb2e8b25b427c5d88353638909e8d))
+
 ## [1.4.2](https://github.com/kriziw/netem/compare/v1.4.1...v1.4.2) (2026-10-16)
 
 
