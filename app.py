@@ -9685,16 +9685,15 @@ def showroom_session_snapshot():
     brief = scenario.get('briefing') or showcase_summary.briefing(scenario,
         (site_plan or {}).get('targets') or SHOWROOM_LAB_TARGETS, scenario.get('live_window_seconds') or 15)
     execution = ((diagnosis.get('traffic_generator') or {}).get('status') or {})
-    scope = ((execution.get('run') or {}).get('run_id'),
+    scope = (lab_session.get('id'), lab_session.get('started_at'),
+             (execution.get('run') or {}).get('run_id'),
              (execution.get('dem') or {}).get('live_phase_id'))
     with STORY_LOCK:
         if SHOWROOM_STATE.get('scope') != scope:
+            SHOWROOM_STATE.clear()
             SHOWROOM_STATE.update(scope=scope, values={}, impacts={})
     story = showroom_story(diagnosis, links, outcome)
-    if 'live_phase_pending' in ((execution.get('dem') or {}).get('evidence_issues') or []):
-        story['status'] = 'Collecting current-phase evidence.'
-    elif (execution.get('dem') or {}).get('at_risk') and outcome['experience'].get('business_acceptance') != 'fail':
-        story['status'] = 'Application responses are overdue; experience is not yet confirmed.'
+    showroom_evidence_story(story, outcome['experience'], execution.get('dem') or {})
     return {
         "timestamp": now, "links": links, "story": story, "time_format": time_format(cfg),
         "showcase_video": showcase_video_public(cfg),
@@ -9962,6 +9961,46 @@ def settled(key, value, now, settle=STORY_SETTLE_S):
     if value != entry["shown"] and now - entry["since"] >= settle:
         entry["shown"] = value
     return entry["shown"]
+
+
+def showroom_evidence_story(story, experience, dem, now=None):
+    """Settle overdue narration only; leave scores and evidence verdicts untouched."""
+    now = time.monotonic() if now is None else now
+    issues = set(dem.get('evidence_issues') or [])
+    pending = 'live_phase_pending' in issues
+    failed = experience.get('business_acceptance') == 'fail'
+    overdue = bool(dem.get('at_risk')) and not failed and not pending
+    # Other invalid evidence, pauses and disconnects must not inherit a prior verdict.
+    transient = (overdue and experience.get('available') and not dem.get('live_paused')
+                 and not dem.get('truncated')
+                 and not (issues - {'outstanding_overdue_operations'}))
+    with STORY_LOCK:
+        state = SHOWROOM_STATE.setdefault('evidence_story', {})
+        if pending and not failed:
+            story['status'] = 'Collecting current-phase evidence.'
+        elif overdue:
+            since = state.setdefault('overdue_since', now)
+            if transient and now - since < STORY_SETTLE_S:
+                previous = state.get('confirmed')
+                story['status'] = ('Last confirmed observation: ' + previous['status'] if previous
+                                   else 'Application monitoring is collecting measurements.')
+                experience['user_impact'] = ('Last confirmed observation: ' + previous['impact'] if previous
+                                             else 'Application monitoring is collecting measurements.')
+            else:
+                story['status'] = 'Application responses remain overdue; experience is not yet confirmed.'
+        if not overdue:
+            state.pop('overdue_since', None)
+        confirmed = (experience.get('available') and experience.get('scoring_complete') is True
+                     and not issues and not dem.get('at_risk') and not dem.get('live_paused')
+                     and not dem.get('truncated')
+                     and experience.get('business_acceptance') in ('pass', 'fail'))
+        if confirmed:
+            impact = experience.get('user_impact') or (
+                'Application checks met the configured targets; no user impact was detected in this measurement window.'
+                if not failed else 'Application checks did not meet the configured targets.')
+            state['confirmed'] = {'status': story['status'], 'impact': impact}
+        elif not transient:
+            state.pop('confirmed', None)
 
 
 def impairment_text(link):
