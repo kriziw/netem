@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.3.7](https://github.com/kriziw/netem/compare/v1.3.6...v1.3.7) (2026-10-16)
+
+
+### Bug Fixes
+
+* settle transient showcase overdue narration ([#146](https://github.com/kriziw/netem/issues/146)) ([28a26d5](https://github.com/kriziw/netem/commit/28a26d524142feb5a98cc979b6f72b1f62708604))
+
 ## [1.3.6](https://github.com/kriziw/netem/compare/v1.3.5...v1.3.6) (2026-10-15)
 
 
