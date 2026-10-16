@@ -8,7 +8,7 @@
   </div>
   <div class="card-pad{% if session_state.active %} session-console-layout{% endif %}">
     {% if not session_state.active %}
-      <p class="field-help">The showcase stays on its waiting screen until a session starts. <a href="{{ url_for('sessions') }}">Start a lab session</a>.</p>
+      <p class="field-help">The showcase shows running tests live; standalone trials are not saved. {% if access_can('session_start', 'POST') %}<a href="{{ url_for('sessions') }}">Start a lab session</a>.{% else %}<a href="{{ url_for('sessions') }}">View sessions</a>.{% endif %}</p>
     {% else %}
       <section class="session-console-summary" aria-label="Current session">
       <div class="kv">

@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · NetEm</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
-<body><main style="max-width:460px;margin:10vh auto;padding:24px">
+<body><main class="access-page" style="max-width:460px;margin:10vh auto;padding:24px">
 <section class="card"><div class="card-pad"><h1>Sign in to NetEm</h1>
 {% for category, message in get_flashed_messages(with_categories=true) %}<p role="alert">{{ message }}</p>{% endfor %}
 <form method="post" action="{{ url_for('access_login') }}">

@@ -254,21 +254,66 @@ def init_app(app, store):
             # Server-rendered tokens also cover fetch(FormData) and newly replaced page fragments.
             session.setdefault('integration_csrf', secrets.token_urlsafe(32))
             token = session['integration_csrf']
+            def route_for(path, method):
+                try:
+                    return app.url_map.bind_to_environ(request.environ).match(path or request.path, method=method)[0]
+                except Exception:
+                    return None
+
+            def lock_control(match):
+                opening = match.group(0)
+                attributes = ' inert data-access-denied="true"'
+                if not re.search(r'\sdisabled(?:\s|=|>)', opening, re.I):
+                    attributes += ' disabled'
+                return opening[:-1] + attributes + '>'
+
             def form(match):
                 opening, contents = match.group(1), match.group(2)
-                if not re.search(r'\bmethod\s*=\s*[\"\']?post\b', opening, re.I):
+                if not re.search(r'\bmethod\s*=\s*["\']?post\b', opening, re.I):
                     return match.group(0)
-                action = re.search(r'\baction\s*=\s*[\"\']([^\"\']*)', opening, re.I)
-                path = urlsplit(action.group(1)).path if action else request.path
-                try:
-                    endpoint, _ = app.url_map.bind_to_environ(request.environ).match(path, method='POST')
-                except Exception:
-                    endpoint = None
+                action = re.search(r'\baction\s*=\s*["\']([^"\']*)', opening, re.I)
+                endpoint = route_for(urlsplit(action.group(1)).path if action else request.path, 'POST')
+                notice = ''
                 if getattr(g, 'access_user', None) and not allowed(endpoint, 'POST'):
-                    return '<p class="field-help">Your role has read-only access to these controls.</p>'
-                return opening + '<input type="hidden" name="integration_csrf" value="' + token + '">' + contents + '</form>'
+                    # Preserve element IDs and preview data needed by read-only live widgets.
+                    opening = opening[:-1] + ' inert data-access-readonly="true">'
+                    contents = re.sub(r'<(?:input|select|textarea|button)\b[^>]*>', lock_control, contents, flags=re.I)
+                    notice = '<p class="field-help">Read-only · requires ' + required_role(endpoint, 'POST').capitalize() + ' access.</p>'
+                elif getattr(g, 'access_user', None):
+                    # A mixed-action form can contain buttons with more privileged formactions.
+                    def alternate(button):
+                        tag = button.group(0)
+                        target = re.search(r'\bformaction\s*=\s*["\']([^"\']*)', tag, re.I)
+                        if target and not allowed(route_for(urlsplit(target.group(1)).path, 'POST'), 'POST'):
+                            return lock_control(button)
+                        return tag
+                    contents = re.sub(r'<(?:button|input)\b[^>]*>', alternate, contents, flags=re.I)
+                return notice + opening + '<input type="hidden" name="integration_csrf" value="' + token + '">' + contents + '</form>'
+
+            def link(match):
+                opening, contents = match.group(1), match.group(2)
+                action = re.search(r'\bdata-access-action=["\']([^"\']*)', opening)
+                href = re.search(r'\bhref\s*=\s*["\']([^"\']*)', opening, re.I)
+                permitted = True
+                if action:
+                    permitted = allowed(action.group(1), 'POST')
+                elif href:
+                    target = urlsplit(href.group(1))
+                    if not target.netloc or target.netloc == request.host:
+                        endpoint = route_for(target.path, 'GET') if target.path else None
+                        if endpoint:
+                            permitted = allowed(endpoint)
+                if permitted:
+                    return match.group(0)
+                if re.search(r'\b(?:btn|command-item|quick-action)\b', opening):
+                    return ''
+                return '<span>' + contents + '</span>'
+
             if request.endpoint != 'simulator_controller':
-                response.set_data(re.sub(r'(<form\b[^>]*>)(.*?)</form>', form, response.get_data(as_text=True), flags=re.I | re.S))
+                html = re.sub(r'(<form\b[^>]*>)(.*?)</form>', form, response.get_data(as_text=True), flags=re.I | re.S)
+                if getattr(g, 'access_user', None):
+                    html = re.sub(r'(<a\b[^>]*>)(.*?)</a>', link, html, flags=re.I | re.S)
+                response.set_data(html)
         return response
 
     def sign_in(user):

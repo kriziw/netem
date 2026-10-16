@@ -111,6 +111,50 @@ class AccessTests(unittest.TestCase):
         self.assertIn('name="integration_csrf" value="test-token"', html)
         self.assertIn('Authentik', html)
 
+    def test_navigation_shortcuts_and_mixed_forms_follow_each_role(self):
+        from html.parser import HTMLParser
+        class Page(HTMLParser):
+            def __init__(self, html):
+                super().__init__()
+                self.forms, self.links, self.alternates, self.ids = {}, [], [], set()
+                self.feed(html)
+            def handle_starttag(self, tag, attrs):
+                attrs = dict(attrs)
+                if attrs.get('id'):
+                    self.ids.add(attrs['id'])
+                if tag == 'form':
+                    self.forms[attrs.get('id') or attrs.get('action')] = attrs
+                if tag == 'a':
+                    self.links.append(attrs)
+                if attrs.get('formaction'):
+                    self.alternates.append(attrs)
+        cfg = {'site_profile': {'industry': 'manufacturing', 'sub_industry': 'automotive',
+                'function': 'plant', 'size': 'large', 'criticality': 'mission_critical'},
+               'wan_links': [{'id': 'wan1', 'name': 'WAN1', 'inner': 'eth1', 'outer': 'eth2',
+                              'bridge': 'br-wan1', 'preset': 'dia'}]}
+        with patch.object(netem, 'load_config', return_value=cfg), \
+             patch.object(netem, 'traffic_generator_snapshot', return_value={'connected': True, 'configured': True,
+                          'integration': {}, 'status': {'status': 'idle', 'run': {}, 'dem': {'experience_score': None, 'availability_pct': None, 'interactive_p95_ms': None, 'p95_ms': None}}}), \
+             patch.object(netem, 'current_diagnosis', return_value={}), \
+             patch.object(netem, 'latest_telemetry_sample', return_value=None):
+            for role in access.ROLES:
+                self.identity(self.admin if role == 'admin' else self.store.create('ui-' + role, 'example-password', role))
+                response = self.client.get('/')
+                self.assertEqual(response.status_code, 200)
+                overview = Page(response.get_data(as_text=True))
+                self.assertEqual(any(link.get('data-access-action') == 'lab_scenario_start' for link in overview.links), role != 'viewer')
+                self.assertEqual(any(link.get('data-access-action') == 'quick_wan_action' for link in overview.links), role in ('operator', 'admin'))
+                self.assertEqual(any(link.get('href') == '/settings' for link in overview.links), role == 'admin')
+                response = self.client.get('/tests')
+                self.assertEqual(response.status_code, 200)
+                tests = Page(response.get_data(as_text=True))
+                self.assertIn('site-selection', tests.forms)  # Live preview initialization still works.
+                self.assertIn('site-industry', tests.ids)
+                self.assertEqual('inert' in tests.forms['site-selection'], role in ('viewer', 'presenter'))
+                self.assertEqual('inert' in tests.forms['site-run'], role == 'viewer')
+                apply_wan = next(button for button in tests.alternates if button['formaction'] == '/site/wan')
+                self.assertEqual('inert' in apply_wan, role in ('viewer', 'presenter'))
+
     def test_oidc_group_mapping_subject_binding_and_disabled_identity(self):
         settings = {'issuer': 'https://auth.example/application/o/netem/',
                     'groups': {'presenters': 'presenter', 'admins': 'admin'}}

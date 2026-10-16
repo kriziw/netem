@@ -196,7 +196,7 @@ class SiteTestControlTests(SessionCase):
     def test_command_centre_offers_a_start_button_per_test_only_when_a_session_runs(self):
         template = netem.app.jinja_env.get_template("_session_console.html")
         with netem.app.test_request_context():
-            idle = template.render(session_state=blank_session(), session_tests=[], session_wan={},
+            idle = template.render(access_can=lambda *args: True, session_state=blank_session(), session_tests=[], session_wan={},
                                    traffic_generator={"connected": True}, scenario_state={"active": False},
                                    site_state={"active": False}, integration_csrf="token")
             tests = [{"id": "baseline", "name": "Baseline", "role": "primary", "description": "", "status": "pending"},
@@ -204,10 +204,10 @@ class SiteTestControlTests(SessionCase):
             session = dict(blank_session(), active=True, name="Contoso PoC", site={"label": "Plant"},
                            deadline=time.time() + 3600)
             wan = {"primary": {"link_id": "wan1", "label": "WAN1"}, "backup": {"link_id": "wan2", "label": "WAN2"}}
-            running = template.render(session_state=session, session_tests=tests, session_wan=wan,
+            running = template.render(access_can=lambda *args: True, session_state=session, session_tests=tests, session_wan=wan,
                                       traffic_generator={"connected": True}, scenario_state={"active": False},
                                       site_state={"active": False}, integration_csrf="token")
-            busy = template.render(session_state=session, session_tests=tests, session_wan=wan,
+            busy = template.render(access_can=lambda *args: True, session_state=session, session_tests=tests, session_wan=wan,
                                    traffic_generator={"connected": True}, scenario_state={"active": True},
                                    site_state={"active": True}, integration_csrf="token")
         self.assertIn("No session", idle)

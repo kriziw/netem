@@ -2,6 +2,7 @@
 {% block title %}Users &amp; access · {{ branding.name }}{% endblock %}
 {% block crumb %}Users &amp; access{% endblock %}
 {% block content %}
+<div class="access-page">
 <h1>Users &amp; access</h1>
 {% if not access_enabled %}
 <section class="card"><div class="card-pad"><h2>Enable user accounts</h2>
@@ -43,4 +44,5 @@
 <p><a href="https://docs.goauthentik.io/add-secure-apps/providers/oauth2/" target="_blank" rel="noopener">Authentik setup documentation</a></p>
 </div></section>
 {% endif %}
+</div>
 {% endblock %}
