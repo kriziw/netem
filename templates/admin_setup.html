@@ -2,8 +2,8 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Set up administrator · NetEm</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
 <body><main class="access-page" style="max-width:520px;margin:6vh auto;padding:24px"><section class="card"><div class="card-pad">
 <h1>Set up your administrator</h1>
-<p>Create the initial administrator to sign in to NetEm. On the NetEm host, run this from the installation directory as the service account to retrieve your one-time setup code:</p>
-<pre>.venv/bin/python access_control.py setup-code</pre>
+<p>Create the initial administrator to sign in to NetEm. On the NetEm host, run this command to retrieve your one-time setup code:</p>
+<pre>{{ setup_command }}</pre>
 <p class="field-help">The code proves you have access to this server. Keep it private. Setup closes after the first account is created.</p>
 {% for category, message in get_flashed_messages(with_categories=true) %}<p role="alert">{{ message }}</p>{% endfor %}
 <form method="post" action="{{ url_for('access_bootstrap') }}">

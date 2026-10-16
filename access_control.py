@@ -12,7 +12,10 @@ import os
 from pathlib import Path
 import re
 import secrets
+import stat
 import sqlite3
+import shlex
+import sys
 import threading
 import time
 from urllib.parse import urlsplit
@@ -372,8 +375,8 @@ def init_app(app, store):
                 return redirect('/')
             except ValueError as exc:
                 flash(str(exc), 'error')
-                return render_template('admin_setup.html'), 400
-        return render_template('admin_setup.html')
+                return render_template('admin_setup.html', setup_command=shlex.join([sys.executable, str(Path(__file__).absolute()), 'setup-code'])), 400
+        return render_template('admin_setup.html', setup_command=shlex.join([sys.executable, str(Path(__file__).absolute()), 'setup-code']))
 
     @app.route('/login', methods=['GET', 'POST'], endpoint='access_login')
     def login():
@@ -490,16 +493,72 @@ def init_app(app, store):
     return store
 
 
+def prepare_cli_database(database):
+    """Run root-invoked recovery commands as the runtime's owner, before SQLite.
+
+    The server creates session.secret at startup with its own identity. Prefer
+    that identity to the directory owner (installers may leave runtime root-owned).
+    For a fresh/manual deployment, use the nearest existing database directory.
+    """
+    path = Path(database).absolute()
+    if os.geteuid() != 0:
+        return path
+    import pwd
+    directory = path.parent
+    existing = directory
+    while not existing.exists():
+        existing = existing.parent
+    secret = directory / 'session.secret'
+    identity = secret.stat() if secret.is_file() else existing.stat()
+    uid, gid = identity.st_uid, identity.st_gid
+    if uid == 0:
+        return path
+    account = pwd.getpwuid(uid)
+    # Fresh directories must be writable by the identity we are about to adopt.
+    missing = []
+    current = directory
+    while not current.exists():
+        missing.append(current)
+        current = current.parent
+    for folder in reversed(missing):
+        folder.mkdir(mode=0o700)
+        os.chown(folder, uid, gid)
+    # Recover only access DB files left by earlier root CLI runs. Never change
+    # unrelated runtime data or follow a symlink during privileged ownership repair.
+    for candidate in (path, *(Path(str(path) + suffix) for suffix in ('-journal', '-wal', '-shm'))):
+        try:
+            fd = os.open(candidate, os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK)
+        except FileNotFoundError:
+            continue
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or info.st_uid not in (0, uid):
+                raise ValueError('Access database ownership repair requires an ordinary file owned by root or the runtime account.')
+            if info.st_uid == 0:
+                os.fchown(fd, uid, gid)
+                os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+    os.initgroups(account.pw_name, gid)
+    os.setgid(gid)
+    os.setuid(uid)
+    return path
+
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('command', choices=['setup-code', 'create-admin', 'reset-password'])
     parser.add_argument('username', nargs='?')
     parser.add_argument('--database', default=str(Path(__file__).parent / 'runtime' / 'access.sqlite3'))
     args = parser.parse_args()
+    try:
+        args.database = prepare_cli_database(args.database)
+    except (OSError, KeyError, ValueError) as exc:
+        parser.error(f'Cannot prepare the access database: {exc}. Run this command as the NetEm service account.')
     if args.command == 'setup-code':
         try:
             print(AccessStore(args.database).setup_code())
-        except ValueError as exc:
+        except (OSError, sqlite3.Error, ValueError) as exc:
             parser.error(str(exc))
         raise SystemExit(0)
     if not args.username:
@@ -516,6 +575,6 @@ if __name__ == '__main__':
             if not user:
                 raise ValueError('Local user not found.')
             access.update(user['id'], user['role'], True, password)
-    except ValueError as exc:
+    except (OSError, sqlite3.Error, ValueError) as exc:
         parser.error(str(exc))
     print('Local account ready. Authentication is enabled; restart NetEm if necessary.')
