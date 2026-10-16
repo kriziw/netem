@@ -4,14 +4,14 @@
     <span class="status warn">No session</span>
   </div>
   <div class="card-pad">
-    <p id="no-session-text">&ldquo;{{ scenario.name }}&rdquo; would run on {{ link_name }} without a session. Without one, the client, the appliance and the WAN roles are not recorded, and the showcase stays on its waiting screen.</p>
+    <p id="no-session-text">&ldquo;{{ scenario.name }}&rdquo; would run on {{ link_name }} without a session. This is an unsaved test: it appears live on the dashboard and showcase, but NetEm does not retain its test record, results, events or telemetry. The showcase returns to its waiting screen when the test ends.</p>
     <div class="actions" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap">
       <a class="btn btn-primary" href="{{ url_for('sessions') }}">Start a session</a>
       <form method="post" action="{{ url_for('lab_scenario_start') }}">
         {% for name, value in fields %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
         <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
         <input type="hidden" name="no_session_ack" value="1">
-        <button class="btn" type="submit">Acknowledge and run anyway</button>
+        <button class="btn" type="submit">Run unsaved test</button>
       </form>
     </div>
   </div>

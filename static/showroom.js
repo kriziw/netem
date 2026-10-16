@@ -446,7 +446,7 @@
     text('site-meta', view.meta);
     text('site-people', view.people);
     const session = latest.session || {};
-    text('session-name', session.active ? session.name || 'Lab session' : 'No session running');
+    text('session-name', (latest.scenario || {}).unsaved ? 'Test mode · not saved' : session.active ? session.name || 'Lab session' : 'No session running');
     text('session-site', session.active ? (session.site ? `Validating ${session.site}` : 'Session without a recorded site') : '');
   }
 

@@ -26,9 +26,12 @@
     </div>
 
     {% for group in nav_groups %}
+      {% set visible_group = namespace(show=false) %}
+      {% for item in group['items'] if access_can(item.endpoint) %}{% set visible_group.show = true %}{% endfor %}
+      {% if visible_group.show %}
       <div class="nav-group">
         <div class="nav-group-title">{{ group.label }}</div>
-        {% for item in group['items'] %}
+        {% for item in group['items'] if access_can(item.endpoint) %}
           <a class="nav-link {% if page == item.id or (item.id == 'settings' and settings_group) %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="nav-icon">
               {% if item.icon == 'overview' %}
@@ -55,6 +58,7 @@
           </a>
         {% endfor %}
       </div>
+      {% endif %}
     {% endfor %}
 
     <div class="sidebar-bottom">
@@ -77,6 +81,8 @@
         <div class="breadcrumb"><span data-brand-name>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
+        {% if access_user %}<span class="top-pill">{{ access_user.username }} · {{ access_user.role|capitalize }}</span>
+        <form method="post" action="{{ url_for('access_logout') }}" data-native-submit><button class="top-pill scenario" type="submit">Sign out</button></form>{% endif %}
         <span id="inventory-alerts">{% if inventory_summary.critical %}<a class="top-pill alert" href="{{ url_for('inventory') }}">{{ inventory_summary.critical }} appliance alert{{ '' if inventory_summary.critical == 1 else 's' }}</a>{% elif inventory_summary.warnings %}<a class="top-pill" href="{{ url_for('inventory') }}">{{ inventory_summary.warnings }} appliance warning{{ '' if inventory_summary.warnings == 1 else 's' }}</a>{% endif %}</span>
         <span id="page-guide">{% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>
@@ -162,7 +168,7 @@
     <a class="command-item" data-command-search="platform health simulator target agent status" href="{{ url_for('platform_health') }}"><span>Platform Health</span><small>Simulator and target status</small></a>
     {% endif %}
     {% for link in global_links %}
-    <a class="command-item" data-command-search="{{ link.label|lower }} wan controls degrade blackhole mtu restore" href="{{ url_for('overview') }}?wan={{ link.id }}">
+    <a class="command-item" data-access-action="quick_wan_action" data-command-search="{{ link.label|lower }} wan controls degrade blackhole mtu restore" href="{{ url_for('overview') }}?wan={{ link.id }}">
       <span>Open {{ link.label }} controls</span><small>{{ link.preset_name }} · {{ link.nominal_download_mbit }}/{{ link.nominal_upload_mbit }} Mbit/s</small>
     </a>
     {% endfor %}

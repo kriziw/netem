@@ -331,7 +331,7 @@ th { color:var(--muted); font-weight:650; text-align:left; padding:9px 10px; bor
 td { color:var(--text-soft); padding:9px 10px; border-bottom:1px solid rgba(var(--color-213149-rgb), .58); }
 tr:last-child td { border-bottom:0; }
 
-input[type="text"], input[type="number"], select, textarea {
+input:not([type]), input[type="text"], input[type="number"], input[type="password"], input[type="url"], select, textarea {
   width:100%; min-height:32px; border:1px solid var(--border-strong); border-radius:8px; padding:7px 9px;
   background:var(--color-091321); color:var(--text); outline:none; transition:.13s ease;
 }
@@ -777,7 +777,7 @@ pre {
   border:1px solid rgba(var(--color-36d6b0-rgb), .34); border-radius:11px; background:rgba(var(--color-081c1e-rgb), .94);
   backdrop-filter:blur(12px); box-shadow:var(--shadow);
 }
-.running-test-line { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.running-test-line { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; }
 .running-test-progress { height:4px; margin-top:9px; border-radius:999px; background:var(--color-173034); overflow:hidden; }
 .running-test-progress > span { display:block; height:100%; background:var(--accent); transition:width .4s ease; }
 
@@ -1120,3 +1120,13 @@ body.update-active{overflow:hidden}
   .settings-nav, .command-shortcuts { display:none; }
   .settings-layout { display:block; }
 }
+
+/* User administration and the standalone sign-in form share the existing form styling. */
+.access-page .field { margin:12px 0; }
+.access-page .card + .card { margin-top:14px; }
+.access-page .actions { display:flex; align-items:flex-end; gap:12px; flex-wrap:wrap; }
+.access-page .actions > label { flex:1 1 180px; }
+
+/* Keep read-only live widgets mounted while locking unauthorized controls. */
+[data-access-readonly] { opacity:.65; }
+[data-access-readonly] button, [data-access-denied] { opacity:.42; pointer-events:none; }

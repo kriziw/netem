@@ -86,7 +86,10 @@
 
 <h2 id="session">Assertions and Lab Sessions</h2>
 <p>Start a Lab Session before running a scored validation. Every assertion writes an <code>assertion</code> event containing the requirement, observed value, elapsed evaluation time and PASS/FAIL result. Completed session reports aggregate those results automatically.</p>
-<p>A test started without a session shows a warning first. Start a session from the warning, or acknowledge it to run the test anyway. Such a test is outside every session, so it is not part of a session report, and the showcase keeps its waiting screen.</p>
+<p>A test started without a session shows a warning first. Start a session from the warning, or select <strong>Run unsaved test</strong>. The test appears live on the dashboard and showcase with a <strong>Test mode · not saved</strong> label. NetEm does not retain a test archive, summary, event history or telemetry for that run. The showcase returns to its waiting screen when it ends.</p>
 
 <h2 id="security">Security and capture tools</h2>
 <p>EICAR, benign beacon and bounded packet capture remain on the same Tests page. These are diagnostics/detection-validation tools and are not used as unrestricted offensive functionality.</p>
+
+<h2 id="phase-navigation">Move between phases</h2>
+<p>Presenters, Operators and Admins can select <strong>Previous phase</strong> or <strong>Next phase</strong> in the running-test bar. The destination phase restarts and resumes with a fresh measurement window and its WAN state reapplied. Navigation is unavailable during introduction, workload preparation or another transition. Recorded runs keep each visit separately and mark manual navigation; they cannot confirm validation of the original full sequence.</p>

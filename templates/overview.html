@@ -12,11 +12,11 @@
     <p class="page-description">Control WANs and compare measured traffic with employee experience. Expand topology and history below for more detail.</p>
   </div>
   <div class="page-actions">
-    {% if not session_state.active %}
+    {% if not session_state.active and access_can('session_start', 'POST') %}
     <a class="btn" href="{{ url_for('sessions') }}">Start lab session</a>
     {% endif %}
     <a class="btn" href="{{ url_for('analytics') }}">Deep analytics</a>
-    <a class="btn btn-primary" href="{{ url_for('tests') }}">Run a test</a>
+    <a class="btn btn-primary" href="{{ url_for('tests') }}">{{ 'Run a test' if access_can('lab_scenario_start', 'POST') else 'View tests' }}</a>
   </div>
 </div>
 
@@ -25,10 +25,10 @@
 
 <nav class="command-shortcuts" aria-label="Quick actions">
 
-          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='progressive_brownout') }}" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
-          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='sla_failover') }}" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
-          <a class="quick-action" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='flaky_underlay') }}" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
-          <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
+          <a class="quick-action" data-access-action="lab_scenario_start" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='progressive_brownout') }}" href="{{ url_for('tests') }}?scenario=progressive_brownout"><strong>Degrade a WAN</strong><span>Progressive brownout test</span></a>
+          <a class="quick-action" data-access-action="lab_scenario_start" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='sla_failover') }}" href="{{ url_for('tests') }}?scenario=sla_failover"><strong>Fail a WAN</strong><span>Carrier-up blackhole test</span></a>
+          <a class="quick-action" data-access-action="lab_scenario_start" data-scenario-modal="{{ url_for('scenario_configuration', scenario_id='flaky_underlay') }}" href="{{ url_for('tests') }}?scenario=flaky_underlay"><strong>Unstable WAN</strong><span>One-way failure sequence</span></a>
+          <a class="quick-action" data-access-action="lab_capture_start" href="{{ url_for('tests') }}#capture"><strong>Capture traffic</strong><span>Bounded PCAP diagnostic</span></a>
 
 </nav>
 <div class="command-center-grid">
@@ -379,7 +379,7 @@
     <div class="section-title">More</div>
     <div class="quick-actions">
       <a class="quick-action" href="{{ url_for('wan_links') }}#{{ link.id }}"><strong>Advanced WAN settings</strong><span>Profiles, custom packet behavior and qdisc diagnostics</span></a>
-      <a class="quick-action" href="{{ url_for('tests') }}#capture"><strong>Packet capture</strong><span>Capture on {{ link.label }} inner or outer side</span></a>
+      <a class="quick-action" data-access-action="lab_capture_start" href="{{ url_for('tests') }}#capture"><strong>Packet capture</strong><span>Capture on {{ link.label }} inner or outer side</span></a>
     </div>
   </div>
 </aside>

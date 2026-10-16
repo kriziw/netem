@@ -7,6 +7,10 @@ on:
       - main
       - 'codex/**'
 
+env:
+  # Legacy runtime tests isolate authentication; access tests explicitly enable it.
+  NETEM_AUTH_REQUIRED: "0"
+
 permissions:
   contents: read
 
@@ -21,7 +25,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install application dependency
-        run: python -m pip install --disable-pip-version-check flask
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Compile Python
         run: python -m py_compile app.py appliance_inventory.py appliance_platform.py branding.py host_health.py netem_core.py showroom.py site_catalog.py experience_groups.py test_records.py
@@ -270,8 +274,8 @@ jobs:
       - name: Validate telemetry and Traffic Simulator regressions
         run: |
           python -m unittest discover -s tests -v
-          node --test tests/telemetry.test.js
           npm ci --prefix tests
+          node --test tests/telemetry.test.js
           node --test tests/modal.test.js
           node --test tests/showroom.test.js
           node --check static/showroom.js
