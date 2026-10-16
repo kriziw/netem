@@ -28,7 +28,7 @@
     {% for group in nav_groups %}
       <div class="nav-group">
         <div class="nav-group-title">{{ group.label }}</div>
-        {% for item in group['items'] %}
+        {% for item in group['items'] if access_can(item.endpoint) %}
           <a class="nav-link {% if page == item.id or (item.id == 'settings' and settings_group) %}active{% endif %}" href="{{ url_for(item.endpoint) }}">
             <span class="nav-icon">
               {% if item.icon == 'overview' %}
@@ -77,6 +77,8 @@
         <div class="breadcrumb"><span data-brand-name>{{ branding.name if branding_enabled else 'NetEm' }}</span><span>/</span><span class="breadcrumb-current">{% block crumb %}Overview{% endblock %}</span></div>
       </div>
       <div class="top-actions">
+        {% if access_user %}<span class="top-pill">{{ access_user.username }} · {{ access_user.role|capitalize }}</span>
+        <form method="post" action="{{ url_for('access_logout') }}" data-native-submit><button class="top-pill" type="submit">Sign out</button></form>{% endif %}
         <span id="inventory-alerts">{% if inventory_summary.critical %}<a class="top-pill alert" href="{{ url_for('inventory') }}">{{ inventory_summary.critical }} appliance alert{{ '' if inventory_summary.critical == 1 else 's' }}</a>{% elif inventory_summary.warnings %}<a class="top-pill" href="{{ url_for('inventory') }}">{{ inventory_summary.warnings }} appliance warning{{ '' if inventory_summary.warnings == 1 else 's' }}</a>{% endif %}</span>
         <span id="page-guide">{% if help_doc_slug %}
           <a class="top-pill" href="{{ url_for('documentation_page', slug=help_doc_slug) }}">Guide</a>

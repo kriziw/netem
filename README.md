@@ -225,7 +225,7 @@ cd netem
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install flask
+pip install -r requirements.txt
 deactivate
 ```
 
@@ -560,3 +560,15 @@ Run regression coverage with `python -m unittest discover -s tests -v`.
 
 Counter semantics: [Linux interface statistics](https://www.kernel.org/doc/html/latest/networking/statistics.html).
 ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping.8.html).
+
+### Users, roles and Authentik
+
+See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. Upgrading an existing trusted lab does not silently lock its operator interface: provisioning the first local administrator enables login and RBAC. Set `NETEM_AUTH_REQUIRED=1` in the service environment to require authentication even before provisioning.
+
+### Phase navigation and unsaved tests
+
+The running-test bar provides **Previous phase** and **Next phase** for Presenters, Operators and Admins. Selecting a phase restarts and resumes that phase with a fresh measurement identity, reconstitutes its WAN settings, and preserves normal stop/restore handling. Navigation is unavailable during the introduction, workload preparation, an existing transition or at the corresponding end of the phase list. The browser submits the observed test and phase identity; stale or duplicate requests are rejected.
+
+Recorded runs retain separate visits to repeated phases and a manual-navigation log. A manually navigated run cannot confirm successful validation of the full planned sequence; independently measured failures remain failures.
+
+Starting a generic test without a session asks you to confirm **Run unsaved test**. The test appears live on the operator dashboard and showcase with **Test mode · not saved**. NetEm uses an in-memory telemetry database and does not create a test archive, saved summary or persistent event history for that run. The showcase returns to its waiting screen when the run ends. A session cannot be started halfway through an unsaved run. Previously saved results are unaffected. Independently managed Traffic Simulator/target logs and web-server access logs have their own retention policies.

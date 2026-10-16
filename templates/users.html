@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Users &amp; access · {{ branding.name }}{% endblock %}
+{% block crumb %}Users &amp; access{% endblock %}
+{% block content %}
+<h1>Users &amp; access</h1>
+{% if not access_enabled %}
+<section class="card"><div class="card-pad"><h2>Enable user accounts</h2>
+<p>Provision the first local administrator on the NetEm server. This enables login and role enforcement for the operator interface.</p>
+<pre>.venv/bin/python access_control.py create-admin admin</pre>
+<p class="field-help">Passwords are prompted securely. Existing installations stay in their current trusted-lab mode until an administrator is provisioned. Set NETEM_AUTH_REQUIRED=1 to block access before provisioning.</p></div></section>
+{% else %}
+<section class="card"><div class="card-pad"><h2>Roles</h2>
+<table class="table"><thead><tr><th>Role</th><th>Permissions</th></tr></thead><tbody>
+<tr><td>Viewer</td><td>Inspect dashboards, measurements and results.</td></tr>
+<tr><td>Presenter</td><td>Viewer access plus start/stop sessions and tests, pause/resume and navigate phases.</td></tr>
+<tr><td>Operator</td><td>Presenter access plus WAN controls, profiles, probes, captures, workload controls and test definitions.</td></tr>
+<tr><td>Admin</td><td>All controls, users, identity provider, topology, appliances, integrations and system maintenance.</td></tr>
+</tbody></table></div></section>
+<section class="card"><div class="card-pad"><h2>Users</h2>
+{% for user in users %}
+<form method="post" action="{{ url_for('access_update') }}" class="actions" style="margin-bottom:16px;flex-wrap:wrap">
+<input type="hidden" name="user_id" value="{{ user.id }}"><strong>{{ user.username }}</strong><span>{{ 'Authentik' if user.issuer else 'Local' }}</span>
+<label>Role <select name="role" {% if user.issuer %}disabled{% endif %}>{% for role in access_roles %}<option value="{{ role }}" {% if role == user.role %}selected{% endif %}>{{ role|capitalize }}</option>{% endfor %}</select></label>
+{% if user.issuer %}<input type="hidden" name="role" value="{{ user.role }}"><span class="field-help">Role synchronizes from Authentik groups at sign-in.</span>{% endif %}
+<label><input type="checkbox" name="active" value="1" {% if user.active %}checked{% endif %}> Enabled</label>
+{% if not user.issuer %}<label>Reset password <input type="password" name="password" minlength="12" maxlength="256" autocomplete="new-password" placeholder="Leave blank to keep"></label>{% endif %}
+<button class="btn" type="submit">Save user</button></form>{% endfor %}
+<h3>Add local user</h3><form method="post" action="{{ url_for('access_create') }}" class="actions" style="flex-wrap:wrap">
+<label>Username <input name="username" required maxlength="80" autocomplete="off"></label>
+<label>Password <input type="password" name="password" required minlength="12" maxlength="256" autocomplete="new-password"></label>
+<label>Role <select name="role">{% for role in access_roles %}<option value="{{ role }}">{{ role|capitalize }}</option>{% endfor %}</select></label><button class="btn btn-primary" type="submit">Create user</button>
+</form></div></section>
+<section class="card"><div class="card-pad"><h2>Authentik · OpenID Connect</h2>
+<form method="post" action="{{ url_for('access_oidc_settings') }}">
+<label><input type="checkbox" name="enabled" value="1" {% if oidc.enabled %}checked{% endif %}> Enable Authentik login</label>
+<div class="field"><label>Issuer URL <input type="url" name="issuer" value="{{ oidc.issuer or '' }}" placeholder="https://auth.example.com/application/o/netem/"></label></div>
+<div class="field"><label>Client ID <input name="client_id" value="{{ oidc.client_id or '' }}" autocomplete="off"></label></div>
+<div class="field"><label>Client secret <input type="password" name="client_secret" autocomplete="new-password" placeholder="Leave blank to keep existing secret"></label></div>
+<div class="field"><label>Exact callback URL <input type="url" name="redirect_uri" value="{{ oidc.redirect_uri or '' }}" placeholder="https://netem.example.com/auth/oidc/callback"></label></div>
+<div class="field"><label>Group → role mappings (JSON)<textarea name="groups" rows="7" spellcheck="false">{{ group_mapping }}</textarea></label><p class="field-help">Example: {"netem-admins":"admin", "netem-operators":"operator", "netem-presenters":"presenter", "netem-viewers":"viewer"}. Highest mapped role wins. Unmapped users cannot sign in.</p></div>
+<p class="field-help">Use a confidential OAuth2/OpenID provider, strict redirect URI matching, a signing key, scopes openid/profile/email, and a groups claim in the ID token. Keep one local administrator for recovery. Existing SSO logins are revoked when these settings change.</p>
+<button class="btn btn-primary" type="submit">Save OIDC configuration</button></form>
+<p><a href="https://docs.goauthentik.io/add-secure-apps/providers/oauth2/" target="_blank" rel="noopener">Authentik setup documentation</a></p>
+</div></section>
+{% endif %}
+{% endblock %}

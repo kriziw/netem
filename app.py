@@ -40,6 +40,7 @@ import platform_test
 import test_records
 import site_catalog
 import application_monitoring
+import access_control
 from component_updates import ComponentChecks
 import showcase_summary
 from showroom import create_showroom_app
@@ -112,7 +113,7 @@ def protect_integration_forms():
         "traffic_generator_save", "traffic_generator_test", "traffic_generator_start",
         "traffic_generator_adjust", "traffic_generator_stop", "traffic_generator_repair",
         "branding_activate", "branding_save", "branding_delete", "branding_import", "appliance_save",
-        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save", "showcase_video_save",
+        "site_save", "site_apply_wan", "site_run", "site_stop", "time_format_save", "showcase_video_save", "lab_scenario_phase",
     ):
         supplied = request.form.get("integration_csrf", "")
         expected = session.get("integration_csrf", "")
@@ -190,6 +191,11 @@ SCENARIO_STATE = {
     "intro_clock": None,
     "description": None,
     "checks": [],
+    "unsaved": False,
+    "phase_jump": None,
+    "phase_revision": 0,
+    "navigating": False,
+    "finishing": False,
 }
 # Every test is announced this long before it starts, so the showroom shows what is coming.
 TEST_INTRO_S = 30
@@ -2289,6 +2295,8 @@ def log_event(kind: str, message: str, **details):
         "message": message,
         "details": details,
     }
+    if unsaved_test_active():
+        event['temporary'] = True
     EVENT_LOG.append(event)
     record_id = globals().get('TEST_RECORDER', {}).get('test_id')
     if record_id and TEST_RECORDER.get('active'):
@@ -2297,6 +2305,8 @@ def log_event(kind: str, message: str, **details):
         except OSError:
             TEST_RECORDER['record_error'] = 'Test journal could not be written'
     del EVENT_LOG[:-500]
+    if event.get('temporary'):
+        return
 
     try:
         RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
@@ -2705,8 +2715,44 @@ def qdisc_rates(current, previous, dt):
 from contextlib import contextmanager
 
 
+EPHEMERAL_TELEMETRY_LOCK = threading.RLock()
+EPHEMERAL_TELEMETRY = None
+
+
+def unsaved_test_active():
+    return bool(SCENARIO_STATE.get('active') and SCENARIO_STATE.get('unsaved'))
+
+
+def begin_unsaved_telemetry():
+    global EPHEMERAL_TELEMETRY
+    with EPHEMERAL_TELEMETRY_LOCK:
+        if EPHEMERAL_TELEMETRY is not None:
+            EPHEMERAL_TELEMETRY.close()
+        EPHEMERAL_TELEMETRY = sqlite3.connect(':memory:', check_same_thread=False)
+        EPHEMERAL_TELEMETRY.row_factory = sqlite3.Row
+        init_telemetry_db()
+
+
+def end_unsaved_telemetry():
+    global EPHEMERAL_TELEMETRY
+    with EPHEMERAL_TELEMETRY_LOCK:
+        if EPHEMERAL_TELEMETRY is not None:
+            EPHEMERAL_TELEMETRY.close()
+            EPHEMERAL_TELEMETRY = None
+    TELEMETRY_PREVIOUS.clear()
+    # Live-only events must not enter later session reports.
+    EVENT_LOG[:] = [event for event in EVENT_LOG if not event.get('temporary')]
+    with DIAGNOSIS_LOCK:
+        DIAGNOSIS_CACHE['checked'] = None
+
+
 @contextmanager
 def telemetry_connect():
+    with EPHEMERAL_TELEMETRY_LOCK:
+        if EPHEMERAL_TELEMETRY is not None:
+            with EPHEMERAL_TELEMETRY:
+                yield EPHEMERAL_TELEMETRY
+            return
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
@@ -5510,6 +5556,7 @@ def wait_for_scenario_condition(
         }
 
     while time.monotonic() <= deadline:
+        check_phase_navigation()
         check_test_workload()
         if SCENARIO_STOP.is_set():
             return False, last_observed, "stopped", time.monotonic() - clock
@@ -5531,7 +5578,10 @@ def wait_for_scenario_condition(
 
         if passed:
             return True, observed, detail, time.monotonic() - clock
-        SCENARIO_STOP.wait(max(0.25, min(5.0, float(poll_s))))
+        poll_deadline = time.monotonic() + max(0.25, min(5.0, float(poll_s)))
+        while time.monotonic() < poll_deadline and not SCENARIO_STOP.is_set():
+            check_phase_navigation()
+            SCENARIO_STOP.wait(min(0.25, max(0, poll_deadline - time.monotonic())))
 
     passed, observed, detail = evaluate_scenario_condition(
         condition, default_link_id
@@ -5564,6 +5614,11 @@ LAST_TEST_SUMMARY = load_last_test_summary()
 
 
 def recorder_start(scenario: dict, link_id: str, phases: list):
+    if unsaved_test_active():
+        with TEST_RECORDER_LOCK:
+            TEST_RECORDER.clear()
+            TEST_RECORDER.update(active=False)
+        return
     test_id = uuid.uuid4().hex
     started_at = time.time()
     configuration = {'schema_version': 1, 'test_id': test_id, 'started_at': started_at,
@@ -5581,7 +5636,7 @@ def recorder_start(scenario: dict, link_id: str, phases: list):
         TEST_RECORDER.update(active=True, scenario_id=scenario.get("id"), name=scenario.get("name"), link_id=link_id,
                              started_at=started_at, test_id=test_id, record_error=record_error,
                              run_ids=[], phases=[phase["name"] for phase in phases],
-                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[],
+                             phase_marks=[], phase_ends=[], samples=[], assertions=[], reactions=[], pauses=[], manual_navigation=[],
                              live_window_seconds=scenario.get("live_window_seconds", 15))
 
 
@@ -5785,11 +5840,15 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     samples = record.get("samples") or []
     marks = record.get("phase_marks") or []
     phases = []
-    for name in record.get("phases") or []:
-        rows = [sample for sample in samples if sample.get("phase") == name]
+    visits = [(item['name'], item) for item in marks]
+    visits += [(name, None) for name in record.get('phases') or [] if not any(item['name'] == name for item in marks)]
+    for name, mark in visits:
+        following = next((item for item in marks if mark and item['at'] > mark['at']), None)
+        rows = [sample for sample in samples if sample.get('phase') == name
+                and (not mark or (sample.get('timestamp', mark['at']) >= mark['at']
+                     and (not following or sample.get('timestamp', mark['at']) < following['at'])))]
         measured = [sample for sample in rows if sample.get("experience") is not None]
         last = measured[-1] if measured else {}
-        mark = next((item for item in marks if item["name"] == name), None)
         following = next((item for item in marks if mark and item["at"] > mark["at"]), None)
         links = {}
         for sample in rows:
@@ -5799,7 +5858,9 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
                 links[link["id"]]["up"].append(link.get("up_mbps"))
                 links[link["id"]]["health"] = link.get("health") or links[link["id"]]["health"]
         window = next((item["dem"] for item in record.get("phase_ends") or []
-                       if item.get("name") == name and "error" not in (item.get("dem") or {})), None)
+                       if item.get("name") == name and (not mark or item.get("started_at") == mark["at"]
+                           or (item.get("started_at") is None and sum(m["name"] == name for m in marks) <= 1))
+                       and "error" not in (item.get("dem") or {})), None)
         if window is not None:
             transactions = window.get("requests") or 0
             scored = window.get("scoring_complete") is True and not window.get("truncated") and not window.get("evidence_issues") and (bool(window.get("intervals")) or not any(row.get("paused") for row in rows))
@@ -5872,10 +5933,14 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
             evaluated[-1]["experience_verdict"] = "unknown"
     verdicts = [phase["experience_verdict"] for phase in evaluated]
     experience_result = "fail" if "fail" in verdicts else "pass" if execution_result != "interrupted" and verdicts and all(value == "pass" for value in verdicts) else "unknown"
+    if record.get('manual_navigation') and experience_result == 'pass':
+        experience_result = 'unknown'
     execution_label = ("demonstration interrupted" if execution_result == "interrupted"
                        else "execution completed" if result == "passed" and not assertions else result)
     conclusion = [f"{record.get('name') or 'Test'} {execution_label}" +
                   (f": {len(assertions) - len(failed)} of {len(assertions)} checks passed." if assertions else ".")]
+    if record.get('manual_navigation'):
+        conclusion.append('Manually navigated test: phases were skipped or revisited; this run does not validate the full planned sequence.')
     if error and result != "passed":
         conclusion.append(str(error)[:200])
     if execution_result == "interrupted":
@@ -5924,6 +5989,7 @@ def summarize_test(record: dict, result: str, error, targets=None, site_label=No
     conclusion = narrative[:len(conclusion)] + reacted + narrative[len(conclusion):]
     application_groups = application_matrix(phases)
     return {
+        "manual_navigation": record.get("manual_navigation") or [],
         "live_window_seconds": record.get("live_window_seconds", 15),
         "name": record.get("name"), "scenario_id": record.get("scenario_id"), "link_id": record.get("link_id"),
         "site": site_label, "result": result, "execution_result": execution_result, "experience_result": experience_result, "started_at": record.get("started_at"), "ended_at": ended_at,
@@ -6000,14 +6066,85 @@ def recorder_finish(result: str, error):
     return summary
 
 
+class PhaseNavigation(Exception):
+    """Interrupt only the scenario worker's waits; never execute actions in an HTTP thread."""
+
+
+def check_phase_navigation():
+    if not SCENARIO_STOP.is_set() and SCENARIO_STATE.get('phase_jump') is not None:
+        raise PhaseNavigation()
+
+
+def restore_phase_prefix(original, steps, destination, presets):
+    """Compute destination WAN state, then apply it without replaying intermediate outages."""
+    profile, fault, mtu = copy.deepcopy(original), 'normal', 0
+    # Include the first destination action so jumping straight to recovery never
+    # briefly re-injects the outage from an earlier phase.
+    for step in steps[:destination + 1]:
+        action = step.get('action')
+        if action == 'quality':
+            profile = copy.deepcopy(original)
+            profile.update(mode='quality', quality=int(step.get('value', 100)))
+            profile.pop('custom_profile', None)
+            fault = 'normal'
+        elif action == 'fault':
+            fault = step.get('value', 'normal')
+        elif action == 'mtu':
+            mtu = int(step.get('value', 0))
+    ok, message = apply_mtu_limit(profile, 0)
+    if not ok:
+        raise RuntimeError(message)
+    ok, message, _ = apply_selected_profile(profile, presets)
+    if not ok:
+        raise RuntimeError(message)
+    ACTIVE_FAULTS.pop(original.get('id'), None)
+    if fault != 'normal':
+        ok, message = apply_runtime_fault(profile, fault, presets)
+        if not ok:
+            raise RuntimeError(message)
+    if mtu:
+        ok, message = apply_mtu_limit(profile, mtu)
+        if not ok:
+            raise RuntimeError(message)
+    return profile
+
+
+def accept_phase_navigation(original, steps, phase_indexes, presets):
+    """Close the old visit and reset the destination's evidence identity before re-entering it."""
+    with RUNTIME_LOCK:
+        target = SCENARIO_STATE.get('phase_jump')
+        SCENARIO_STATE.update(phase_jump=None, navigating=True)
+    destination = phase_indexes.index(target)
+    recorder_close_phase()
+    change = {'at': time.time(), 'from': SCENARIO_STATE.get('phase'),
+              'to': SCENARIO_STATE['phases'][target]['name']}
+    recorder_note('manual_navigation', change)
+    with RUNTIME_LOCK:
+        if SCENARIO_STATE.get('paused'):
+            origin = SCENARIO_STATE.get('paused_clock')
+            held = time.monotonic() - origin if origin is not None else 0
+            SCENARIO_STATE['paused_total_s'] = (SCENARIO_STATE.get('paused_total_s') or 0) + held
+            with TEST_RECORDER_LOCK:
+                if TEST_RECORDER.get('pauses') and TEST_RECORDER['pauses'][-1]['end'] is None:
+                    TEST_RECORDER['pauses'][-1]['end'] = time.time()
+        SCENARIO_PAUSE.clear()
+        SCENARIO_STATE.update(paused=False, paused_at=None, paused_clock=None, phase_index=None,
+                              condition=None, phase_revision=SCENARIO_STATE.get('phase_revision', 0) + 1)
+    profile = restore_phase_prefix(original, steps, destination, presets)
+    log_event('phase-navigation', f"Moved from {change['from']} to {change['to']}; destination phase restarted", **change)
+    return destination + 1, profile
+
+
 def scenario_sleep(seconds: float):
     """Wait out a step delay. Paused time does not count, and a paused test holds here
     in its current phase until resumed. Returns True when the test was stopped."""
     remaining = max(0.0, float(seconds))
+    check_phase_navigation()
     check_test_workload()
     while remaining > 0 or SCENARIO_PAUSE.is_set():
         if SCENARIO_STOP.is_set():
             return True
+        check_phase_navigation()
         check_test_workload()
         started = time.monotonic()
         SCENARIO_STOP.wait(0.25 if SCENARIO_PAUSE.is_set() else min(0.25, remaining))
@@ -6094,6 +6231,11 @@ def announce_test(scenario, seconds):
 
 def reset_scenario_state(result, error):
     with RUNTIME_LOCK:
+        # Finish teardown before admitting another session or test.
+        SCENARIO_PAUSE.clear()
+        SCENARIO_STOP.clear()
+        if EPHEMERAL_TELEMETRY is not None:
+            end_unsaved_telemetry()
         SCENARIO_STATE.update(
             {
                 "active": False,
@@ -6127,10 +6269,13 @@ def reset_scenario_state(result, error):
                 "description": None,
                 "checks": [],
                 "briefing": None,
+                "unsaved": False,
+                "phase_jump": None,
+                "phase_revision": 0,
+                "navigating": False,
+                "finishing": False,
             }
         )
-    SCENARIO_PAUSE.clear()
-    SCENARIO_STOP.clear()
 
 
 def scale_scenario_steps(steps, length_s: float):
@@ -6239,7 +6384,7 @@ def test_live_context():
     with RUNTIME_LOCK:
         state = dict(SCENARIO_STATE)
     return {'window_seconds': state.get('live_window_seconds', 15),
-            'phase_id': f"{state.get('scenario_id')}:{state.get('started_at')}:{state.get('phase_index')}",
+            'phase_id': f"{state.get('scenario_id')}:{state.get('started_at')}:{state.get('phase_index')}:{state.get('phase_revision', 0)}",
             'paused': bool(state.get('paused'))}
 
 
@@ -6355,163 +6500,185 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
 
     try:
         publish_test_live_context()
-        for index, step in enumerate(scenario.get("steps", []), start=1):
-            if scenario_sleep(max(0, int(step.get("after", 0)))):
-                scenario_result = "stopped"
-                break
-
-            action = step.get("action")
-            label = step.get("label") or action
-            phase_index = phase_indexes[index - 1] if phase_indexes else None
-            with RUNTIME_LOCK:
-                previous_phase = SCENARIO_STATE.get("phase_index")
-                if phase_index is not None and phase_index != previous_phase:
-                    origin = SCENARIO_STATE.get("clock_start")
-                    ran = (time.monotonic() - origin if origin is not None
-                           else time.time() - (SCENARIO_STATE.get("started_at") or started_at))
-                    SCENARIO_STATE["phase_started_s"] = round(max(0.0, ran - (SCENARIO_STATE.get("paused_total_s") or 0.0)), 1)
-                SCENARIO_STATE.update(
-                    {
-                        "step": index,
-                        "step_label": label,
-                        "step_action": action,
-                        "condition": None,
-                        "phase_index": phase_index,
-                        "phase": phases[phase_index]["name"] if phase_index is not None else None,
-                    }
-                )
-            if phase_index is not None and phase_index != previous_phase:
-                recorder_close_phase()
-                recorder_note("phase_marks", {"name": phases[phase_index]["name"], "at": time.time()})
-                publish_test_live_context()
-                log_event("scenario", f'{scenario["name"]}: phase {phases[phase_index]["name"]}',
-                          scenario_id=scenario.get("id"), link_id=link_id, phase=phases[phase_index]["name"])
-
-            if action == "phase":
-                pass
-
-            elif action == "quality":
-                runtime_profile = copy.deepcopy(original)
-                runtime_profile["mode"] = "quality"
-                runtime_profile["quality"] = int(step.get("value", 100))
-                runtime_profile.pop("custom_profile", None)
-                ok, msg, _effective = apply_selected_profile(
-                    runtime_profile, presets
-                )
-                if not ok:
-                    scenario_result = "failed"
-                    scenario_error = msg
-                    break
-                ACTIVE_FAULTS.pop(link_id, None)
-                log_event(
-                    "scenario",
-                    f'{scenario["name"]}: {label}',
-                    scenario_id=scenario.get("id"),
-                    link_id=link_id,
-                    quality=runtime_profile["quality"],
-                )
-
-            elif action == "fault":
-                ok, msg = apply_runtime_fault(
-                    runtime_profile,
-                    step.get("value", "normal"),
-                    presets,
-                )
-                if not ok:
-                    scenario_result = "failed"
-                    scenario_error = msg
-                    break
-
-            elif action == "mtu":
-                ok, msg = apply_mtu_limit(
-                    runtime_profile, int(step.get("value", 0))
-                )
-                if not ok:
-                    scenario_result = "failed"
-                    scenario_error = msg
-                    break
-
-            elif action == "traffic_generator":
-                payload = dict(step["value"])
-                operation = payload.pop("operation")
-                if operation == "start":
-                    ensure_traffic_path(scenario["name"])
-                    payload['live_window_seconds'] = scenario.get('live_window_seconds', 15)
-                    if supervised:
-                        payload['controller_lease_seconds'] = 30
-                elif operation == 'stop' and supervised and scenario_workload_id:
-                    payload['run_id'] = scenario_workload_id
-                if operation == "stop":
-                    recorder_close_phase()
-                result = traffic_generator_request(
-                    f"/api/v1/workloads/{operation}", method="POST",
-                    payload=payload, timeout=5.0,
-                )
-                if operation == "start":
-                    scenario_workload_id = (result.get("run") or {}).get("run_id")
-                elif operation == "stop":
-                    scenario_workload_id = None
-                with RUNTIME_LOCK:
-                    SCENARIO_STATE["workload_run_id"] = scenario_workload_id
-                    SCENARIO_STATE["workload_checked"] = None
-                if operation == "start" and supervised:
-                    if not scenario_workload_id:
-                        raise RuntimeError("Traffic Simulator did not acknowledge the requested workload.")
-                    wait_for_test_executor(result, scenario_workload_id)
-                    publish_test_live_context()
-                log_event("traffic-generator", f'{scenario["name"]}: {label}',
-                          scenario_id=scenario.get("id"), link_id=link_id,
-                          action=operation, run_id=(result.get("run") or {}).get("run_id"),
-                          users=result.get("users"))
-
-            elif action in ("wait", "assert"):
-                condition = step.get("condition") or {}
-                passed, observed, detail, elapsed = wait_for_scenario_condition(
-                    condition,
-                    link_id,
-                    step.get("timeout", 30),
-                    step.get("poll", 0.5),
-                )
-                if SCENARIO_STOP.is_set():
+        index, skip_delay = 1, False
+        while index <= len(steps):
+            step = steps[index - 1]
+            try:
+                if scenario_sleep(0 if skip_delay else max(0, int(step.get("after", 0)))):
                     scenario_result = "stopped"
                     break
 
-                details = {
-                    "scenario_id": scenario.get("id"),
-                    "link_id": link_id,
-                    "label": label,
-                    "passed": bool(passed),
-                    "condition": condition,
-                    "observed": observed,
-                    "detail": detail,
-                    "elapsed_s": round(elapsed, 3),
-                }
+                skip_delay = False
+                action = step.get("action")
+                label = step.get("label") or action
+                phase_index = phase_indexes[index - 1] if phase_indexes else None
+                with RUNTIME_LOCK:
+                    previous_phase = SCENARIO_STATE.get("phase_index")
+                    if phase_index is not None and phase_index != previous_phase:
+                        origin = SCENARIO_STATE.get("clock_start")
+                        ran = (time.monotonic() - origin if origin is not None
+                               else time.time() - (SCENARIO_STATE.get("started_at") or started_at))
+                        SCENARIO_STATE["phase_started_s"] = round(max(0.0, ran - (SCENARIO_STATE.get("paused_total_s") or 0.0)), 1)
+                    SCENARIO_STATE.update(
+                        {
+                            "step": index,
+                            "step_label": label,
+                            "step_action": action,
+                            "condition": None,
+                            "phase_index": phase_index,
+                            "phase": phases[phase_index]["name"] if phase_index is not None else None,
+                        }
+                    )
+                if phase_index is not None and phase_index != previous_phase:
+                    recorder_close_phase()
+                    recorder_note("phase_marks", {"name": phases[phase_index]["name"], "at": time.time()})
+                    publish_test_live_context()
+                    with RUNTIME_LOCK:
+                        SCENARIO_STATE["navigating"] = False
+                    log_event("scenario", f'{scenario["name"]}: phase {phases[phase_index]["name"]}',
+                              scenario_id=scenario.get("id"), link_id=link_id, phase=phases[phase_index]["name"])
 
-                if action == "assert":
-                    recorder_note("assertions", {"label": label, "passed": bool(passed), "observed": observed,
-                                                 "phase": SCENARIO_STATE.get("phase")})
-                    log_event(
-                        "assertion",
-                        f'{scenario["name"]}: {label} — '
-                        + ("PASS" if passed else "FAIL"),
-                        **details,
-                    )
-                else:
-                    log_event(
-                        "condition",
-                        f'{scenario["name"]}: {label} — '
-                        + ("satisfied" if passed else "timeout"),
-                        **details,
-                    )
+                if action == "phase":
+                    pass
 
-                if not passed:
-                    scenario_result = "failed"
-                    scenario_error = (
-                        f'{label}: condition not satisfied within '
-                        f'{step.get("timeout", 30)}s'
+                elif action == "quality":
+                    runtime_profile = copy.deepcopy(original)
+                    runtime_profile["mode"] = "quality"
+                    runtime_profile["quality"] = int(step.get("value", 100))
+                    runtime_profile.pop("custom_profile", None)
+                    ok, msg, _effective = apply_selected_profile(
+                        runtime_profile, presets
                     )
-                    if step.get("on_fail", "stop") == "stop":
+                    if not ok:
+                        scenario_result = "failed"
+                        scenario_error = msg
                         break
+                    ACTIVE_FAULTS.pop(link_id, None)
+                    log_event(
+                        "scenario",
+                        f'{scenario["name"]}: {label}',
+                        scenario_id=scenario.get("id"),
+                        link_id=link_id,
+                        quality=runtime_profile["quality"],
+                    )
+
+                elif action == "fault":
+                    ok, msg = apply_runtime_fault(
+                        runtime_profile,
+                        step.get("value", "normal"),
+                        presets,
+                    )
+                    if not ok:
+                        scenario_result = "failed"
+                        scenario_error = msg
+                        break
+
+                elif action == "mtu":
+                    ok, msg = apply_mtu_limit(
+                        runtime_profile, int(step.get("value", 0))
+                    )
+                    if not ok:
+                        scenario_result = "failed"
+                        scenario_error = msg
+                        break
+
+                elif action == "traffic_generator":
+                    payload = dict(step["value"])
+                    operation = payload.pop("operation")
+                    if operation == "start" and SCENARIO_STATE.get('phase_revision', 0) and SCENARIO_STATE.get('workload_run_id'):
+                        index += 1
+                        continue
+                    if operation == "start":
+                        ensure_traffic_path(scenario["name"])
+                        payload['live_window_seconds'] = scenario.get('live_window_seconds', 15)
+                        if supervised:
+                            payload['controller_lease_seconds'] = 30
+                    elif operation == 'stop' and supervised and scenario_workload_id:
+                        payload['run_id'] = scenario_workload_id
+                    if operation == "stop":
+                        recorder_close_phase()
+                    result = traffic_generator_request(
+                        f"/api/v1/workloads/{operation}", method="POST",
+                        payload=payload, timeout=5.0,
+                    )
+                    if operation == "start":
+                        scenario_workload_id = (result.get("run") or {}).get("run_id")
+                    elif operation == "stop":
+                        scenario_workload_id = None
+                    with RUNTIME_LOCK:
+                        SCENARIO_STATE["workload_run_id"] = scenario_workload_id
+                        SCENARIO_STATE["workload_checked"] = None
+                    if operation == "start" and supervised:
+                        if not scenario_workload_id:
+                            raise RuntimeError("Traffic Simulator did not acknowledge the requested workload.")
+                        wait_for_test_executor(result, scenario_workload_id)
+                        publish_test_live_context()
+                    with RUNTIME_LOCK:
+                        SCENARIO_STATE["navigating"] = False
+                    log_event("traffic-generator", f'{scenario["name"]}: {label}',
+                              scenario_id=scenario.get("id"), link_id=link_id,
+                              action=operation, run_id=(result.get("run") or {}).get("run_id"),
+                              users=result.get("users"))
+
+                elif action in ("wait", "assert"):
+                    condition = step.get("condition") or {}
+                    passed, observed, detail, elapsed = wait_for_scenario_condition(
+                        condition,
+                        link_id,
+                        step.get("timeout", 30),
+                        step.get("poll", 0.5),
+                    )
+                    if SCENARIO_STOP.is_set():
+                        scenario_result = "stopped"
+                        break
+
+                    details = {
+                        "scenario_id": scenario.get("id"),
+                        "link_id": link_id,
+                        "label": label,
+                        "passed": bool(passed),
+                        "condition": condition,
+                        "observed": observed,
+                        "detail": detail,
+                        "elapsed_s": round(elapsed, 3),
+                    }
+
+                    if action == "assert":
+                        recorder_note("assertions", {"label": label, "passed": bool(passed), "observed": observed,
+                                                     "phase": SCENARIO_STATE.get("phase")})
+                        log_event(
+                            "assertion",
+                            f'{scenario["name"]}: {label} — '
+                            + ("PASS" if passed else "FAIL"),
+                            **details,
+                        )
+                    else:
+                        log_event(
+                            "condition",
+                            f'{scenario["name"]}: {label} — '
+                            + ("satisfied" if passed else "timeout"),
+                            **details,
+                        )
+
+                    if not passed:
+                        scenario_result = "failed"
+                        scenario_error = (
+                            f'{label}: condition not satisfied within '
+                            f'{step.get("timeout", 30)}s'
+                        )
+                        if step.get("on_fail", "stop") == "stop":
+                            break
+                index += 1
+                with RUNTIME_LOCK:
+                    check_phase_navigation()
+                    if index > len(steps):
+                        SCENARIO_STATE['finishing'] = True
+            except PhaseNavigation:
+                if SCENARIO_STOP.is_set():
+                    scenario_result = 'stopped'
+                    break
+                index, runtime_profile = accept_phase_navigation(original, steps, phase_indexes, presets)
+                skip_delay = True
 
         if SCENARIO_STOP.is_set() and scenario_result == "passed":
             scenario_result = "stopped"
@@ -6524,6 +6691,8 @@ def run_scenario(link_id: str, scenario: dict, intro_s: float = 0):
                 TEST_RECORDER["execution_result"] = "interrupted"
 
     finally:
+        with RUNTIME_LOCK:
+            SCENARIO_STATE['finishing'] = True
         try:
             recorder_close_phase()
         except Exception as exc:
@@ -6731,6 +6900,7 @@ SETTINGS_GROUPS = [
     {"id": "system", "label": "System & integrations", "items": [
         ("updates", None, "Updates"),
         ("integrations", None, "API & integrations"),
+        ("access_settings", None, "Users & access"),
     ]},
 ]
 
@@ -7273,6 +7443,9 @@ def session_start():
     now = time.time()
     deadline = now + SESSION_MAX_S
     with RUNTIME_LOCK:
+        if SCENARIO_STATE.get('active') or SITE_PLAN_STATE.get('active'):
+            flash('Stop the running test before starting a session.', 'error')
+            return redirect_after('sessions')
         if ACTIVE_SESSION["active"]:
             flash("A lab session is already active.", "error")
             return redirect_after("sessions")
@@ -8288,7 +8461,7 @@ def run_site_plan(plan: dict, tests: list, link_for_role: dict):
                     item.update(status="running", link_id=link_id)
             SCENARIO_STOP.clear()
             SCENARIO_STATE.update({
-                "active": True, "scenario_id": scenario["id"], "scenario_name": f"{plan['label']}: {test['name']}",
+                "active": True, "unsaved": False, "phase_jump": None, "phase_revision": 0, "navigating": False, "finishing": False, "scenario_id": scenario["id"], "scenario_name": f"{plan['label']}: {test['name']}",
                 "link_id": link_id, "started_at": time.time(), "clock_start": time.monotonic(), "step": 0,
                 "step_count": len(scenario["steps"]),
                 "step_label": "Starting", "step_action": None, "condition": None, "result": None, "error": None,
@@ -8514,10 +8687,18 @@ def lab_scenario_start():
         if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
             flash("A scenario is already running.", "error")
             return redirect_after("scenarios")
+        unsaved = not ACTIVE_SESSION.get('active')
         SCENARIO_STOP.clear()
+        if unsaved:
+            begin_unsaved_telemetry()
         SCENARIO_STATE.update(
             {
                 "active": True,
+                "unsaved": unsaved,
+                "phase_jump": None,
+                "phase_revision": 0,
+                "navigating": False,
+                "finishing": False,
                 "scenario_id": scenario_id,
                 "scenario_name": scenario["name"],
                 "link_id": link_id,
@@ -8540,6 +8721,36 @@ def lab_scenario_start():
     ).start()
     flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
     return redirect_after("scenarios")
+
+
+@app.post('/lab/scenario/phase')
+def lab_scenario_phase():
+    direction = request.form.get('direction')
+    if direction not in ('next', 'previous'):
+        abort(400, 'Choose next or previous phase.')
+    try:
+        expected_phase = int(request.form.get('phase_index', ''))
+        expected_revision = int(request.form.get('phase_revision', ''))
+        expected_start = float(request.form.get('started_at', ''))
+    except ValueError:
+        abort(400, 'Reload the running test before navigating.')
+    with RUNTIME_LOCK:
+        state = SCENARIO_STATE
+        if (not state.get('active') or state.get('intro') or state.get('preparing_workload')
+                or SCENARIO_STOP.is_set() or state.get('finishing') or state.get('navigating') or state.get('phase_jump') is not None
+                or state.get('phase_index') is None):
+            abort(409, 'The test is not ready for phase navigation.')
+        if (request.form.get('scenario_id') != state.get('scenario_id')
+                or expected_phase != state.get('phase_index')
+                or expected_revision != state.get('phase_revision', 0)
+                or expected_start != state.get('started_at')):
+            abort(409, 'The running phase changed. Reload before navigating.')
+        target = state['phase_index'] + (1 if direction == 'next' else -1)
+        if not 0 <= target < len(state.get('phases') or []):
+            abort(409, 'There is no phase in that direction.')
+        state['phase_jump'] = target
+    flash('Moving to the selected phase. It will restart and resume with a fresh measurement window.', 'info')
+    return redirect_after('tests')
 
 
 @app.route("/lab/scenario/pause", methods=["POST"])
@@ -9567,9 +9778,9 @@ def clear():
 
 
 def showroom_snapshot():
-    """What the showcase may show. Before a session starts it shows nothing about the client, the appliance or the lab."""
+    """Present the active session or an explicitly unsaved trial; otherwise publish the waiting screen."""
     expire_session_if_due()
-    if not session_snapshot().get("active"):
+    if not session_snapshot().get("active") and not unsaved_test_active():
         return showroom_idle_snapshot()
     return showroom_session_snapshot()
 
@@ -9700,7 +9911,7 @@ def showroom_session_snapshot():
         "appliance": {key: value for key, value in (lab_session.get("appliance") or {}).items() if key in ("vendor", "vendor_name", "product", "model")},
         "scenario": dict({key: scenario.get(key) for key in (
             "active", "started_at", "scenario_name", "step", "step_count", "step_label", "phase_index", "phase",
-            "planned_s", "elapsed_s", "paused", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s", "preparing_workload")},
+            "planned_s", "elapsed_s", "paused", "unsaved", "phase_elapsed_s", "phase_remaining_s", "next_phase", "intro", "starts_in_s", "preparing_workload")},
             link=showroom_link_label(cfg, scenario.get("link_id")),
             # Shown while a test is announced: what each phase does and what is checked.
             phases=[{"name": phase.get("name"), "planned_s": phase.get("planned_s"), "what": showroom_text(phase.get("what")) or None}
@@ -9710,7 +9921,7 @@ def showroom_session_snapshot():
             watch=[showroom_text(item, 320) for item in brief['watch']],
             checks=[showroom_text(check, 120) for check in (scenario.get("checks") or [])[:6]]),
         # Once a test ends, its summary stays on screen until the next one starts.
-        "last_test": showroom_summary(LAST_TEST_SUMMARY) if not scenario.get("active") and summary_belongs_to_session(LAST_TEST_SUMMARY, lab_session) else None,
+        "last_test": showroom_summary(LAST_TEST_SUMMARY) if lab_session.get("active") and not scenario.get("active") and summary_belongs_to_session(LAST_TEST_SUMMARY, lab_session) else None,
         # After a run sequence, the whole plan's results and insights.
         "plan_summary": (showroom_plan_summary(SITE_PLAN_SUMMARY, now, lab_session)
                          if not scenario.get("active") and not plan.get("active") else None),
@@ -10167,6 +10378,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
                         for item in impacts[:STORY_MAX_IMPACTS]]}
 
 
+ACCESS_STORE = access_control.init_app(app, access_control.AccessStore(RUNTIME_DIR / "access.sqlite3"))
 APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
 showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE, showcase_video_file)
 

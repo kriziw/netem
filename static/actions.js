@@ -78,6 +78,10 @@ window.NetEmActions = (() => {
     notice.textContent = message;
   }
   async function update(response, options = {}) {
+    if (response.status === 401 || new URL(response.url || location.href).pathname === '/login') {
+      window.location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search));
+      return false;
+    }
     if (!response.ok && response.status !== 400) throw new Error('Action failed (' + response.status + ').');
     const url = new URL(response.url || location.href);
     if (url.origin !== location.origin) throw new Error('Navigation must stay within this NetEm instance.');
@@ -160,7 +164,7 @@ window.NetEmActions = (() => {
   }
   function isAppPage(url) {
     return url.origin === location.origin && (/^\/(?:dashboard|wan|lab|tests|sessions|scenarios|traffic-security|analytics|integrations|settings|setup|presets|updates|docs|appliances|platform-health)?$/.test(url.pathname)
-      || /^\/settings\/(?:branding|traffic\/(?:network|experience|maintenance))$/.test(url.pathname)
+      || /^\/settings\/(?:users|branding|traffic\/(?:network|experience|maintenance))$/.test(url.pathname)
       || /^\/docs\/[^/]+$/.test(url.pathname) || /^\/sessions\/[^/]+\/report$/.test(url.pathname));
   }
   function rememberScroll() {
@@ -329,6 +333,7 @@ window.NetEmActions = (() => {
     const current = document.querySelector('main.page')?.dataset.uiVersion;
     if (!current || busy || document.visibilityState === 'hidden') return;
     const response = await fetch('/api/v1/ui-version', {cache:'no-store'});
+    if (response.status === 401) { window.location.assign('/login?next=' + encodeURIComponent(location.pathname + location.search)); return; }
     if (!response.ok) return;
     const {version} = await response.json();
     if (!version || version === document.querySelector('main.page')?.dataset.uiVersion) return;
@@ -354,7 +359,7 @@ window.NetEmActions = (() => {
   }
   document.addEventListener('submit', async event => {
     const form = event.target;
-    if (event.defaultPrevented || form.closest?.('#traffic-simulator-dialog, #scenario-configuration-dialog') || !(form instanceof HTMLFormElement)) return;
+    if (event.defaultPrevented || form.hasAttribute?.('data-native-submit') || form.closest?.('#traffic-simulator-dialog, #scenario-configuration-dialog') || !(form instanceof HTMLFormElement)) return;
     if (form.method.toLowerCase() === 'get') {
       const url = new URL(form.getAttribute('action') || location.href, location.href);
       if (!isAppPage(url) || (form.target && form.target !== '_self')) return;

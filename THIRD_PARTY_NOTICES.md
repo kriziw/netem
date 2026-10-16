@@ -13,3 +13,12 @@ or substantial portions of that software.
 
 NetEm WAN Lab's ongoing development, releases and support are maintained in
 [kriziw/netem](https://github.com/kriziw/netem).
+
+
+## Authentication dependencies
+
+OIDC support uses [Authlib](https://github.com/authlib/authlib) (BSD-3-Clause)
+and [Requests](https://github.com/psf/requests) (Apache-2.0), installed with their
+own dependency and license metadata through `requirements.txt`. Local password
+hashing uses Werkzeug, distributed with Flask. These packages are dependencies;
+their source is not vendored into this repository.

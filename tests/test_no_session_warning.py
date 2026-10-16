@@ -1,5 +1,5 @@
 """A generic test started without a lab session asks the operator first: start a session, or acknowledge the warning
-and run the test. Until a session runs, the showcase still publishes nothing about the lab."""
+and run the test. Unsaved tests are shown live but never archived."""
 import copy
 import unittest
 from unittest.mock import patch
@@ -27,6 +27,7 @@ class NoSessionWarningTests(unittest.TestCase):
             self.addCleanup(mock.stop)
         netem.SCENARIO_STOP.clear()
         self.addCleanup(netem.SCENARIO_STOP.clear)
+        self.addCleanup(netem.end_unsaved_telemetry)
         self.client = netem.app.test_client()
         with self.client.session_transaction() as state:
             state["integration_csrf"] = "token"
@@ -58,14 +59,15 @@ class NoSessionWarningTests(unittest.TestCase):
         thread.assert_called_once()
         self.assertTrue(netem.SCENARIO_STATE.get("active"))
 
-    def test_a_test_run_without_a_session_stays_invisible_on_the_showcase(self):
+    def test_an_unsaved_test_is_visible_on_the_showcase(self):
         with patch.object(netem.threading, "Thread"):
             self.start(no_session_ack="1")
         self.assertTrue(netem.SCENARIO_STATE.get("active"))
         with patch.object(netem, "load_config", side_effect=lambda: copy.deepcopy(self.config)):
             snapshot = netem.showroom_snapshot()
-        self.assertEqual(snapshot["links"], [])
-        self.assertEqual(snapshot["scenario"], {"active": False})
+        self.assertEqual(snapshot["links"][0]["id"], "wan1")
+        self.assertTrue(snapshot["scenario"]["active"])
+        self.assertTrue(snapshot["scenario"]["unsaved"])
         self.assertEqual(snapshot["appliance"], {})
         self.assertFalse(snapshot["session"]["active"])
 

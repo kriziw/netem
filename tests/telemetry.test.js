@@ -219,7 +219,7 @@ test('running test shows phases, countdown and the pause or resume action', () =
     nodes[selector] = {textContent: '', innerHTML: ''};
   nodes['[data-run-pause-form]'] = {setAttribute(name, value) { this[name] = value; }};
   const root = {dataset: {pauseUrl: '/lab/scenario/pause', resumeUrl: '/lab/scenario/resume'},
-    classList: {toggle: (name, on) => on ? classes.add(name) : classes.delete(name)}, querySelector: selector => nodes[selector] || null};
+    classList: {toggle: (name, on) => on ? classes.add(name) : classes.delete(name)}, querySelectorAll: () => [], querySelector: selector => nodes[selector] || null};
   ui.renderRunningTest(root, {...scenario, scenario_name: '<b>x</b>'});
   assert.equal(nodes['[data-run-name]'].textContent, '<b>x</b>');
   assert.equal(nodes['[data-run-phase]'].textContent, 'phase 2 of 3 · Brownout');
@@ -246,4 +246,27 @@ test('traffic path line shows readiness and offers repair only when the simulato
   ui.renderTrafficPath(root, {ready: null, summary: 'Update the simulator.'});
   assert.equal(root.className, 'traffic-path warn');
   ui.renderTrafficPath(null, {ready: true});
+});
+
+test('phase controls follow live run identity, phase boundaries and pending transitions', () => {
+  const {JSDOM} = require('jsdom');
+  const dom = new JSDOM(`<section><form data-phase-navigation="previous"><input name="scenario_id"><input name="started_at"><input name="phase_index"><input name="phase_revision"><button></button></form><form data-phase-navigation="next"><input name="scenario_id"><input name="started_at"><input name="phase_index"><input name="phase_revision"><button></button></form></section>`);
+  const root = dom.window.document.querySelector('section');
+  const scenario = {active: true, scenario_id: 'trial', started_at: 100, phase_index: 0, phase_revision: 2,
+    phases: [{name: 'Baseline', planned_s: 60}, {name: 'Outage', planned_s: 60}], elapsed_s: 0};
+  ui.renderRunningTest(root, scenario);
+  const prev = root.querySelector('[data-phase-navigation="previous"] button');
+  const next = root.querySelector('[data-phase-navigation="next"] button');
+  assert.equal(prev.disabled, true);
+  assert.equal(next.disabled, false);
+  assert.equal(root.querySelector('[name="phase_revision"]').value, '2');
+  assert.equal(root.querySelector('[name="started_at"]').value, '100');
+  ui.renderRunningTest(root, {...scenario, phase_index: 1});
+  assert.equal(prev.disabled, false);
+  assert.equal(next.disabled, true);
+  ui.renderRunningTest(root, {...scenario, phase_jump: 1});
+  assert.equal(next.disabled, true);
+  ui.renderRunningTest(root, {...scenario, preparing_workload: true});
+  assert.equal(next.disabled, true);
+  dom.window.close();
 });

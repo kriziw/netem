@@ -664,3 +664,10 @@ test('interruption is separate from measured resilience failures in session and 
   assert.equal(report.tone, 'warn');
   assert.deepEqual(plain(report.conclusion), ['Voice success 42%; target 99%']);
 });
+
+test('an unsaved active test is live without a session and returns to waiting afterwards', () => {
+  const data = {timestamp: 100, scenario: {active: true, unsaved: true}, session: {active: false},
+    traffic: {monitoring: {preparing: false}}};
+  assert.equal(ui.stageMode(data), 'live');
+  assert.equal(ui.stageMode({...data, scenario: {active: false}}), 'waiting');
+});

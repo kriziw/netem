@@ -3,11 +3,24 @@
   <div class="running-test-line">
     <div>
       <div class="eyebrow" style="margin:0 0 3px">Current test</div>
+      {% if scenario_state.unsaved %}<span class="status warn">Test mode · not saved</span>{% endif %}
       <strong data-run-name>{{ scenario_state.scenario_name }}</strong>
       <span class="card-sub"> · {{ scenario_state.link_id }} · <span data-run-phase>{{ scenario_state.phase or "" }}</span> · <span data-run-step>{{ scenario_state.step_label }}</span></span>
       <div class="field-help" data-run-condition>{% if scenario_state.condition %}Waiting for {{ scenario_state.condition.description }}{% endif %}</div>
     </div>
     <div class="actions">
+      {% for direction, label in [('previous', 'Previous phase'), ('next', 'Next phase')] %}
+      <form method="post" action="{{ url_for('lab_scenario_phase') }}" data-phase-navigation="{{ direction }}">
+        <input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+        <input type="hidden" name="return_to" value="{{ return_to }}">
+        <input type="hidden" name="direction" value="{{ direction }}">
+        <input type="hidden" name="scenario_id" value="{{ scenario_state.scenario_id }}">
+        <input type="hidden" name="started_at" value="{{ scenario_state.started_at }}">
+        <input type="hidden" name="phase_index" value="{{ scenario_state.phase_index if scenario_state.phase_index is not none else '' }}">
+        <input type="hidden" name="phase_revision" value="{{ scenario_state.phase_revision|default(0) }}">
+        <button class="btn" type="submit" title="Restart and resume the selected phase with fresh measurements" {% if scenario_state.intro or scenario_state.preparing_workload or scenario_state.finishing or scenario_state.navigating or (scenario_state.phase_jump is defined and scenario_state.phase_jump is not none) or scenario_state.phase_index is none or (direction == 'previous' and scenario_state.phase_index == 0) or (direction == 'next' and scenario_state.phase_index == (scenario_state.phases|length - 1)) %}disabled{% endif %}>{{ label }}</button>
+      </form>
+      {% endfor %}
       <form method="post" action="{{ url_for('lab_scenario_resume' if scenario_state.paused else 'lab_scenario_pause') }}" data-run-pause-form>
         <input type="hidden" name="return_to" value="{{ return_to }}">
         <button class="btn" type="submit" data-run-pause title="Hold the test in its current phase, impairment applied, until resumed" {% if scenario_state.intro %}disabled{% endif %}>{{ "Resume" if scenario_state.paused else "Pause phase" }}</button>

@@ -521,6 +521,16 @@ window.NetEmUI = (() => {
       const button = root.querySelector('[data-run-pause]');
       if (button) button.disabled = announced || scenario.preparing_workload;
     }
+    root.querySelectorAll('[data-phase-navigation]').forEach(nav => {
+      for (const name of ['scenario_id', 'started_at', 'phase_index', 'phase_revision']) {
+        const input = nav.querySelector(`[name="${name}"]`);
+        if (input) input.value = scenario[name] ?? (name === 'phase_revision' ? 0 : '');
+      }
+      const button = nav.querySelector('button');
+      if (button) button.disabled = announced || scenario.preparing_workload || scenario.navigating || scenario.finishing ||
+        scenario.phase_jump != null || scenario.phase_index == null ||
+        (nav.dataset.phaseNavigation === 'previous' ? scenario.phase_index <= 0 : scenario.phase_index >= count - 1);
+    });
     const track = root.querySelector('[data-run-phases]');
     if (track) {
       track.innerHTML = phaseTimeline(scenario).map(phase => '<span class="phase '+phase.state+'" style="flex-basis:'+phase.share.toFixed(2)+'%" title="'+escapeHtml(phase.name)+' · '+clock(phase.planned_s)+'">'+

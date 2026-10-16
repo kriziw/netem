@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sign in · NetEm</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body><main style="max-width:460px;margin:10vh auto;padding:24px">
+<section class="card"><div class="card-pad"><h1>Sign in to NetEm</h1>
+{% for category, message in get_flashed_messages(with_categories=true) %}<p role="alert">{{ message }}</p>{% endfor %}
+<form method="post" action="{{ url_for('access_login') }}">
+<input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="next" value="{{ next_url }}">
+<div class="field"><label for="username">Username</label><input id="username" name="username" autocomplete="username" required maxlength="80"></div>
+<div class="field"><label for="password">Password</label><input id="password" name="password" type="password" autocomplete="current-password" required maxlength="256"></div>
+<button class="btn btn-primary" type="submit">Sign in</button></form>
+{% if oidc %}<p><a class="btn" href="{{ url_for('access_oidc_login') }}">Sign in with Authentik</a></p>{% endif %}
+<p class="field-help">Local accounts also provide recovery access when single sign-on is unavailable.</p>
+</div></section></main></body></html>

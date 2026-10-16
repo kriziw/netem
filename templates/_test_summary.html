@@ -1,4 +1,4 @@
-{% macro test_summary(summary, title="Last test summary") %}
+{% macro test_summary(summary, title="Last saved test summary") %}
 {% set execution = summary.execution_result or summary.result %}
 {% set tone = {'passed': 'good', 'failed': 'bad'}.get(execution, 'warn') %}
 {% set verdicts = {'steered': 'steered away', 'unaffected': 'unaffected', 'balanced': 'all WANs healthy', 'stuck': 'on impaired WAN',
@@ -14,6 +14,7 @@
     {% if summary.test_id %}<a class="btn btn-sm" href="{{ url_for('test_record_download', test_id=summary.test_id) }}">Download test log</a>{% endif %}</div>
   </div>
   <div class="card-pad">
+    {% if summary.manual_navigation %}<p class="status warn">Manually navigated test · phases were skipped or revisited; full sequence validation is not confirmed.</p>{% endif %}
     {% if summary.record_complete is sameas false %}<p class="field-help">The test log contains incomplete evidence. See its export status for missing records.</p>{% endif %}
     {% if summary.experience_result %}<p><strong>Resilience requirements:</strong> {{ {'pass': 'Met', 'fail': 'Not met in recorded measurements', 'unknown': 'Not confirmed'}.get(summary.experience_result, 'Not confirmed') }}</p>{% endif %}
     <ul class="summary-lines">
