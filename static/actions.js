@@ -291,7 +291,7 @@ window.NetEmActions = (() => {
   });
   window.addEventListener('scroll', () => { if (!busy) rememberScroll(); }, {passive: true});
   async function refresh() {
-    if (busy || refreshController) return;
+    if (document.body.classList.contains('update-active') || busy || refreshController) return;
     const controller = refreshController = new AbortController();
     const token = ++refreshGeneration;
     const revision = editRevision;
