@@ -1,7 +1,7 @@
 """Local identities, Authentik OIDC and server-enforced operator permissions.
 
 Provision recovery access: python access_control.py create-admin USERNAME
-The first local administrator enables authentication for the operator listener.
+On first use, open NetEm and retrieve the setup code with: python access_control.py setup-code
 """
 import argparse
 from contextlib import contextmanager
@@ -31,7 +31,7 @@ OPERATOR_CONTROLS = {'quick_wan_action', 'lab_fault', 'lab_mtu', 'lab_sla', 'cle
 ADMIN_READS = {'integrations', 'settings', 'setup', 'updates', 'update_components', 'updates_status',
     'branding_settings', 'branding_preview', 'branding_export', 'traffic_settings', 'traffic_settings_data',
     'simulator_controller', 'access_settings'}
-PUBLIC = {'static', 'access_login', 'access_oidc_login', 'access_oidc_callback'}
+PUBLIC = {'static', 'access_login', 'access_oidc_login', 'access_oidc_callback', 'access_bootstrap'}
 
 
 def required_role(endpoint, method='GET'):
@@ -87,7 +87,26 @@ class AccessStore:
             row = conn.execute('SELECT * FROM users WHERE id=?', (user_id,)).fetchone()
             return dict(row) if row else None
 
-    def create(self, username, password, role):
+    def setup_code(self):
+        """Only server access can retrieve the private, single-use setup credential."""
+        with self.lock, self.connect() as conn:
+            conn.execute('BEGIN IMMEDIATE')
+            if conn.execute('SELECT 1 FROM users LIMIT 1').fetchone():
+                raise ValueError('Initial administrator setup is already complete.')
+            row = conn.execute('SELECT value FROM settings WHERE id=2').fetchone()
+            if row:
+                return row[0]
+            code = secrets.token_urlsafe(32)
+            conn.execute('INSERT INTO settings(id,value) VALUES(2,?)', (code,))
+            return code
+
+    def create(self, username, password, role, *, bootstrap_code=None):
+        if bootstrap_code is not None:
+            # Reject invalid credentials before doing expensive password hashing.
+            with self.connect() as conn:
+                row = conn.execute('SELECT value FROM settings WHERE id=2').fetchone()
+                if not row or not hmac.compare_digest(str(bootstrap_code).encode(), row[0].encode()):
+                    raise ValueError('Invalid setup code.')
         username = str(username).strip().lower()
         if not re.fullmatch(r'[a-z0-9][a-z0-9_.@-]{1,79}', username):
             raise ValueError('Username must contain 2–80 letters, digits or . _ @ - characters.')
@@ -98,11 +117,18 @@ class AccessStore:
         hashed = generate_password_hash(password)
         user_id = secrets.token_hex(16)
         with self.lock, self.connect() as conn:
-            if not conn.execute('SELECT 1 FROM users LIMIT 1').fetchone() and role != 'admin':
+            conn.execute('BEGIN IMMEDIATE')
+            exists = conn.execute('SELECT 1 FROM users LIMIT 1').fetchone()
+            if bootstrap_code is not None:
+                row = conn.execute('SELECT value FROM settings WHERE id=2').fetchone()
+                if exists or role != 'admin' or not row or not hmac.compare_digest(str(bootstrap_code).encode(), row[0].encode()):
+                    raise ValueError('Initial setup is closed or the setup code is invalid.')
+            if not exists and role != 'admin':
                 raise ValueError('The first account must be a local administrator.')
             try:
                 conn.execute('INSERT INTO users(id,username,password,role) VALUES(?,?,?,?)',
                              (user_id, username, hashed, role))
+                conn.execute('DELETE FROM settings WHERE id=2')
             except sqlite3.IntegrityError as exc:
                 raise ValueError('This username already exists.') from exc
         return user_id
@@ -194,7 +220,7 @@ DUMMY_PASSWORD = generate_password_hash(secrets.token_urlsafe(32))
 def init_app(app, store):
     app.extensions['netem_access'] = store
     attempts, attempts_lock = {}, threading.Lock()
-    app.config.setdefault('NETEM_AUTH_REQUIRED', os.environ.get('NETEM_AUTH_REQUIRED') == '1')
+    app.config.setdefault('NETEM_AUTH_REQUIRED', os.environ.get('NETEM_AUTH_REQUIRED') != '0')
     app.config.setdefault('NETEM_SECURE_COOKIES', os.environ.get('NETEM_SECURE_COOKIES') == '1')
     app.config['SESSION_COOKIE_SECURE'] = app.config['NETEM_SECURE_COOKIES']
 
@@ -220,6 +246,10 @@ def init_app(app, store):
             return
         if request.endpoint == 'static' or request.endpoint is None:
             return
+        if not store.enabled() and request.endpoint != 'access_bootstrap':
+            if request.path.startswith('/api/') or request.method not in ('GET', 'HEAD'):
+                return jsonify(error='Initial administrator setup required'), 401
+            return redirect(url_for('access_bootstrap'))
         if request.endpoint in PUBLIC:
             return
         identity = session.get('access_identity') or {}
@@ -323,6 +353,27 @@ def init_app(app, store):
 
     def safe_next(value):
         return value if value and value.startswith('/') and not value.startswith('//') and '\\' not in value else '/'
+
+    @app.route('/setup/admin', methods=['GET', 'POST'], endpoint='access_bootstrap')
+    def bootstrap():
+        if store.enabled():
+            if request.method == 'POST':
+                abort(409, 'Initial administrator setup is already complete.')
+            return redirect(url_for('access_login'))
+        if request.method == 'POST':
+            csrf()
+            try:
+                if request.form.get('password') != request.form.get('confirm_password'):
+                    raise ValueError('Passwords do not match.')
+                user_id = store.create(request.form.get('username', ''), request.form.get('password', ''),
+                                       'admin', bootstrap_code=request.form.get('setup_code', ''))
+                sign_in(store.get(user_id))
+                flash('Administrator created. You are signed in.', 'success')
+                return redirect('/')
+            except ValueError as exc:
+                flash(str(exc), 'error')
+                return render_template('admin_setup.html'), 400
+        return render_template('admin_setup.html')
 
     @app.route('/login', methods=['GET', 'POST'], endpoint='access_login')
     def login():
@@ -441,10 +492,18 @@ def init_app(app, store):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('command', choices=['create-admin', 'reset-password'])
-    parser.add_argument('username')
+    parser.add_argument('command', choices=['setup-code', 'create-admin', 'reset-password'])
+    parser.add_argument('username', nargs='?')
     parser.add_argument('--database', default=str(Path(__file__).parent / 'runtime' / 'access.sqlite3'))
     args = parser.parse_args()
+    if args.command == 'setup-code':
+        try:
+            print(AccessStore(args.database).setup_code())
+        except ValueError as exc:
+            parser.error(str(exc))
+        raise SystemExit(0)
+    if not args.username:
+        parser.error('Username is required for this command.')
     password = getpass.getpass('New password (12+ characters): ')
     if password != getpass.getpass('Confirm password: '):
         parser.error('Passwords do not match.')

@@ -71,6 +71,18 @@ class StartTests(SessionCase):
         self.assertEqual(self.history[0]["status"], "active")
         self.assertEqual(self.history[0]["appliance"]["model"], "FortiGate-VM04")
 
+    def test_session_admission_rechecks_if_another_start_wins_during_preparation(self):
+        def load_after_competing_start():
+            self.session.update(active=True, id='competing-session', name='Other session')
+            return copy.deepcopy(self.cfg)
+        with patch.object(netem, 'load_config', side_effect=load_after_competing_start), \
+                patch.object(netem, 'save_session_history') as persist:
+            self.assertEqual(self.start().status_code, 302)
+            self.assertEqual(self.session['id'], 'competing-session')
+            self.assertEqual(self.session['name'], 'Other session')
+            self.assertEqual(self.history, [])
+            persist.assert_not_called()
+
     def test_the_captured_appliance_does_not_follow_later_selection_changes(self):
         self.start()
         with patch.object(netem, "appliance_under_test", return_value={"vendor_name": "Cisco", "model": "Other"}):

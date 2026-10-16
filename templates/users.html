@@ -8,7 +8,7 @@
 <section class="card"><div class="card-pad"><h2>Enable user accounts</h2>
 <p>Provision the first local administrator on the NetEm server. This enables login and role enforcement for the operator interface.</p>
 <pre>.venv/bin/python access_control.py create-admin admin</pre>
-<p class="field-help">Passwords are prompted securely. Existing installations stay in their current trusted-lab mode until an administrator is provisioned. Set NETEM_AUTH_REQUIRED=1 to block access before provisioning.</p></div></section>
+<p class="field-help">Passwords are prompted securely. Anonymous operation was explicitly enabled with NETEM_AUTH_REQUIRED=0. Remove that override and restart to use the first-administrator browser setup flow.</p></div></section>
 {% else %}
 <section class="card"><div class="card-pad"><h2>Roles</h2>
 <table class="table"><thead><tr><th>Role</th><th>Permissions</th></tr></thead><tbody>

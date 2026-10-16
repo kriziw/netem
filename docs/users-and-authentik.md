@@ -2,16 +2,22 @@
 
 ## Enable local accounts
 
-Run as the same service account that runs NetEm, from its installation directory:
+After updating, open the operator interface. If no account exists, NetEm takes you to **Set up your administrator**. The operator interface and APIs require authentication by default, including before setup.
 
-```bash
-.venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python access_control.py create-admin admin
-```
+1. On the NetEm host, run as the service account from the installation directory:
 
-The command prompts for a password of at least 12 characters without putting it in command-line arguments or shell history. The first local administrator enables authentication on the operator listener. Open NetEm and sign in, then use **Settings → System & integrations → Users & access** to add accounts, change roles, reset local passwords or disable users. Keep at least one enabled local administrator; NetEm prevents disabling or demoting the last one. Password, role and enable/disable changes revoke the affected user's existing logins immediately.
+   ```bash
+   .venv/bin/python access_control.py setup-code
+   ```
 
-Existing installations retain their trusted-lab access until a local administrator is provisioned. To prevent access before provisioning, set `NETEM_AUTH_REQUIRED=1` in the systemd service environment and restart. There is no unauthenticated web registration or first-user takeover endpoint. Bootstrap and password recovery require server access.
+2. Copy the one-time code into the setup page, choose the administrator username, and enter and confirm a password of 12–256 characters.
+3. Select **Create administrator and sign in**. You are signed in immediately. Future visits use the normal login page.
+
+The setup code is stored in the private access database and is only returned by the server command, never by the web interface. Re-running the command returns the same unused code. It is consumed atomically when the first account is created, including if an administrator is provisioned through the CLI instead. Setup cannot create additional accounts afterward, even from a stale browser tab. There is no default administrator password. Existing accounts and passwords survive upgrades.
+
+Use **Settings → System & integrations → Users & access** to add accounts, change roles, reset local passwords or disable users. Keep at least one enabled local administrator; NetEm prevents disabling or demoting the last one. Password, role and enable/disable changes revoke the affected user's existing logins immediately. The CLI alternative `.venv/bin/python access_control.py create-admin admin` remains available for provisioning and recovery.
+
+For an explicitly trusted lab only, `NETEM_AUTH_REQUIRED=0` retains anonymous operation until an account is provisioned; remove that override to use browser setup. Once any account exists, authentication is enforced regardless of this setting.
 
 For an HTTPS deployment, terminate TLS at your trusted reverse proxy and set `NETEM_SECURE_COOKIES=1` in the NetEm service environment. This makes the login cookie HTTPS-only. Sessions are HttpOnly, SameSite=Lax and expire after eight hours; successful sign-in rotates session state. Browser mutations require a CSRF token. APIs return HTTP 401 when authentication is required and HTTP 403 when the role is insufficient. Existing unauthenticated operator API or metrics clients must be updated to authenticate using a session; this change does not add long-lived API tokens.
 
@@ -24,7 +30,7 @@ For an HTTPS deployment, terminate TLS at your trusted reverse proxy and set `NE
 | Operator | Presenter access plus runtime WAN changes, profiles, probes, captures, workload controls and test definitions |
 | Admin | All controls, including users, OIDC, topology, appliances, traffic-path setup, integrations, branding and system updates |
 
-Permissions apply on the server to HTML and API routes. Unavailable navigation and action shortcuts are removed. Unauthorized forms and alternate submit actions are locked read-only while keeping live preview and measurement widgets working. These interface restrictions are usability aids; direct requests are still checked on the server. New mutation endpoints default to Admin until explicitly assigned a lower role. Presenter test execution can apply the WAN impairments defined by a prepared test, but does not grant arbitrary WAN configuration access. Users currently control one shared lab; RBAC does not provide independent concurrent sessions. Parallel-session feasibility is tracked in [issue #148](https://github.com/kriziw/netem/issues/148).
+Permissions apply on the server to HTML and API routes. Unavailable navigation and action shortcuts are removed. Unauthorized forms and alternate submit actions are locked read-only while keeping live preview and measurement widgets working. These interface restrictions are usability aids; direct requests are still checked on the server. New mutation endpoints default to Admin until explicitly assigned a lower role. Presenter test execution can apply the WAN impairments defined by a prepared test, but does not grant arbitrary WAN configuration access. Starting a new session while another is active is rejected for every role, including Admin; complete the existing session first. The Sessions page hides the start form during an active session, and the server rechecks admission under a lock. Users currently control one shared lab; RBAC does not provide independent concurrent sessions. Parallel-session feasibility is tracked in [issue #148](https://github.com/kriziw/netem/issues/148).
 
 The separate showcase listener remains an intentionally public, read-only presentation surface with its existing restricted routes. Protect it at the network/reverse-proxy boundary if the audience must be restricted. It does not expose operator control or user-management routes.
 

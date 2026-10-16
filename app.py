@@ -7422,6 +7422,12 @@ def sessions():
 
 @app.route("/sessions/start", methods=["POST"])
 def session_start():
+    # Reject a conflicting start before configuration or appliance preparation.
+    # Admission is checked again under the same lock immediately before creation.
+    with RUNTIME_LOCK:
+        if ACTIVE_SESSION["active"]:
+            flash("A lab session is already active. Complete it before starting another.", "error")
+            return redirect_after("sessions")
     name = (request.form.get("name") or "Lab session").strip()[:100]
     # A session validates one client site; without fields it uses the active site profile.
     cfg = load_config()

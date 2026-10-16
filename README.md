@@ -526,7 +526,7 @@ Custom scenarios execute `traffic_generator` actions (`start`, `adjust`, `stop`)
 
 For the dual-NIC simulator, controlled target routing, FortiGate policy/SNAT and verification steps, see the [Traffic Simulator deployment guide](https://github.com/kriziw/netem-traffic-simulator#installation--controlled-target). Simulator API keys are stored separately from `config.json`; the browser controls require session form tokens. NetEm remains a management-network lab application and has no general user authentication layer.
 
-Run regression coverage with `python -m unittest discover -s tests -v`.
+Run regression coverage with `NETEM_AUTH_REQUIRED=0 python -m unittest discover -s tests -v`.
 
 ### Telemetry accuracy and measurement scope
 
@@ -563,7 +563,7 @@ ICMP semantics: [iputils ping manual](https://man7.org/linux/man-pages/man8/ping
 
 ### Users, roles and Authentik
 
-See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. Upgrading an existing trusted lab does not silently lock its operator interface: provisioning the first local administrator enables login and RBAC. Set `NETEM_AUTH_REQUIRED=1` in the service environment to require authentication even before provisioning.
+See [Users and Authentik setup](docs/users-and-authentik.md) for first-administrator provisioning, local recovery, role permissions and OIDC group mappings. After updating, installations without accounts open a first-administrator setup page. Retrieve the one-time setup code on the host with `.venv/bin/python access_control.py setup-code`, choose and confirm your administrator password in the browser, and NetEm signs you in. Existing accounts keep their passwords. Authentication is required by default; explicit `NETEM_AUTH_REQUIRED=0` retains trusted-lab anonymous operation only until an account is provisioned.
 
 ### Phase navigation and unsaved tests
 

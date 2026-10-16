@@ -7,6 +7,10 @@ on:
       - main
       - 'codex/**'
 
+env:
+  # Legacy runtime tests isolate authentication; access tests explicitly enable it.
+  NETEM_AUTH_REQUIRED: "0"
+
 permissions:
   contents: read
 
