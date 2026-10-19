@@ -75,8 +75,14 @@
     form.setAttribute('aria-busy', 'true');
     status('Starting scenario…');
     try {
-      const response = await fetch(action.href, {method: 'POST', body: data});
-      const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+      const response = await fetch(action.href, {method: 'POST', body: data, headers: {Accept: 'application/json'}});
+      const body = await response.text();
+      let payload;
+      try { payload = JSON.parse(body); } catch (_) { /* Older servers and warning pages return HTML. */ }
+      const doc = new DOMParser().parseFromString(payload ? '' : body, 'text/html');
+      const http = response.status ? ` (HTTP ${response.status})` : '';
+      const login = doc.querySelector('form[action="/login"], form[action="/setup"]');
+      if (response.status === 401 || login) throw new Error('Sign in to NetEm, then reopen the scenario.' + http);
       const warning = doc.querySelector('#no-session-warning');
       if (warning) {
         // No lab session is running: the operator starts one, or acknowledges the warning and runs the test.
@@ -88,10 +94,18 @@
         return;
       }
       const errors = [...doc.querySelectorAll('.flash.error')].map(el => el.textContent.trim());
-      if (!response.ok || errors.length) throw new Error(errors.join(' ') || 'The scenario could not be started. Check the configuration and retry.');
-      const started = doc.querySelector('#running-test')?.dataset.scenarioId === data.get('scenario_id');
+      if (!response.ok || errors.length || payload?.error) {
+        // Flask aborts (CSRF/RBAC), JSON refusals and proxy failures do not use flash messages.
+        const reason = (typeof payload?.error === 'string' && payload.error) || errors.join(' ')
+          || (response.status >= 400 && response.status < 500 ? doc.querySelector('body > p')?.textContent.trim() : '');
+        const uncertain = response.status >= 500;
+        throw new Error((reason || (uncertain ? 'The server could not confirm the start.' : 'The scenario start was refused.'))
+          + http + (uncertain ? ' Check live status before retrying; the start may have applied.' : ''));
+      }
+      const started = payload ? payload.accepted === true && payload.scenario_id === data.get('scenario_id')
+        : doc.querySelector('#running-test')?.dataset.scenarioId === data.get('scenario_id');
       if (!started) throw new Error('The start was not confirmed. Check live status before retrying.');
-      const message = [...doc.querySelectorAll('.flash.success')].map(el => el.textContent.trim()).join(' ') || 'Scenario started.';
+      const message = (typeof payload?.message === 'string' && payload.message) || [...doc.querySelectorAll('.flash.success')].map(el => el.textContent.trim()).join(' ') || 'Scenario started.';
       if (token === generation && dialog.open) close();
       window.NetEmActions?.notify(message);
       await window.NetEmActions?.refresh();
