@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.0](https://github.com/kriziw/netem/compare/v1.5.0...v1.6.0) (2026-10-19)
+
+
+### Features
+
+* provision FortiGate SD-WAN lab configurations ([#162](https://github.com/kriziw/netem/issues/162)) ([53f0b90](https://github.com/kriziw/netem/commit/53f0b9024cdd9a93d3f2d19b24dff787b93a53e6))
+
 ## [1.5.0](https://github.com/kriziw/netem/compare/v1.4.4...v1.5.0) (2026-10-19)
 
 
