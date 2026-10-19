@@ -28,13 +28,16 @@ function setup(initial=discovery()) {
   const find = id => w.document.querySelector('#fortinet-' + id);
   const choice = find('appliance').querySelector('option'); choice.value = appliance;
   const other = w.document.createElement('option'); other.value='b'.repeat(32); other.textContent='Other'; find('appliance').append(other);
-  const root = find('lab'); Object.assign(root.dataset, {statusUrl:'/status', discoverUrl:'/discover', previewUrl:'/preview', applyUrl:'/apply'});
+  const root = find('lab'); Object.assign(root.dataset, {statusUrl:'/status', discoverUrl:'/discover', previewUrl:'/preview', applyUrl:'/apply', connectionUrl:'/connection'});
   let data = initial, fail = null; const posts=[], timers=[];
   w.setTimeout = (fn, ms) => {if(ms===3000) timers.push(fn);return 1;}; w.clearTimeout=()=>{};
   w.fetch = async (url, options={}) => {
     if (options.method==='POST') {
       posts.push({url, body:options.body});
       if(fail) throw new Error(fail);
+      if(url==='/connection') {
+        return {ok:true,json:async()=>({saved:true,appliance_id:appliance,name:'Lab FortiGate',endpoint:'https://192.0.2.10',vdom:'root',fingerprint:'',self_signed:false})};
+      }
       if(url==='/preview') data=planned();
       if(url==='/apply') data={...discovery(), state:'applying', message:'Applying…'};
       if(url==='/discover') data={...discovery(), state:'discovering', discovery:null};
@@ -55,6 +58,39 @@ test('discovery suggests dedicated management, LAN and three WAN interfaces safe
   assert.equal(t.find('wans').querySelector('[data-gateway]').value,'10.10.1.1');
   assert.equal(t.find('health').value,'198.18.0.1');
   assert.match(t.find('identity').textContent,/<img/); assert.equal(t.find('identity').querySelector('img'),null);
+});
+
+test('first-time setup guides token creation, saves a connection privately and continues to discovery', async()=>{
+  const t=setup({state:'idle',message:'Begin setup',steps:[]}); await settle();
+  assert.equal(t.find('prepare').hidden,false);
+  assert.match(t.find('prepare').textContent,/System → Administrators → Create New → REST API Admin/);
+  assert.match(t.find('prepare').textContent,/Trusted Hosts/);
+  t.find('token-ready').click(); assert.equal(t.find('connection-panel').hidden,false);
+  t.find('connection-choice').value=''; t.find('connection-choice').dispatchEvent(new t.w.Event('change'));
+  for(const [field,value] of Object.entries({name:'Lab FortiGate',endpoint:'https://192.0.2.10',vdom:'root',token:'private-api-token'})) t.find('connection-'+field).value=value;
+  t.submit('connection'); await settle();
+  assert.equal(t.posts.length,1);
+  assert.equal(t.posts[0].url,'/connection');
+  assert.equal(t.posts[0].body.get('api_token'),'private-api-token');
+  assert.equal(t.find('connection-token').value,'');
+  assert.equal(t.find('discovery-panel').hidden,false);
+  assert.equal(t.find('appliance').value,appliance);
+  assert.match(t.find('status').textContent,/Connection saved/);
+  t.find('edit-connection').click(); assert.equal(t.find('connection-panel').hidden,false);
+  assert.match(t.find('token-help').textContent,/stored privately/);
+  assert.equal(t.find('connection-token').required,false);
+  t.find('token-back').click(); assert.equal(t.find('prepare').hidden,false);
+});
+
+test('successful provisioning guides forwarding verification for the selected appliance', async()=>{
+  const t=setup(planned()); await settle();
+  t.set({...discovery(),state:'completed',message:'Configuration verified.'});
+  await t.timers.pop()();
+  assert.equal(t.find('finish').hidden,false);
+  assert.match(t.find('finish').textContent,/Verify & select/);
+  assert.match(t.find('finish-appliance').href,new RegExp('edit='+appliance));
+  t.find('appliance').value='b'.repeat(32); t.find('appliance').dispatchEvent(new t.w.Event('change'));
+  await t.timers.pop()(); assert.equal(t.find('finish').hidden,true);
 });
 
 test('preview submits selected WAN topology and applies only a confirmed single-use plan', async()=>{

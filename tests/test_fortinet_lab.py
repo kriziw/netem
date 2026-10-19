@@ -344,10 +344,11 @@ class EndpointTests(unittest.TestCase):
             self.login(netem.ACCESS_STORE.create('user-' + role, 'sample-user-password', role))
             for path in ('/integrations/fortinet', '/api/v1/integrations/fortinet', '/integrations/fortinet/x/recovery.json'):
                 self.assertEqual(self.client.get(path).status_code, 403)
-            for suffix in ('discover', 'preview', 'apply'):
+            for suffix in ('connection', 'discover', 'preview', 'apply'):
                 self.assertEqual(self.client.post('/integrations/fortinet/' + suffix, data={'integration_csrf': 'test-token'}).status_code, 403)
 
     def test_explicit_csrf_and_apply_confirmation(self):
+        self.assertEqual(self.client.post('/integrations/fortinet/connection').status_code, 400)
         self.assertEqual(self.client.post('/integrations/fortinet/discover').status_code, 400)
         self.assertEqual(self.client.post('/integrations/fortinet/apply', data={'integration_csrf': 'test-token'}).status_code, 400)
         self.assertEqual(self.client.post('/integrations/fortinet/preview', data={'integration_csrf': 'test-token', 'configuration': '[]'}).status_code, 409)
@@ -357,6 +358,37 @@ class EndpointTests(unittest.TestCase):
             for path in ('/sessions/start', '/appliances/save', '/settings/storage/compact'):
                 self.assertEqual(self.client.post(path, data={'integration_csrf': 'test-token'}).status_code, 409)
         self.assertEqual(access_control.required_role('fortinet_status'), 'admin')
+
+    def test_guided_connection_create_keep_token_and_change_origin(self):
+        payload = dict(name='Guided FortiGate', endpoint='https://192.0.2.10', vdom='root', kind='vm',
+                       api_token='private-guided-token', integration_csrf='test-token')
+        with patch.object(netem.FORTINET_LAB, 'idle'), patch.object(netem, 'log_event'):
+            response = self.client.post('/integrations/fortinet/connection', data=payload)
+            self.assertEqual(response.status_code, 200)
+            appliance_id = response.json['appliance_id']
+            self.assertEqual(netem.FORTINET_LAB.store.token(appliance_id), 'private-guided-token')
+            self.assertNotIn('private-guided-token', response.text)
+            payload.update(id=appliance_id, api_token='')
+            self.assertEqual(self.client.post('/integrations/fortinet/connection', data=payload).status_code, 200)
+            self.assertEqual(netem.FORTINET_LAB.store.token(appliance_id), 'private-guided-token')
+            payload['endpoint'] = 'https://192.0.2.11'
+            response = self.client.post('/integrations/fortinet/connection', data=payload)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(netem.FORTINET_LAB.store.get(appliance_id)['endpoint'], 'https://192.0.2.10')
+            payload['api_token'] = 'replacement-private-token'
+            self.assertEqual(self.client.post('/integrations/fortinet/connection', data=payload).status_code, 200)
+            self.assertEqual(netem.FORTINET_LAB.store.token(appliance_id), 'replacement-private-token')
+            html = self.client.get('/integrations/fortinet').text
+            self.assertIn('data-has-token="1"', html)
+            self.assertNotIn('replacement-private-token', html)
+
+    def test_guided_connection_requires_token_and_verified_self_signed_trust(self):
+        payload = dict(name='Guided FortiGate', endpoint='https://192.0.2.10', vdom='root', integration_csrf='test-token')
+        with patch.object(netem.FORTINET_LAB, 'idle'):
+            self.assertEqual(self.client.post('/integrations/fortinet/connection', data=payload).status_code, 409)
+            payload.update(api_token='private-token', self_signed='1')
+            self.assertEqual(self.client.post('/integrations/fortinet/connection', data=payload).status_code, 409)
+        self.assertEqual(netem.FORTINET_LAB.store.rows(), [])
 
     def test_authenticated_discover_preview_apply_flow_uses_real_handlers(self):
         manager = netem.FORTINET_LAB
