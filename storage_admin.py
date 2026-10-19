@@ -185,7 +185,7 @@ class StorageAdmin:
 
 def init_app(app, netem):
     storage = StorageAdmin(netem)
-    app.jinja_env.filters['storage_bytes'] = human_bytes
+    app.jinja_env.globals['storage_bytes'] = human_bytes
     allowed = app.extensions['netem_access_allowed']
 
     @app.context_processor

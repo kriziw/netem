@@ -7,17 +7,17 @@
 <div id="storage-panel" class="grid">
 <section class="card"><div class="card-head"><div class="card-title">Disk capacity</div><span class="status" data-storage-health></span></div>
 <div class="card-pad"><div class="kv">
-<div class="k">Total capacity</div><div class="v" data-storage-total>{{ storage.disk.total|storage_bytes }}</div>
-<div class="k">Used</div><div class="v" data-storage-used>{{ storage.disk.used|storage_bytes }}</div>
-<div class="k">Available to NetEm</div><div class="v" data-storage-free>{{ storage.disk.available|storage_bytes }}</div>
+<div class="k">Total capacity</div><div class="v" data-storage-total>{{ storage_bytes(storage.disk.total) }}</div>
+<div class="k">Used</div><div class="v" data-storage-used>{{ storage_bytes(storage.disk.used) }}</div>
+<div class="k">Available to NetEm</div><div class="v" data-storage-free>{{ storage_bytes(storage.disk.available) }}</div>
 </div><p class="field-help">Available space excludes filesystem-reserved blocks. Usage follows the disk's usable capacity, as in df.</p></div></section>
 <section class="card"><div class="card-head"><div class="card-title">Logs</div></div><div class="card-pad"><div class="kv">
-<div class="k">NetEm event log</div><div class="v" data-storage-events>{{ storage.event_log_bytes|storage_bytes }}</div>
-<div class="k">System journals</div><div class="v" data-storage-journals>{{ storage.journal.bytes|storage_bytes }}</div>
+<div class="k">NetEm event log</div><div class="v" data-storage-events>{{ storage_bytes(storage.event_log_bytes) }}</div>
+<div class="k">System journals</div><div class="v" data-storage-journals>{{ storage_bytes(storage.journal.bytes) }}</div>
 </div><p class="field-help" data-storage-log-note>System journals include the host's persistent and volatile journals. Recorded test bundles are separate from these logs.</p></div></section>
 <section class="card"><div class="card-head"><div class="card-title">Databases</div></div><div class="card-pad">
 <div class="table-wrap"><table><thead><tr><th>Database</th><th>Main file</th><th>Write-ahead log</th><th>Shared memory</th><th>Total</th></tr></thead><tbody data-storage-databases>
-{% for db in storage.databases %}<tr><td>{{ db.name }}</td><td>{{ db.main_bytes|storage_bytes }}</td><td>{{ db.wal_bytes|storage_bytes }}</td><td>{{ db.shm_bytes|storage_bytes }}</td><td>{{ db.total_bytes|storage_bytes }}</td></tr>{% endfor %}
+{% for db in storage.databases %}<tr><td>{{ db.name }}</td><td>{{ storage_bytes(db.main_bytes) }}</td><td>{{ storage_bytes(db.wal_bytes) }}</td><td>{{ storage_bytes(db.shm_bytes) }}</td><td>{{ storage_bytes(db.total_bytes) }}</td></tr>{% endfor %}
 </tbody></table></div>
 <p class="field-help">Sizes refresh about every 10 seconds. Database sidecar files are included in the total.</p>
 </div></section>
