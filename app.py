@@ -139,6 +139,7 @@ TELEMETRY_RETENTION_HOURS = 168
 MAX_PROBES = 20
 
 RUNTIME_LOCK = threading.Lock()
+SESSION_END_LOCK = threading.Lock()
 ACTIVE_FAULTS = {}
 RUNTIME_EFFECTIVE = {}
 PROFILE_APPLY_LOCK = threading.RLock()
@@ -2472,50 +2473,65 @@ def session_wan_roles(cfg, primary=None, backup=None):
             "backup": {"link_id": backup, "label": labels[backup]}}
 
 
-def end_session(reason):
-    """End the lab session. Running site tests stop and restore their WAN, the session report is built and the
-    record is closed. reason is "completed" when the operator stops it, "timed_out" once six hours have passed."""
+def end_session(reason, expected_session_id=None):
+    """Close the session before optional report work; report failures must never hold lab controls open."""
     with RUNTIME_LOCK:
-        if not ACTIVE_SESSION["active"]:
-            return None
-        session_id = ACTIVE_SESSION["id"]
-        session_name = ACTIVE_SESSION["name"]
-        plan_running = bool(SITE_PLAN_STATE.get("active"))
-        scenario_running = bool(SCENARIO_STATE.get("active"))
-    if plan_running:
-        SITE_PLAN_STOP.set()
-    if plan_running or scenario_running:
-        SCENARIO_STOP.set()
-    log_event("session", f"Lab session {'reached its six-hour limit' if reason == 'timed_out' else 'completed'}: {session_name}",
-              session_id=session_id, reason=reason)
-    ended_at = time.time()
-    with RUNTIME_LOCK:
-        for item in reversed(LAB_SESSIONS):
-            if item.get("id") == session_id:
-                item["ended_at"] = ended_at
-                item["status"] = reason
-                break
+        requested_id = expected_session_id or (ACTIVE_SESSION.get("id") if ACTIVE_SESSION.get("active") else None)
+    if requested_id is None:
+        return None
+    with SESSION_END_LOCK:
+        with RUNTIME_LOCK:
+            # A concurrent stop/expiry may already have closed this session.
+            if not ACTIVE_SESSION.get("active") or ACTIVE_SESSION.get("id") != requested_id:
+                return None
+            session_id = ACTIVE_SESSION["id"]
+            session_name = ACTIVE_SESSION["name"]
+            plan_running = bool(SITE_PLAN_STATE.get("active"))
+            scenario_running = bool(SCENARIO_STATE.get("active"))
+        if plan_running:
+            SITE_PLAN_STOP.set()
+        if plan_running or scenario_running:
+            SCENARIO_STOP.set()
+        log_event("session", f"Lab session {'reached its six-hour limit' if reason == 'timed_out' else 'completed'}: {session_name}",
+                  session_id=session_id, reason=reason)
+        ended_at = time.time()
+        with RUNTIME_LOCK:
+            for item in reversed(LAB_SESSIONS):
+                if item.get("id") == session_id:
+                    item.update(ended_at=ended_at, status=reason)
+                    break
+            ACTIVE_SESSION.update({"active": False, "id": None, "name": None, "started_at": None, "deadline": None,
+                                   "site": None, "appliance": None, "wan": None, "tests": {}})
+            save_session_history()
 
-    report = build_session_report(session_id, end_time=ended_at)
-
-    with RUNTIME_LOCK:
-        for item in reversed(LAB_SESSIONS):
-            if item.get("id") == session_id:
-                item["report"] = report
-                break
-        ACTIVE_SESSION.update({"active": False, "id": None, "name": None, "started_at": None, "deadline": None,
-                               "site": None, "appliance": None, "wan": None, "tests": {}})
-        save_session_history()
-    return {"name": session_name, "report": report, "reason": reason}
+        report, report_error = None, None
+        try:
+            report = build_session_report(session_id, end_time=ended_at)
+        except Exception:
+            # Reporting is an optional boundary: preserve closure and the original traceback.
+            app.logger.exception("Session %s closed, but its report could not be generated", session_id)
+            report_error = "Report unavailable. Open the session report to retry."
+        with RUNTIME_LOCK:
+            for item in reversed(LAB_SESSIONS):
+                if item.get("id") == session_id:
+                    item["report"] = report
+                    if report_error:
+                        item["report_error"] = report_error
+                    else:
+                        item.pop("report_error", None)
+                    break
+            save_session_history()
+        return {"name": session_name, "report": report, "reason": reason, "report_error": report_error}
 
 
 def expire_session_if_due(now=None):
     """End the session once its six-hour limit has passed, whoever is watching. Returns True when it ended."""
     with RUNTIME_LOCK:
         deadline = ACTIVE_SESSION.get("deadline") if ACTIVE_SESSION.get("active") else None
+        session_id = ACTIVE_SESSION.get("id")
     if deadline is None or (now if now is not None else time.time()) < deadline:
         return False
-    return end_session("timed_out") is not None
+    return end_session("timed_out", expected_session_id=session_id) is not None
 
 
 def set_session_test(test, status, summary=None):
@@ -2826,9 +2842,9 @@ def telemetry_connect():
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
     conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
     try:
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         with conn:
             yield conn
     finally:
@@ -7589,16 +7605,37 @@ def session_start():
 @app.route("/sessions/stop", methods=["POST"])
 def session_stop():
     ended = end_session("completed")
+    asynchronous = request.accept_mimetypes.best == "application/json"
     if not ended:
+        if asynchronous:
+            return jsonify(stopped=True, message="No lab session is active.")
         flash("No lab session is active.", "info")
         return redirect_after("sessions")
     report = ended["report"]
-    flash(
-        f'Lab session "{ended["name"]}" completed'
-        + (f' · result {report["result"].upper()}.' if report else "."),
-        "success",
-    )
+    message = (f'Lab session "{ended["name"]}" completed'
+               + (f' · result {report["result"].upper()}.' if report else "."))
+    if asynchronous:
+        return jsonify(stopped=True, message=message, warning=ended["report_error"])
+    flash(message, "success")
+    if ended["report_error"]:
+        flash(ended["report_error"], "warning")
     return redirect_after("sessions")
+
+def session_report_or_retry(session):
+    if session.get("report"):
+        return session["report"]
+    try:
+        report = build_session_report(session["id"])
+    except Exception:
+        app.logger.exception("Session %s report retry failed", session["id"])
+        return None
+    if report and session.get("status") != "active":
+        with RUNTIME_LOCK:
+            session["report"] = report
+            session.pop("report_error", None)
+            save_session_history()
+    return report
+
 
 @app.route("/sessions/<session_id>/report")
 def session_report(session_id):
@@ -7608,9 +7645,10 @@ def session_report(session_id):
     )
     if not session:
         abort(404)
-    report = session.get("report") or build_session_report(session_id)
+    report = session_report_or_retry(session)
     if not report:
-        abort(404)
+        flash("The session report is unavailable. Check the server logs and retry.", "warning")
+        return redirect(url_for("sessions"))
     return render_template(
         "session_report.html",
         page="sessions",
@@ -7626,9 +7664,9 @@ def session_report_json(session_id):
     )
     if not session:
         abort(404)
-    report = session.get("report") or build_session_report(session_id)
+    report = session_report_or_retry(session)
     if not report:
-        abort(404)
+        return jsonify(error="The session report is unavailable. Check the server logs and retry."), 503
     return jsonify(report)
 
 

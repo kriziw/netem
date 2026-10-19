@@ -172,3 +172,39 @@ test('the update screen prevents automatic page replacement while an install is 
   assert.equal(screen.doc.querySelector('main.page').dataset.uiVersion,'v1');
   screen.win.close();
 });
+
+test('session stop acknowledgement survives a failed dashboard refresh without claiming stop failed', async () => {
+  const screen = open({version: 'v1', body: '<form method="post" action="/sessions/stop"><button>Stop session</button></form>'}, next);
+  let posts = 0;
+  screen.win.fetch = async (url, options = {}) => {
+    if (options.method === 'POST') {
+      posts++;
+      assert.equal(options.headers.Accept, 'application/json');
+      return {ok: true, headers: {get: () => 'application/json'}, json: async () => ({stopped: true,
+        message: 'Session completed.', warning: 'Report unavailable. Open the session report to retry.'})};
+    }
+    return {ok: false, status: 500};
+  };
+  const form = screen.doc.querySelector('form');
+  form.dispatchEvent(new screen.win.Event('submit', {bubbles: true, cancelable: true}));
+  form.dispatchEvent(new screen.win.Event('submit', {bubbles: true, cancelable: true}));
+  for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(posts, 1);
+  assert.match(screen.doc.getElementById('action-toasts').textContent, /Session completed.*Report unavailable/);
+  assert.match(screen.doc.getElementById('action-error').textContent, /Session stopped.*page could not refresh/);
+  assert.doesNotMatch(screen.doc.getElementById('action-error').textContent, /may have applied/);
+  assert.equal(form.querySelector('button').disabled, true);
+  screen.win.close();
+});
+
+test('session stop JSON acknowledgement refreshes the visible session state', async () => {
+  const screen = open({version: 'v1', body: '<form method="post" action="/sessions/stop"><button>Stop session</button></form>'}, next);
+  screen.win.fetch = async (url, options = {}) => options.method === 'POST'
+    ? {ok: true, headers: {get: () => 'application/json'}, json: async () => ({stopped: true, message: 'Session completed.'})}
+    : {ok: true, url: 'http://netem.test/tests', text: async () => page({version: 'v2', body: '<div>No session</div>'})};
+  screen.doc.querySelector('form').dispatchEvent(new screen.win.Event('submit', {bubbles: true, cancelable: true}));
+  for (let i = 0; i < 4; i++) await new Promise(resolve => setImmediate(resolve));
+  assert.equal(screen.doc.querySelector('main.page').textContent, 'No session');
+  assert.match(screen.doc.getElementById('action-toasts').textContent, /Session completed/);
+  screen.win.close();
+});
