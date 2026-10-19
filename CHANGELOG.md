@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.6.2](https://github.com/kriziw/netem/compare/v1.6.1...v1.6.2) (2026-10-19)
+
+
+### Bug Fixes
+
+* brand and animate the sign-in experience ([#168](https://github.com/kriziw/netem/issues/168)) ([20241cd](https://github.com/kriziw/netem/commit/20241cd40465645ee94696c5cfb91e29c22541d2))
+* expose confirmed appliance removal in inventory ([#166](https://github.com/kriziw/netem/issues/166)) ([6e491d3](https://github.com/kriziw/netem/commit/6e491d30dda5d60daabf8cb7b642b31a0d08c628))
+
 ## [1.6.1](https://github.com/kriziw/netem/compare/v1.6.0...v1.6.1) (2026-10-19)
 
 
