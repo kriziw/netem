@@ -574,3 +574,17 @@ The running-test bar provides **Previous phase** and **Next phase** for Presente
 Recorded runs retain separate visits to repeated phases and a manual-navigation log. A manually navigated run cannot confirm successful validation of the full planned sequence; independently measured failures remain failures.
 
 Starting a generic test without a session asks you to confirm **Run unsaved test**. The test appears live on the operator dashboard and showcase with **Test mode · not saved**. NetEm uses an in-memory telemetry database and does not create a test archive, saved summary or persistent event history for that run. The showcase returns to its waiting screen when the run ends. A session cannot be started halfway through an unsaved run. Previously saved results are unaffected. Independently managed Traffic Simulator/target logs and web-server access logs have their own retention policies.
+
+### Admin storage monitoring and database compaction
+
+Open **Settings → System & integrations → Storage & database** as an Admin. The page shows the capacity, used space and space available to NetEm on its data filesystem; the NetEm event-log size; persistent/volatile system-journal allocation; and the main, WAL and shared-memory sizes of the telemetry, user-access and inventory databases. File sizes refresh in the background about every ten seconds. Unreadable journal sizes are labelled unavailable rather than zero; reading system journals requires the service account to have access to their directories.
+
+Admins receive a banner across the operator interface at **80% disk usage or higher** (less than roughly 20% available). Available space excludes filesystem-reserved blocks, following `df` semantics. The banner and storage API are unavailable to Viewer, Presenter and Operator roles. The public showcase publishes no storage information.
+
+**Compact database** runs SQLite `VACUUM` on the telemetry database in a background job. It reclaims unused pages while preserving remaining records; it does not delete history or apply gzip/file compression. It does not compact the authentication or appliance-inventory databases. Stop sessions, scenarios, plans, captures and simulator workloads first. New lab starts are refused while maintenance runs. A single maintenance job runs at a time; SQLite locking remains in force and busy databases fail with a visible result rather than bypassing locks.
+
+Compaction requires working space: twice the database size plus 64 MiB on its filesystem, and the database size plus 64 MiB in SQLite's temporary-file directory. Low/unknown space, unavailable simulator status, failed integrity checks and busy databases prevent compaction. A full disk should be expanded or safely cleared before compacting. The UI displays completion/failure and the reclaimed main-file bytes; an already compact database may reclaim nothing. Progress is in memory for the running service process.
+
+Admin endpoints: `GET /api/v1/storage` for metrics/job status, `GET /settings/storage` for the page and CSRF-protected `POST /settings/storage/compact` for maintenance. Database paths are fixed server-side; requests cannot select arbitrary files. The job has a 120-second SQL progress deadline and a one-second SQLite lock timeout. No database or WAL file is manually deleted or replaced.
+
+Reference: [SQLite VACUUM](https://sqlite.org/lang_vacuum.html) and [SQLite temporary-file locations](https://sqlite.org/tempfiles.html#temporary_file_storage_locations).

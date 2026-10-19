@@ -40,6 +40,10 @@
 
   {% endif %}
   {% if settings_group == "system" %}
+  <a class="card" href="{{ url_for('storage_settings') }}">
+    <div class="card-head"><div><div class="card-title">Storage &amp; database</div><div class="card-sub">Disk capacity, logs, database sizes and compaction</div></div></div>
+    <div class="card-pad">Review available space and reclaim unused telemetry database pages.</div>
+  </a>
   <a class="card" href="{{ url_for('updates') }}">
     <div class="card-head"><div><div class="card-title">Updates</div><div class="card-sub">NetEm, the Traffic Simulator and the controlled target, in one place</div></div><span class="status {{ 'good' if update_status.ok and not update_status.update_available else 'warn' }}">v{{ app_version }}</span></div>
     <div class="card-pad">

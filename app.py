@@ -36,6 +36,7 @@ import bottlenecks
 import calibration_log
 import calibration_trace
 import host_health
+import storage_admin
 import platform_test
 import test_records
 import site_catalog
@@ -6989,6 +6990,7 @@ SETTINGS_GROUPS = [
         ("updates", None, "Updates"),
         ("integrations", None, "API & integrations"),
         ("access_settings", None, "Users & access"),
+        ("storage_settings", None, "Storage & database"),
     ]},
 ]
 
@@ -9179,6 +9181,9 @@ def ui_state_version():
             sorted(ACTIVE_FAULTS.items()),
             CAPTURE_STATE.get("active"),
         ]
+    if "STORAGE_ADMIN" in globals():
+        disk = storage_admin.disk_usage(RUNTIME_DIR)
+        parts.append([disk['warning'], disk['error'], STORAGE_ADMIN.status()['state']])
     try:
         parts.append(CONFIG_PATH.stat().st_mtime_ns)
     except OSError:
@@ -10508,6 +10513,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
 
 ACCESS_STORE = access_control.init_app(app, access_control.AccessStore(RUNTIME_DIR / "access.sqlite3"))
 APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
+STORAGE_ADMIN = storage_admin.init_app(app, sys.modules[__name__])
 showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE, showcase_video_file)
 
 

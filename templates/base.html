@@ -106,6 +106,13 @@
     </header>
 
     <div id="global-alert-slot">
+    {% if admin_storage_disk and (admin_storage_disk.warning or admin_storage_disk.error) %}
+      <div class="global-alert" id="admin-storage-warning" role="alert">
+        <strong>{{ 'Storage capacity unavailable' if admin_storage_disk.error else 'Storage nearly full' }}</strong>
+        <span class="grow">{% if admin_storage_disk.error %}{{ admin_storage_disk.error }}{% else %}{{ admin_storage_disk.used_percent }}% used · {{ storage_bytes(admin_storage_disk.available) }} free. Warning starts at 80% used.{% endif %}</span>
+        <a class="btn btn-sm" href="{{ url_for('storage_settings') }}">Review storage</a>
+      </div>
+    {% endif %}
     {% if global_runtime.active_fault_count %}
       <div class="global-alert">
         <strong>Active runtime impairment</strong>
