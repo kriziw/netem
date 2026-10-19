@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.1](https://github.com/kriziw/netem/compare/v1.6.0...v1.6.1) (2026-10-19)
+
+
+### Bug Fixes
+
+* initialize and guide FortiGate lab setup ([#164](https://github.com/kriziw/netem/issues/164)) ([4de472b](https://github.com/kriziw/netem/commit/4de472b2ece0f6e4e368f4ec94ade33f1fcc5a43))
+
 ## [1.6.0](https://github.com/kriziw/netem/compare/v1.5.0...v1.6.0) (2026-10-19)
 
 
