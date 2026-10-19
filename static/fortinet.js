@@ -7,6 +7,7 @@
     const find = id => root.querySelector('#fortinet-' + id);
     const text = (id, value) => { find(id).textContent = value; };
     let state = {}, initialized = '', timer = null, stopped = false, posting = false, firstRead = true;
+    let connectionStage = 1, connectionInitialized = false, lastSpec = null;
     const ignoredPlans = new Set();
     const requests = new Set();
     const option = (value, label) => { const node = document.createElement('option'); node.value = value; node.textContent = label; return node; };
@@ -14,6 +15,25 @@
       select.replaceChildren(option('', 'Choose interface'));
       interfaces.forEach(row => select.append(option(row.name, row.name + ' · ' + (row.alias || row.role || row.type || 'port'))));
       select.value = value || '';
+    }
+    function showConnectionStep(step) {
+      connectionStage = step;
+      find('prepare').hidden = step !== 1;
+      find('connection-panel').hidden = step !== 2;
+      find('discovery-panel').hidden = step !== 3;
+      if (step !== 3) { find('topology').hidden = true; find('review').hidden = true; }
+    }
+    function loadConnection(id) {
+      find('connection-choice').value = id || '';
+      const data = find('connection-choice').selectedOptions[0]?.dataset || {};
+      for (const field of ['name', 'endpoint', 'vdom', 'fingerprint', 'kind']) {
+        find('connection-' + field).value = data[field] || (field === 'vdom' ? 'root' : field === 'kind' ? 'vm' : '');
+      }
+      find('connection-self-signed').checked = data.selfSigned === '1';
+      find('connection-fingerprint').required = data.selfSigned === '1';
+      find('connection-token').value = '';
+      find('connection-token').required = data.hasToken !== '1';
+      text('token-help', data.hasToken === '1' ? 'A token is stored privately. Leave blank to keep it, or paste a replacement. Changing the API address requires a new token.' : 'Paste the token generated in Step 1.');
     }
     const ports = () => state.discovery?.interfaces || [];
     const address = name => ports().find(p => p.name === name)?.cidr || '';
@@ -65,9 +85,17 @@
       firstRead = false;
       if (next.plan && ignoredPlans.has(next.plan.id)) next = {...next, plan: null};
       state = next;
+      if (!connectionInitialized) {
+        connectionInitialized = true;
+        loadConnection(find('appliance').value);
+        const chosen = find('appliance').selectedOptions[0];
+        showConnectionStep(next.discovery || (chosen?.dataset.hasToken === '1' && chosen.dataset.endpoint) ? 3 : 1);
+      }
+      if (next.plan || next.applied_spec) lastSpec = next.plan?.spec || next.applied_spec;
       text('status', next.message || 'Ready.');
       const busy = posting || ['discovering', 'applying'].includes(next.state);
-      root.querySelectorAll('button').forEach(button => { button.disabled = busy || !find('appliance').options.length; });
+      root.querySelectorAll('button').forEach(button => { button.disabled = busy; });
+      find('discover').querySelector('button[type=submit]').disabled = busy || !find('appliance').options.length;
       find('appliance').disabled = busy;
       if (next.appliance_id) {
         find('recovery').href = '/integrations/fortinet/' + encodeURIComponent(next.appliance_id) + '/recovery.json';
@@ -76,7 +104,7 @@
       const steps = find('steps'); steps.replaceChildren();
       (next.steps || []).forEach(step => { const line = document.createElement('p'); line.textContent = step.table + ' · ' + (step.key ?? 'configuration') + ' · ' + step.state; steps.append(line); });
       const selected = find('appliance').value === next.appliance_id;
-      find('topology').hidden = !next.discovery || !selected;
+      find('topology').hidden = !next.discovery || !selected || connectionStage !== 3;
       if (next.discovery && selected) {
         const d = next.discovery, signature = next.appliance_id + ':' + next.started_at;
         if (signature !== initialized) { initialized = signature; initialize(d); }
@@ -86,12 +114,17 @@
         const table = find('interfaces'); table.replaceChildren();
         d.interfaces.forEach(port => { const row = document.createElement('tr'); [port.name, [port.type, port.role].filter(Boolean).join(' / '), port.cidr || 'Not configured', port.gateway || 'Not discovered', port.sdwan_member ? 'Yes' : 'No'].forEach(value => { const td = document.createElement('td'); td.textContent = value; row.append(td); }); table.append(row); });
       }
-      find('review').hidden = !next.plan || !selected;
+      find('review').hidden = !next.plan || !selected || connectionStage !== 3;
       if (next.plan && selected) {
         const p = next.plan, warnings = find('warnings'), plan = find('plan'); warnings.replaceChildren(); plan.replaceChildren();
         p.warnings.forEach(message => { const li = document.createElement('li'); li.textContent = message; warnings.append(li); });
         text('plan-summary', p.spec.wans.length + ' WAN link(s) · ' + p.actions.length + ' changes · expires ' + new Date(p.expires_at * 1000).toLocaleTimeString());
         p.actions.forEach(action => { const details = document.createElement('details'), summary = document.createElement('summary'), pre = document.createElement('pre'); summary.textContent = action.method + ' ' + action.table + (action.key !== null ? ' / ' + action.key : ''); pre.textContent = JSON.stringify({before: action.before, after: action.after}, null, 2); details.append(summary, pre); plan.append(details); });
+      }
+      find('finish').hidden = next.state !== 'completed' || !selected || connectionStage !== 3;
+      if (next.state === 'completed') {
+        find('finish-appliance').href = '/appliances?edit=' + encodeURIComponent(next.appliance_id) + '#appliance-editor';
+        text('finish-summary', lastSpec?.lan ? 'Base configuration verified. FortiGate LAN gateway: ' + lastSpec.lan.address.split('/')[0] + '. Complete forwarding verification below.' : 'Base configuration verified. Complete forwarding verification below using the LAN gateway from your approved configuration.');
       }
     }
     async function requestData(url, options = {}) {
@@ -113,6 +146,38 @@
       catch (error) { posting = false; render(state); text('status', error.message + ' Check operation status before retrying; an interrupted request may have been accepted.'); }
       schedule();
     }
+    find('token-ready').addEventListener('click', () => showConnectionStep(2));
+    find('token-back').addEventListener('click', () => showConnectionStep(1));
+    find('edit-connection').addEventListener('click', () => { loadConnection(find('appliance').value); showConnectionStep(2); });
+    find('connection-choice').addEventListener('change', () => loadConnection(find('connection-choice').value));
+    find('connection-self-signed').addEventListener('change', () => { find('connection-fingerprint').required = find('connection-self-signed').checked; });
+    find('connection').addEventListener('submit', async event => {
+      event.preventDefault();
+      if (posting) return;
+      posting = true; render(state);
+      const body = new URLSearchParams(new FormData(find('connection')));
+      text('connection-status', 'Saving the API connection…');
+      try {
+        const saved = await requestData(root.dataset.connectionUrl, {method:'POST', body});
+        let item = [...find('appliance').options].find(o => o.value === saved.appliance_id);
+        if (!item) { item = option(saved.appliance_id, ''); find('appliance').append(item); }
+        item.textContent = saved.name + ' · ' + saved.endpoint + ' · VDOM: ' + saved.vdom;
+        item.dataset.hasToken = '1'; item.dataset.endpoint = saved.endpoint;
+        find('appliance').value = saved.appliance_id;
+        let connection = [...find('connection-choice').options].find(o => o.value === saved.appliance_id);
+        if (!connection) { connection = option(saved.appliance_id, saved.name); find('connection-choice').append(connection); }
+        Object.assign(connection.dataset, {name:saved.name, endpoint:saved.endpoint, vdom:saved.vdom,
+          kind:find('connection-kind').value, fingerprint:saved.fingerprint, selfSigned:saved.self_signed ? '1' : '0', hasToken:'1'});
+        find('connection-token').value = '';
+        find('connection-token').required = false;
+        initialized = ''; invalidate();
+        state = {state:'idle', appliance_id:saved.appliance_id, message:'Connection saved. Click Discover appliance to verify the certificate, token and permissions.', steps:[]};
+        posting = false; showConnectionStep(3); render(state);
+      } catch (error) {
+        posting = false; render(state); text('connection-status', error.message + ' The connection was not confirmed; check before submitting again.');
+      }
+      schedule();
+    });
     find('discover').addEventListener('submit', event => { event.preventDefault(); initialized = ''; post(root.dataset.discoverUrl, {id: find('appliance').value}); });
     find('appliance').addEventListener('change', () => { invalidate(); find('topology').hidden = true; initialized = ''; });
     find('lan').addEventListener('change', () => { find('lan-address').value = address(find('lan').value); });

@@ -28,13 +28,16 @@ function setup(initial=discovery()) {
   const find = id => w.document.querySelector('#fortinet-' + id);
   const choice = find('appliance').querySelector('option'); choice.value = appliance;
   const other = w.document.createElement('option'); other.value='b'.repeat(32); other.textContent='Other'; find('appliance').append(other);
-  const root = find('lab'); Object.assign(root.dataset, {statusUrl:'/status', discoverUrl:'/discover', previewUrl:'/preview', applyUrl:'/apply'});
+  const root = find('lab'); Object.assign(root.dataset, {statusUrl:'/status', discoverUrl:'/discover', previewUrl:'/preview', applyUrl:'/apply', connectionUrl:'/connection'});
   let data = initial, fail = null; const posts=[], timers=[];
   w.setTimeout = (fn, ms) => {if(ms===3000) timers.push(fn);return 1;}; w.clearTimeout=()=>{};
   w.fetch = async (url, options={}) => {
     if (options.method==='POST') {
       posts.push({url, body:options.body});
       if(fail) throw new Error(fail);
+      if(url==='/connection') {
+        return {ok:true,json:async()=>({saved:true,appliance_id:appliance,name:'Lab FortiGate',endpoint:'https://192.0.2.10',vdom:'root',fingerprint:'',self_signed:false})};
+      }
       if(url==='/preview') data=planned();
       if(url==='/apply') data={...discovery(), state:'applying', message:'Applying…'};
       if(url==='/discover') data={...discovery(), state:'discovering', discovery:null};
@@ -55,6 +58,39 @@ test('discovery suggests dedicated management, LAN and three WAN interfaces safe
   assert.equal(t.find('wans').querySelector('[data-gateway]').value,'10.10.1.1');
   assert.equal(t.find('health').value,'198.18.0.1');
   assert.match(t.find('identity').textContent,/<img/); assert.equal(t.find('identity').querySelector('img'),null);
+});
+
+test('first-time setup guides token creation, saves a connection privately and continues to discovery', async()=>{
+  const t=setup({state:'idle',message:'Begin setup',steps:[]}); await settle();
+  assert.equal(t.find('prepare').hidden,false);
+  assert.match(t.find('prepare').textContent,/System → Administrators → Create New → REST API Admin/);
+  assert.match(t.find('prepare').textContent,/Trusted Hosts/);
+  t.find('token-ready').click(); assert.equal(t.find('connection-panel').hidden,false);
+  t.find('connection-choice').value=''; t.find('connection-choice').dispatchEvent(new t.w.Event('change'));
+  for(const [field,value] of Object.entries({name:'Lab FortiGate',endpoint:'https://192.0.2.10',vdom:'root',token:'private-api-token'})) t.find('connection-'+field).value=value;
+  t.submit('connection'); await settle();
+  assert.equal(t.posts.length,1);
+  assert.equal(t.posts[0].url,'/connection');
+  assert.equal(t.posts[0].body.get('api_token'),'private-api-token');
+  assert.equal(t.find('connection-token').value,'');
+  assert.equal(t.find('discovery-panel').hidden,false);
+  assert.equal(t.find('appliance').value,appliance);
+  assert.match(t.find('status').textContent,/Connection saved/);
+  t.find('edit-connection').click(); assert.equal(t.find('connection-panel').hidden,false);
+  assert.match(t.find('token-help').textContent,/stored privately/);
+  assert.equal(t.find('connection-token').required,false);
+  t.find('token-back').click(); assert.equal(t.find('prepare').hidden,false);
+});
+
+test('successful provisioning guides forwarding verification for the selected appliance', async()=>{
+  const t=setup(planned()); await settle();
+  t.set({...discovery(),state:'completed',message:'Configuration verified.'});
+  await t.timers.pop()();
+  assert.equal(t.find('finish').hidden,false);
+  assert.match(t.find('finish').textContent,/Verify & select/);
+  assert.match(t.find('finish-appliance').href,new RegExp('edit='+appliance));
+  t.find('appliance').value='b'.repeat(32); t.find('appliance').dispatchEvent(new t.w.Event('change'));
+  await t.timers.pop()(); assert.equal(t.find('finish').hidden,true);
 });
 
 test('preview submits selected WAN topology and applies only a confirmed single-use plan', async()=>{
@@ -92,4 +128,61 @@ test('uncertain apply is not retried and polling reports partial changes', async
   await t.timers.pop()();
   assert.match(t.find('steps').textContent,/sending/); assert.equal(t.find('recovery').hidden,false);
   assert.equal(t.posts.length,1); t.client.stop();
+});
+
+// Exercise the actual Flask/base template and shared page loader. Loading fortinet.js
+// directly in setup() cannot catch scripts accidentally placed in inert templates.
+function renderedFortinetPage() {
+  const {execFileSync} = require('node:child_process');
+  return execFileSync('python', ['-c', `
+from flask import render_template
+from app import app
+app.config['NETEM_AUTH_REQUIRED'] = False
+with app.test_request_context('/integrations/fortinet'):
+    print(render_template('fortinet.html', page='integrations', appliances=[dict(id='${appliance}', name='Lab FortiGate', endpoint='https://192.0.2.10', vdom='root')], lab=dict(state='idle', message='Ready', appliance_id=None)))
+`], {encoding:'utf8', env:{...process.env, NETEM_AUTH_REQUIRED:'0'}});
+}
+
+test('rendered shell loads the FortiGate client before initial mount and remounts it after refresh', async()=>{
+  const html = renderedFortinetPage();
+  const dom = new JSDOM(html, {url:'https://netem.test/integrations/fortinet', runScripts:'outside-only'});
+  const w = dom.window; windows.push(w);
+  w.scrollTo=()=>{}; w.setTimeout=()=>1; w.setInterval=()=>1;
+  w.clearTimeout=()=>{}; w.clearInterval=()=>{};
+  let posts=0, reads=0;
+  w.fetch=async (url, options={})=>{
+    const path=new URL(url,w.location.href).pathname;
+    if (options.method==='POST') {
+      posts++;
+      assert.equal(path,'/integrations/fortinet/discover');
+      assert.equal(options.body.get('id'),appliance);
+      assert.ok(options.body.get('integration_csrf'));
+      return {ok:true,json:async()=>discovery()};
+    }
+    if(path==='/api/v1/integrations/fortinet') {
+      reads++;
+      return {ok:true,json:async()=>({state:'idle',message:'Ready',steps:[]})};
+    }
+    return {ok:true,url:String(url),text:async()=>html};
+  };
+  // Match browser parsing: template.content scripts are inert and aren't in this list.
+  for(const script of w.document.querySelectorAll('script')) {
+    const path=script.getAttribute('src');
+    if(path?.endsWith('/actions.js') || path?.endsWith('/fortinet.js')) {
+      w.eval(fs.readFileSync('static/'+path.split('/').pop(),'utf8'));
+    } else if(!path && script.textContent.trim()==='NetEmActions.mount();') {
+      w.eval(script.textContent);
+    }
+  }
+  await settle();
+  assert.equal(typeof w.NetEmFortinet?.mount,'function');
+  assert.equal(reads,1);
+  assert.match(w.document.querySelector('#fortinet-appliance').textContent,/VDOM: root/);
+  await w.NetEmActions.refresh(); await settle();
+  assert.equal(reads,2);
+  const form=w.document.querySelector('#fortinet-discover');
+  form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await settle();
+  assert.equal(posts,1);
+  assert.equal(w.document.querySelector('#fortinet-status').textContent,'Discovery complete.');
 });

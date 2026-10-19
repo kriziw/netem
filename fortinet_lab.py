@@ -19,7 +19,7 @@ from urllib.parse import quote, urlsplit
 
 from flask import abort, g, jsonify, render_template, request, session
 
-from appliance_inventory import APIError, FortiGateClient
+from appliance_inventory import APIError, FortiGateClient, validate
 
 TABLES = ('system/interface', 'system/sdwan', 'router/static', 'firewall/policy',
           'firewall/address', 'system/zone', 'system/switch-interface',
@@ -408,6 +408,8 @@ class Manager:
             result = copy.deepcopy(self.job)
             result['discovery'] = copy.deepcopy(self.snapshot['public']) if self.snapshot else None
             result['plan'] = self.public_plan(self.plan) if self.plan else None
+            if result.get('state') == 'completed' and result.get('appliance_id'):
+                result['applied_spec'] = self.store.state('fortinet_lab_owned:' + result['appliance_id']).get('spec')
             return result
 
     @staticmethod
@@ -570,7 +572,7 @@ class Manager:
 def init_app(app, netem):
     manager = Manager(netem)
     app.extensions['fortinet_lab'] = manager
-    mutations = {'fortinet_discover', 'fortinet_preview', 'fortinet_apply'}
+    mutations = {'fortinet_connection', 'fortinet_discover', 'fortinet_preview', 'fortinet_apply'}
     guarded = mutations | {'session_start', 'lab_scenario_start', 'site_run', 'traffic_generator_start', 'lab_capture_start',
                           'storage_compact', 'inventory_save', 'inventory_archive', 'inventory_select', 'inventory_import',
                           'traffic_path_save', 'traffic_path_select', 'traffic_path_remove', 'platform_self_test', 'platform_calibrate',
@@ -601,7 +603,40 @@ def init_app(app, netem):
     @app.get('/integrations/fortinet')
     def fortinet_settings():
         rows = [r for r in manager.store.rows() if r['vendor'] == 'fortinet']
+        rows = [dict(r, has_token=bool(manager.store.token(r['id']))) for r in rows]
         return render_template('fortinet.html', page='integrations', appliances=rows, lab=manager.status())
+
+    @app.post('/integrations/fortinet/connection')
+    def fortinet_connection():
+        try:
+            manager.idle()
+            appliance_id = request.form.get('id') or None
+            old = manager.store.get(appliance_id) if appliance_id else None
+            if appliance_id and (not old or old['vendor'] != 'fortinet'):
+                raise ValueError('Choose a Fortinet appliance or create a new connection.')
+            token = request.form.get('api_token', '').strip()
+            values = dict(old or {}, **{k: request.form.get(k, '') for k in
+                          ('name', 'endpoint', 'vdom', 'fingerprint', 'self_signed')}, vendor='fortinet')
+            values['kind'] = request.form.get('kind') or (old or {}).get('kind', 'vm')
+            if not old:
+                values.update(required_licenses='vm')
+            else:
+                values['required_licenses'] = ' '.join(old.get('required_licenses', []))
+            definition = validate(values, netem.SDWAN_VENDORS)
+            if old and old.get('simulator_id'):
+                definition['simulator_id'] = old['simulator_id']
+            if not token and (not old or old['endpoint'] != definition['endpoint'] or not manager.store.token(appliance_id)):
+                raise ValueError('Paste the FortiGate REST API token. A new API address requires a new token.')
+            saved = manager.store.save(definition, appliance_id, token=token or None)
+            with manager.lock:
+                manager.snapshot = manager.plan = None
+                manager.set_job(state='idle', appliance_id=saved, steps=[], started_at=None, finished_at=None,
+                                message='Connection saved. Discover the appliance to verify certificate trust, token and permissions.')
+            netem.log_event('fortinet-connection', 'FortiGate API connection saved', appliance_id=saved)
+            return jsonify(saved=True, appliance_id=saved, name=definition['name'], endpoint=definition['endpoint'],
+                           vdom=definition['vdom'], fingerprint=definition['fingerprint'], self_signed=definition['self_signed'])
+        except (ValueError, RuntimeError) as exc:
+            return jsonify(error=str(exc)), 409
 
     @app.get('/api/v1/integrations/fortinet')
     def fortinet_status():
