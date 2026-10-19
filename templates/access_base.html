@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en" data-brand-revision="{{ branding_revision }}">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}Sign in{% endblock %} · {{ branding.name }}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  {% if branding_enabled %}
+  {% for font in branding.fonts %}<link rel="preload" as="font" href="{{ branding_asset_url(font.file) }}" crossorigin>{% endfor %}
+  <link data-brand-theme rel="stylesheet" href="{{ url_for('branding_stylesheet', brand=branding_revision) }}">
+  {% if branding.favicon %}<link data-brand-icon rel="icon" href="{{ branding_asset_url(branding.favicon) }}">{% endif %}
+  {% endif %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='access.css') }}">
+</head>
+<body class="access-body">
+<input class="access-motion-toggle" type="checkbox" id="access-pause-motion" aria-label="Pause background animation">
+<div class="access-backdrop" aria-hidden="true">
+  <div class="access-glow access-glow-one"></div><div class="access-glow access-glow-two"></div>
+  <svg class="access-network" viewBox="0 0 1440 1000" preserveAspectRatio="xMidYMid slice" focusable="false">
+    <g class="access-network-lines"><path d="M-80 250H260Q340 250 340 330V610Q340 690 420 690H650"/><path d="M1500 170H1130Q1050 170 1050 250V460Q1050 540 970 540H810"/><path d="M-60 850H170Q250 850 250 770V740Q250 660 330 660H480"/><path d="M1510 830H1190Q1110 830 1110 750V720Q1110 640 1030 640H970"/><path d="M490-60V100Q490 180 570 180H870Q950 180 950 260V340"/></g>
+    <g class="access-network-flow"><path d="M-80 250H260Q340 250 340 330V610Q340 690 420 690H650"/><path d="M1500 170H1130Q1050 170 1050 250V460Q1050 540 970 540H810"/><path d="M1510 830H1190Q1110 830 1110 750V720Q1110 640 1030 640H970"/></g>
+    <g class="access-network-nodes"><circle cx="260" cy="250" r="5"/><circle cx="340" cy="610" r="5"/><circle cx="1130" cy="170" r="5"/><circle cx="1050" cy="460" r="5"/><circle cx="1190" cy="830" r="5"/><circle cx="490" cy="100" r="5"/></g>
+  </svg>
+</div>
+<main class="access-shell">
+  <header class="access-brand">
+    <img data-brand-logo class="access-logo" {% if branding.logo %}src="{{ branding_asset_url(branding.logo) }}"{% else %}hidden{% endif %} alt="{{ branding.name }}">
+    <div data-brand-mark class="access-mark" {% if branding.logo %}hidden{% endif %}>{{ branding.mark }}</div>
+    <div class="access-brand-copy"><div data-brand-name class="access-brand-name">{{ branding.name }}</div><p data-brand-subtitle class="access-brand-subtitle">{{ branding.subtitle }}</p></div>
+  </header>
+  <section class="access-card" aria-labelledby="access-title">
+    <div class="access-card-accent" aria-hidden="true"></div>
+    <div class="access-card-content">{% block content %}{% endblock %}</div>
+  </section>
+  <p class="access-footnote">Your lab. Your network. Your next insight.</p>
+</main>
+<label class="access-motion-control" for="access-pause-motion"><span class="access-motion-symbol" aria-hidden="true"></span><span data-motion-pause>Pause motion</span><span data-motion-resume>Resume motion</span></label>
+<script src="{{ url_for('static', filename='branding-live.js') }}"></script>
+</body>
+</html>

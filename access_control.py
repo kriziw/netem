@@ -35,7 +35,8 @@ ADMIN_READS = {'integrations', 'settings', 'setup', 'updates', 'update_component
     'branding_settings', 'branding_preview', 'branding_export', 'traffic_settings', 'traffic_settings_data',
     'simulator_controller', 'access_settings', 'storage_settings', 'storage_status',
     'fortinet_settings', 'fortinet_status', 'fortinet_recovery', 'inventory_remove_confirmation'}
-PUBLIC = {'static', 'access_login', 'access_oidc_login', 'access_oidc_callback', 'access_bootstrap'}
+PUBLIC_PRESENTATION = {'static', 'branding_asset', 'branding_stylesheet', 'branding_status'}
+PUBLIC = PUBLIC_PRESENTATION | {'access_login', 'access_oidc_login', 'access_oidc_callback', 'access_bootstrap'}
 
 
 def required_role(endpoint, method='GET'):
@@ -250,7 +251,7 @@ def init_app(app, store):
             if (request.endpoint or '').startswith('access_') and request.endpoint != 'access_settings':
                 abort(403, 'Provision a local administrator on the server first.')
             return
-        if request.endpoint == 'static' or request.endpoint is None:
+        if request.endpoint in PUBLIC_PRESENTATION or request.endpoint is None:
             return
         if not store.enabled() and request.endpoint != 'access_bootstrap':
             if request.path.startswith('/api/') or request.method not in ('GET', 'HEAD'):
