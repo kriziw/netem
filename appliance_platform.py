@@ -331,6 +331,8 @@ def init_app(app, netem):
             try:
                 platform.preflight(request.form)
             except (ValueError, RuntimeError) as exc:
+                if netem.scenario_start_wants_json():
+                    return netem.scenario_start_refused(str(exc), 503 if isinstance(exc, RuntimeError) else 409)
                 flash(str(exc), "error")
                 return redirect(url_for("tests"))
         return None

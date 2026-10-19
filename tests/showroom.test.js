@@ -671,3 +671,39 @@ test('an unsaved active test is live without a session and returns to waiting af
   assert.equal(ui.stageMode(data), 'live');
   assert.equal(ui.stageMode({...data, scenario: {active: false}}), 'waiting');
 });
+
+test('standalone scenario renders measurements and automatically returns to the default waiting screen', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window, doc = win.document;
+  let poll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) poll = fn; return 1; };
+  win.clearTimeout = () => {};
+  win.setInterval = () => 1;
+  const snapshot = {timestamp: 100, session: {active: false},
+    scenario: {active: true, unsaved: true, started_at: 90, scenario_name: 'Progressive brownout',
+      phase: 'Degradation', phase_index: 1, phases: [{name: 'Baseline'}, {name: 'Degradation'}, {name: 'Recovery'}]},
+    links: [{id: 'wan1', name: 'WAN 1', profile: 'DIA', fault: 'normal', sla_pass: false,
+      quality: 40, down_mbps: 12.5, up_mbps: 1.5, traffic_available: true,
+      delay_ms: 80, jitter_ms: 10, loss_pct: 5}],
+    experience: {available: false, targets: {}}, traffic: {}, findings: [], steering: [], plan: {}, last_test: null};
+  win.fetch = async () => ({ok: true, json: async () => snapshot});
+  try {
+    win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
+    win.eval(source);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(doc.body.dataset.mode, 'live');
+    assert.equal(doc.getElementById('waiting').hidden, true);
+    assert.equal(doc.getElementById('session-name').textContent, 'Test mode · not saved');
+    assert.equal(doc.querySelector('[data-field="down"]').textContent, '13');
+    snapshot.timestamp = 102;
+    snapshot.scenario = {active: false};
+    snapshot.links = [];
+    snapshot.plan_summary = null;
+    await poll();
+    assert.equal(doc.body.dataset.mode, 'waiting');
+    assert.equal(doc.getElementById('waiting').hidden, false);
+    assert.equal(doc.getElementById('waiting-title').textContent, 'Waiting for the session to start');
+    assert.equal(doc.getElementById('report').hidden, true);
+    assert.equal(doc.getElementById('intro').hidden, true);
+  } finally { win.close(); }
+});

@@ -144,3 +144,61 @@ test('a start without a lab session offers a session or acknowledges the warning
   assert.equal(dialog.open, false);
   assert.equal(w.document.querySelector('#running-test').textContent, 'Brownout running');
 });
+
+test('Flask CSRF and permission rejections expose their explanation and HTTP status', async () => {
+  for (const [code, reason] of [[400, 'Invalid form token. Reload the page and retry.'], [403, 'Your role does not permit this action.']]) {
+    const {w, dialog} = setup();
+    w.fetch = async (url, options = {}) => options.method === 'POST'
+      ? {ok: false, status: code, text: async () => `<html><body><h1>Request refused</h1><p>${reason}</p></body></html>`}
+      : {ok: true, text: async () => configuration};
+    w.document.querySelector('[data-scenario-modal]').click(); await settle();
+    dialog.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+    assert.equal(dialog.open, true);
+    assert.equal(dialog.querySelector('[data-scenario-feedback]').textContent, `${reason} (HTTP ${code})`);
+  }
+});
+
+test('JSON preflight refusals preserve the WAN and show the actual direct-path reason', async () => {
+  const {w, dialog} = setup();
+  w.fetch = async (url, options = {}) => options.method === 'POST'
+    ? {ok: false, status: 409, text: async () => JSON.stringify({error: 'Run the scenario on the WAN assigned to this direct NetEm path.'})}
+    : {ok: true, text: async () => configuration};
+  w.document.querySelector('[data-scenario-modal]').click(); await settle();
+  dialog.querySelector('select').value = 'wan2';
+  dialog.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+  assert.equal(dialog.querySelector('select').value, 'wan2');
+  assert.match(dialog.querySelector('[data-scenario-feedback]').textContent, /WAN assigned.*HTTP 409/);
+});
+
+test('JSON start acceptance confirms immediately without requiring a dashboard in the POST response', async () => {
+  const {w, dialog} = setup(); let posts = 0;
+  w.fetch = async (url, options = {}) => {
+    if (options.method === 'POST') {
+      posts++;
+      assert.equal(options.headers.Accept, 'application/json');
+      return {ok: true, status: 202, text: async () => JSON.stringify({accepted: true, scenario_id: 'progressive_brownout', message: 'Started scenario'})};
+    }
+    return {ok: true, text: async () => String(url).includes('/tests/scenario/') ? configuration : page(true)};
+  };
+  w.document.querySelector('[data-scenario-modal]').click(); await settle();
+  dialog.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+  assert.equal(posts, 1);
+  assert.equal(dialog.open, false);
+  assert.ok(w.document.querySelector('#running-test'));
+});
+
+test('authentication expiry and proxy errors are distinguishable and never retry POST', async () => {
+  for (const [code, body, expected] of [[401, '{"error":"Authentication required"}', /Sign in to NetEm.*HTTP 401/],
+    [502, '<h1>Bad Gateway</h1>', /HTTP 502.*start may have applied/]]) {
+    const {w, dialog} = setup(); let posts = 0;
+    w.fetch = async (url, options = {}) => {
+      if (options.method === 'POST') { posts++; return {ok: false, status: code, text: async () => body}; }
+      return {ok: true, text: async () => configuration};
+    };
+    w.document.querySelector('[data-scenario-modal]').click(); await settle();
+    dialog.querySelector('form').dispatchEvent(new w.Event('submit', {bubbles: true, cancelable: true})); await settle();
+    assert.equal(posts, 1);
+    assert.equal(dialog.open, true);
+    assert.match(dialog.querySelector('[data-scenario-feedback]').textContent, expected);
+  }
+});

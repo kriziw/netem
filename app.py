@@ -8749,6 +8749,18 @@ def site_stop():
     return redirect_after("tests")
 
 
+def scenario_start_wants_json():
+    return (request.endpoint == "lab_scenario_start"
+            and request.accept_mimetypes.best == "application/json")
+
+
+def scenario_start_refused(message, status=400):
+    if scenario_start_wants_json():
+        return jsonify(error=message), status
+    flash(message, "error")
+    return redirect_after("scenarios")
+
+
 @app.route("/lab/scenario/start", methods=["POST"])
 def lab_scenario_start():
     link_id = request.form.get("link_id") or ""
@@ -8760,17 +8772,14 @@ def lab_scenario_start():
     )
 
     if not get_link(cfg, link_id):
-        flash("Unknown WAN link.", "error")
-        return redirect_after("scenarios")
+        return scenario_start_refused("Unknown WAN link.")
     if not scenario:
-        flash("Unknown scenario.", "error")
-        return redirect_after("scenarios")
+        return scenario_start_refused("Unknown scenario.")
     try:
         length_s = requested_length_s(request.form.get("length_min"))
         live_window_seconds = requested_live_window(request.form.get("live_window_seconds"))
     except ValueError as exc:
-        flash(str(exc), "error")
-        return redirect_after("scenarios")
+        return scenario_start_refused(str(exc))
     if length_s:
         scenario = dict(scenario, steps=scale_scenario_steps(scenario["steps"], length_s))
     scenario = dict(scenario, auto_workload=True, controller_managed=True, live_window_seconds=live_window_seconds)
@@ -8783,8 +8792,7 @@ def lab_scenario_start():
                                link_name=get_link(cfg, link_id).get("name") or link_id), 409
     with RUNTIME_LOCK:
         if SCENARIO_STATE["active"] or SITE_PLAN_STATE["active"]:
-            flash("A scenario is already running.", "error")
-            return redirect_after("scenarios")
+            return scenario_start_refused("A scenario is already running.", 409)
         unsaved = not ACTIVE_SESSION.get('active')
         SCENARIO_STOP.clear()
         if unsaved:
@@ -8817,7 +8825,10 @@ def lab_scenario_start():
         args=(link_id, scenario, TEST_INTRO_S),
         daemon=True,
     ).start()
-    flash(f'Started scenario "{scenario["name"]}" on {link_id}.', "success")
+    message = f'Started scenario "{scenario["name"]}" on {link_id}.'
+    if scenario_start_wants_json():
+        return jsonify(accepted=True, scenario_id=scenario_id, message=message), 202
+    flash(message, "success")
     return redirect_after("scenarios")
 
 
