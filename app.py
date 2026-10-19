@@ -37,6 +37,7 @@ import calibration_log
 import calibration_trace
 import host_health
 import storage_admin
+import fortinet_lab
 import platform_test
 import test_records
 import site_catalog
@@ -10552,6 +10553,7 @@ def showroom_story(diagnosis, links, outcome, now=None):
 ACCESS_STORE = access_control.init_app(app, access_control.AccessStore(RUNTIME_DIR / "access.sqlite3"))
 APPLIANCE_PLATFORM = appliance_platform.init_app(app, sys.modules[__name__])
 STORAGE_ADMIN = storage_admin.init_app(app, sys.modules[__name__])
+FORTINET_LAB = fortinet_lab.init_app(app, sys.modules[__name__])
 showroom_app = create_showroom_app(showroom_snapshot, BRAND_STORE, showcase_video_file)
 
 

@@ -245,6 +245,13 @@ class FortiGateClient:
     def get(self, path):
         if path not in self.PATHS:
             raise ValueError("Unsupported read-only FortiGate endpoint.")
+        result = self._request("GET", "/api/v2/monitor/" + path)
+        if not isinstance(result.get("results"), dict):
+            raise APIError("api_error", "Vendor API did not return a successful monitor object.")
+        return result
+
+    def _request(self, method, path, payload=None):
+        """Shared bounded transport; concrete clients restrict the endpoint allowlist."""
         parsed = urlsplit(self.row["endpoint"])
         context = ssl._create_unverified_context() if self.row["self_signed"] else ssl.create_default_context()
         conn = http.client.HTTPSConnection(parsed.hostname, parsed.port or 443, timeout=4, context=context)
@@ -253,21 +260,25 @@ class FortiGateClient:
             pin = hashlib.sha256(conn.sock.getpeercert(binary_form=True)).hexdigest()
             if self.row["fingerprint"] and not hmac.compare_digest(self.row["fingerprint"], pin):
                 raise APIError("tls_error", "Certificate fingerprint changed. Verify certificate trust before reconnecting.")
-            conn.request("GET", "/api/v2/monitor/" + path + "?" + urlencode({"vdom": self.row["vdom"]}),
-                         headers={"Authorization": "Bearer " + self.token, "Accept": "application/json"})
+            conn.request(method, path + "?" + urlencode({"vdom": self.row["vdom"]}),
+                         body=json.dumps(payload).encode() if payload is not None else None,
+                         headers={"Authorization": "Bearer " + self.token, "Accept": "application/json",
+                                  "Content-Type": "application/json"})
             response = conn.getresponse()
             if response.status in (401, 403):
-                raise APIError("auth_error", "API access denied. Check the read-only token, trusted hosts and permissions.")
+                raise APIError("auth_error", "API access denied. Check the token, trusted hosts and permissions.")
             if response.status in (404, 405):
-                raise APIError("unsupported", "This monitor endpoint is unsupported on the appliance.")
-            if response.status != 200:
+                raise APIError("unsupported", "This API endpoint is unsupported on the appliance.")
+            if response.status not in (200, 201):
                 raise APIError("api_error", f"Vendor API returned HTTP {response.status}.")
             raw = response.read(1024 * 1024 + 1)
             if len(raw) > 1024 * 1024:
                 raise APIError("api_error", "Vendor response exceeds the size limit.")
             result = json.loads(raw)
-            if not isinstance(result, dict) or result.get("status") != "success" or not isinstance(result.get("results"), dict):
-                raise APIError("api_error", "Vendor API did not return a successful monitor object.")
+            if not isinstance(result, dict) or result.get("status") != "success":
+                code = result.get("error") if isinstance(result, dict) else None
+                suffix = f" (FortiOS error {code})" if isinstance(code, int) else ""
+                raise APIError("api_error", "Vendor API rejected the request" + suffix + ".")
             return result
         except ssl.SSLError as exc:
             raise APIError("tls_error", "TLS verification failed. Check certificate trust.") from exc

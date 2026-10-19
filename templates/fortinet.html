@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}FortiGate lab setup · {{ branding.name }}{% endblock %}
+{% block crumb %}FortiGate lab setup{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Integrations · Fortinet</div><h1>FortiGate lab setup</h1><p class="page-description">Discover the appliance, confirm its lab topology, then review and apply a configuration for one to three WAN links.</p></div><div class="page-actions"><a class="btn" href="{{ url_for('inventory') }}#appliance-editor">Manage appliances &amp; API token</a></div></div>
+<div id="fortinet-lab" data-status-url="{{ url_for('fortinet_status') }}" data-discover-url="{{ url_for('fortinet_discover') }}" data-preview-url="{{ url_for('fortinet_preview') }}" data-apply-url="{{ url_for('fortinet_apply') }}">
+<section class="card"><div class="card-head"><div class="card-title">1. Connect &amp; discover</div><span class="status good">FortiOS 7.2 / 7.4 / 7.6</span></div><div class="card-pad">
+<p>Use a dedicated management port and a REST API administrator restricted to NetEm's management IP. Grant read access for discovery and network, routing and firewall write access for provisioning. A monitoring-only token can discover but cannot apply configuration.</p>
+<p class="field-help">HTTPS certificate validation is required. For a self-signed certificate, save its independently verified SHA-256 fingerprint in Appliances. Tokens are stored privately and are never sent to this page.</p>
+<form data-native-submit id="fortinet-discover"><input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><label for="fortinet-appliance">Fortinet appliance</label><select id="fortinet-appliance" name="id" required>{% for row in appliances %}<option value="{{ row.id }}" {% if row.id == lab.appliance_id %}selected{% endif %}>{{ row.name }} · {{ row.endpoint or 'API address missing' }} · {{ row.vdom }}</option>{% endfor %}</select><div class="actions" style="margin-top:12px"><button class="btn btn-primary" type="submit" {% if not appliances %}disabled{% endif %}>Discover appliance</button></div></form>
+{% if not appliances %}<p class="docs-warning">Add a Fortinet appliance with its HTTPS API address and token in Appliances first.</p>{% endif %}
+<p role="status" aria-live="polite" id="fortinet-status">{{ lab.message }}</p><div id="fortinet-steps"></div><a class="btn" id="fortinet-recovery" hidden>Download last recovery record</a>
+<details><summary>What discovery reads</summary><p>Device identity, VDOM interfaces and addresses, static routes, firewall policies and address objects, SD-WAN zones and members, switch membership, DHCP servers, policy routes and central NAT mode. Suggested choices use interface roles and existing gateways; confirm them against the actual cabling.</p></details>
+</div></section>
+<section class="card" id="fortinet-topology" hidden style="margin-top:18px"><div class="card-head"><div class="card-title">2. Confirm discovered topology</div></div><div class="card-pad">
+<p id="fortinet-identity"></p><div id="fortinet-discovery-summary" class="field-help"></div>
+<details><summary>Discovered interfaces &amp; gateways</summary><div class="table-wrap"><table><thead><tr><th>Interface</th><th>Type / role</th><th>IPv4 address</th><th>Gateway</th><th>SD-WAN member</th></tr></thead><tbody id="fortinet-interfaces"></tbody></table></div></details>
+<details><summary>Existing routes, SD-WAN members &amp; firewall policies</summary><pre id="fortinet-existing"></pre></details>
+<form data-native-submit id="fortinet-configure"><div class="form-grid" style="margin-top:16px">
+<div><label for="fortinet-management">Management interface (protected)</label><select id="fortinet-management" required></select><p class="field-help">Management stays on this dedicated port. Confirm manually if the API hostname uses DNS, NAT or a secondary address.</p></div>
+<div><label for="fortinet-wan-count">WAN links</label><select id="fortinet-wan-count"><option value="1">1 WAN</option><option value="2" selected>2 WANs</option><option value="3">3 WANs</option></select></div>
+<div><label for="fortinet-lan">LAN interface</label><select id="fortinet-lan" required></select></div><div><label for="fortinet-lan-address">LAN address / prefix</label><input id="fortinet-lan-address" placeholder="10.250.10.1/24" required></div>
+</div><div id="fortinet-wans"></div><div class="form-grid" style="margin-top:16px">
+<div><label for="fortinet-destination">Routed lab destination subnet</label><input id="fortinet-destination" placeholder="198.18.0.0/15" required><p class="field-help">Use the controlled target subnet beyond all WAN gateways. Only this subnet gets a route and an allow policy.</p></div>
+<div><label for="fortinet-health">ICMP health-check server</label><input id="fortinet-health" placeholder="198.18.0.1" required></div>
+<div><label for="fortinet-nat">Source NAT</label><select id="fortinet-nat"><option value="enable">Enable · use WAN interface address</option><option value="disable">Disable · upstream has LAN return routes</option></select></div>
+</div><p class="field-help">WAN order sets preference: WAN 1, then WAN 2, then WAN 3. SLA thresholds: latency 150 ms, jitter 30 ms, loss 2%. Independent physical/VM ports and static IPv4 addressing are supported. Switch members, VRFs, secondary addresses and central NAT need manual preparation.</p>
+<p class="field-help">NetEm configures existing FortiGate ports. Cable each WAN through its NetEm impairment bridge. This wizard does not create Proxmox NICs, NetEm bridges or upstream router configuration.</p>
+<button class="btn btn-primary" type="submit">Preview configuration</button></form></div></section>
+<section class="card" id="fortinet-review" hidden style="margin-top:18px"><div class="card-head"><div class="card-title">3. Review &amp; apply</div></div><div class="card-pad"><ul id="fortinet-warnings"></ul><p id="fortinet-plan-summary"></p><div id="fortinet-plan"></div>
+<form data-native-submit id="fortinet-apply"><label class="checkbox-row"><input type="checkbox" id="fortinet-confirm" required>I have reviewed these changes, backed up the FortiGate and have console access. Apply this plan to the selected appliance.</label><button class="btn btn-primary" type="submit" style="margin-top:12px">Apply reviewed configuration</button></form><p class="field-help">Approval expires after 15 minutes and can be used once. NetEm rechecks configuration before writing and verifies it afterwards. Changes are sequential; failures can leave partial configuration. Download the recovery record to inspect exactly what was attempted. Forwarding is verified separately through Appliances → Verify &amp; select.</p></div></section>
+</div>
+{% endblock %}
+{% block scripts %}<script src="{{ url_for('static', filename='fortinet.js') }}"></script><script>window.NetEmActions.trackClient(window.NetEmFortinet.mount());</script>{% endblock %}

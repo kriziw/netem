@@ -1,5 +1,5 @@
 <h2 id="principle">Vendor-neutral integration model</h2>
-<p>The core API describes injected state, measured traffic, active measurements, session context and events without depending on any SD-WAN vendor. Future vendor adapters add an observed-state layer rather than changing the impairment engine.</p>
+<p>The core API describes injected state, measured traffic, active measurements, session context and events without depending on any SD-WAN vendor. Optional vendor adapters add monitoring and provisioning without changing the impairment engine.</p>
 
 <h2 id="state-api">GET /api/v1/state</h2>
 <p>Returns application version, WAN definitions/effective impairment, expected SLA, scenario state, active Lab Session, packet capture and configured probes with their latest results.</p>
@@ -26,8 +26,10 @@
 <h2 id="prometheus">GET /metrics</h2>
 <p>Prometheus remains an optional external export surface and is not required for the internal SQLite telemetry/history functions.</p>
 
-<h2 id="vendor-adapters">Future vendor adapter contract</h2>
-<p>The next integration milestone is a normalized adapter output containing member health, observed latency/jitter/loss, SLA state, selected path and transition timestamps. Fortinet is the recommended first adapter, followed by Cisco, Palo Alto, Juniper, VMware/VeloCloud and Versa.</p>
+<h2 id="vendor-adapters">Fortinet adapter</h2>
+<p>FortiGate API/token connection, health and license monitoring, and guided lab provisioning are available. Administrators can <a href="{{ url_for('fortinet_settings') }}">discover and set up a FortiGate lab</a> with one, two or three WAN links, review the interface, SD-WAN, route and firewall policy changes, then explicitly apply them. Existing configuration conflicts are reported before applying; unrelated configuration is preserved.</p>
+<p>Use Appliances to save credentials and certificate trust, then discover the device. The wizard suggests ports, addresses and gateways and asks you to confirm missing or ambiguous values. After provisioning, verify the traffic path in Appliances. Configuration read-back does not establish that traffic can reach the target.</p>
+<p>Fortinet SLA telemetry, selected-path event correlation and the Cisco, Palo Alto, Juniper, VMware/VeloCloud and Versa adapters remain planned.</p>
 <div class="docs-flow">NetEm injected state ─┐
 Active measurements ──┼─→ Session / Analytics correlation
 Vendor adapter state ─┘</div>
