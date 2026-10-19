@@ -226,6 +226,7 @@ def stylesheet(brand, revision=None):
         channels = ", ".join(str(int(value[index:index + 2], 16)) for index in (1, 3, 5))
         declarations.append(f"--{key}-soft:rgba({channels},.12)")
     declarations.append(f'--font-family:"{brand["font_family"]}",Arial,sans-serif')
+    declarations.append(f'--heading-font-family:"{brand.get("heading_font_family", brand["font_family"])}",Arial,sans-serif')
     rules = [":root{" + ";".join(declarations) + "}"]
     for font in brand["fonts"]:
         source = asset_url(font["file"], revision)
