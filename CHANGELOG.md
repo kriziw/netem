@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.4.4](https://github.com/kriziw/netem/compare/v1.4.3...v1.4.4) (2026-10-19)
+
+
+### Bug Fixes
+
+* preserve scenario startup errors and confirm unsaved showcase behavior ([#157](https://github.com/kriziw/netem/issues/157)) ([b30b7f4](https://github.com/kriziw/netem/commit/b30b7f437239170fa5480de375f85e0f3f62be60))
+
 ## [1.4.3](https://github.com/kriziw/netem/compare/v1.4.2...v1.4.3) (2026-10-16)
 
 
