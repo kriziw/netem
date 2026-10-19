@@ -105,6 +105,15 @@ class Platform:
     def selected(self):
         return self.store.get(self.store.state("selection").get("id"))
 
+    def removal_blocker(self, appliance_id):
+        if appliance_id == self.store.state("pending").get("appliance_id"):
+            return "Wait for the pending appliance switch to finish before removing this device."
+        if appliance_id == self.store.state("selection").get("id"):
+            return "This appliance is selected for traffic. Verify and select another appliance or a direct path in Platform Health before removing it."
+        if not self.netem.STORAGE_ADMIN.idle():
+            return "Finish the active session, test, plan or capture before removing an appliance."
+        return None
+
     def ensure_idle(self):
         if self.netem.scenario_snapshot().get("active") or self.netem.site_plan_snapshot().get("active"):
             raise ValueError("Finish the running test or plan before changing appliances.")
@@ -359,6 +368,14 @@ def init_app(app, netem):
         return render_template("appliances.html", page="inventory", inventory=snapshot, edit=edit, detail=detail,
                                history=platform.store.history(detail["id"]) if detail else [], vendors=netem.SDWAN_VENDORS)
 
+    @app.get("/appliances/<appliance_id>/remove", endpoint="inventory_remove_confirmation")
+    def inventory_remove_confirmation(appliance_id):
+        row = platform.store.get(appliance_id)
+        if not row:
+            abort(404)
+        return render_template("appliance_remove.html", page="inventory", appliance=row,
+                               blocker=platform.removal_blocker(appliance_id))
+
     @app.get("/platform-health", endpoint="platform_health")
     def platform_health():
         return render_template("platform_health.html", page="platform_health", inventory=platform.snapshot(),
@@ -452,11 +469,14 @@ def init_app(app, netem):
             row = platform.store.get(request.form.get("id"))
             if not row:
                 raise ValueError("Appliance no longer exists.")
-            if row["id"] in (platform.store.state("selection").get("id"), platform.store.state("pending").get("appliance_id")):
-                raise ValueError("Select another appliance before archiving the active or pending appliance.")
+            if request.form.get("confirmation") != row["name"]:
+                raise ValueError("Type the exact appliance name on the removal confirmation page before removing it.")
+            blocker = platform.removal_blocker(row["id"])
+            if blocker:
+                raise ValueError(blocker)
             platform.store.archive(row["id"])
             netem.log_event("appliance-inventory", "Appliance archived; history retained", appliance_id=row["id"])
-            return "Appliance archived. Observations retained; its stored credential was removed."
+            return "Appliance removed from inventory and its saved API token deleted. Test history and observations were retained; device configuration was not changed."
         return result(archive)
 
     @app.post("/appliances/check", endpoint="inventory_check")

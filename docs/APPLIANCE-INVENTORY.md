@@ -111,3 +111,11 @@ Read-only APIs: `GET /api/v1/appliances` and
 For physical devices, management address and traffic gateway remain separate.
 Additional ISP-router configuration requires a topology decision and is not
 inferred from inventory.
+
+## Remove an appliance from inventory
+
+Administrators can choose **Remove** in the device list, or **Inspect → Remove from inventory**. The confirmation page identifies the device, describes the effect and requires its exact name before the removal POST is accepted. Opening/cancelling the page does not remove anything. Other roles cannot view the confirmation page or remove devices, and CSRF protection applies.
+
+Removal archives the local inventory record, stops its monitoring and deletes the saved API token from NetEm. Historical observations, test/session reports and FortiGate provisioning/recovery records remain. It does not reset the appliance, undo its configuration, revoke the token on FortiGate or delete its saved definition in the Traffic Simulator. Explicit simulator import or manually adding the device can create a new inventory entry; enter its API token again.
+
+A selected appliance cannot be removed, even when its last selection is unverified. First verify/select another appliance or a direct traffic path through **Platform Health**. A pending switch involving the device, active session/test/plan/capture, or in-progress FortiGate operation also blocks removal. The server rechecks these conditions when the confirmed request arrives. Removing an unused appliance is a local operation and does not require contacting an unreachable device or simulator.

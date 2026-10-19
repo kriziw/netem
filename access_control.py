@@ -34,7 +34,7 @@ OPERATOR_CONTROLS = {'quick_wan_action', 'lab_fault', 'lab_mtu', 'lab_sla', 'cle
 ADMIN_READS = {'integrations', 'settings', 'setup', 'updates', 'update_components', 'updates_status',
     'branding_settings', 'branding_preview', 'branding_export', 'traffic_settings', 'traffic_settings_data',
     'simulator_controller', 'access_settings', 'storage_settings', 'storage_status',
-    'fortinet_settings', 'fortinet_status', 'fortinet_recovery'}
+    'fortinet_settings', 'fortinet_status', 'fortinet_recovery', 'inventory_remove_confirmation'}
 PUBLIC = {'static', 'access_login', 'access_oidc_login', 'access_oidc_callback', 'access_bootstrap'}
 
 

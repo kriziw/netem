@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Remove appliance · {{ branding.name }}{% endblock %}
+{% block crumb %}Remove appliance{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Administration · Appliances</div><h1>Remove from inventory</h1><p class="page-description">Review the effect before removing this device from NetEm.</p></div></div>
+<section class="card"><div class="card-head"><div><div class="card-title">{{ appliance.name }}</div><div class="card-sub">{{ appliance.endpoint or 'Management API not configured' }} · {{ appliance.vendor }} · VDOM {{ appliance.vdom }}</div></div></div><div class="card-pad">
+<p>Removing this appliance will:</p><ul><li>Remove it from the active inventory and stop its vendor monitoring.</li><li>Delete its saved API token from NetEm.</li><li>Retain historical observations, test/session reports and provisioning recovery records.</li></ul>
+<p>This archives the inventory record. It does not reset or erase the physical/virtual appliance, undo its lab configuration, revoke the API token on the device, or delete the Traffic Simulator's saved appliance. Explicitly importing from the simulator can add it again; a new API token entry will be needed.</p>
+{% if blocker %}<p class="docs-warning" role="alert">{{ blocker }}</p><a class="btn" href="{{ url_for('platform_health') }}">Platform Health · select a different path</a>{% else %}
+<form method="post" action="{{ url_for('inventory_archive') }}">
+<input type="hidden" name="integration_csrf" value="{{ integration_csrf }}"><input type="hidden" name="id" value="{{ appliance.id }}">
+<label for="remove-confirmation">Type the exact appliance name to confirm: <strong>{{ appliance.name }}</strong></label><input id="remove-confirmation" name="confirmation" required autocomplete="off" spellcheck="false">
+<div class="actions" style="margin-top:16px"><a class="btn" href="{{ url_for('inventory') }}">Cancel · keep appliance</a><button class="btn btn-danger" type="submit">Remove from inventory &amp; delete saved token</button></div>
+</form>{% endif %}
+{% if blocker %}<p><a class="btn" href="{{ url_for('inventory') }}">Back to appliances</a></p>{% endif %}
+</div></section>
+{% endblock %}
