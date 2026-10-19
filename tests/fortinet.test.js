@@ -93,3 +93,60 @@ test('uncertain apply is not retried and polling reports partial changes', async
   assert.match(t.find('steps').textContent,/sending/); assert.equal(t.find('recovery').hidden,false);
   assert.equal(t.posts.length,1); t.client.stop();
 });
+
+// Exercise the actual Flask/base template and shared page loader. Loading fortinet.js
+// directly in setup() cannot catch scripts accidentally placed in inert templates.
+function renderedFortinetPage() {
+  const {execFileSync} = require('node:child_process');
+  return execFileSync('python', ['-c', `
+from flask import render_template
+from app import app
+app.config['NETEM_AUTH_REQUIRED'] = False
+with app.test_request_context('/integrations/fortinet'):
+    print(render_template('fortinet.html', page='integrations', appliances=[dict(id='${appliance}', name='Lab FortiGate', endpoint='https://192.0.2.10', vdom='root')], lab=dict(state='idle', message='Ready', appliance_id=None)))
+`], {encoding:'utf8', env:{...process.env, NETEM_AUTH_REQUIRED:'0'}});
+}
+
+test('rendered shell loads the FortiGate client before initial mount and remounts it after refresh', async()=>{
+  const html = renderedFortinetPage();
+  const dom = new JSDOM(html, {url:'https://netem.test/integrations/fortinet', runScripts:'outside-only'});
+  const w = dom.window; windows.push(w);
+  w.scrollTo=()=>{}; w.setTimeout=()=>1; w.setInterval=()=>1;
+  w.clearTimeout=()=>{}; w.clearInterval=()=>{};
+  let posts=0, reads=0;
+  w.fetch=async (url, options={})=>{
+    const path=new URL(url,w.location.href).pathname;
+    if (options.method==='POST') {
+      posts++;
+      assert.equal(path,'/integrations/fortinet/discover');
+      assert.equal(options.body.get('id'),appliance);
+      assert.ok(options.body.get('integration_csrf'));
+      return {ok:true,json:async()=>discovery()};
+    }
+    if(path==='/api/v1/integrations/fortinet') {
+      reads++;
+      return {ok:true,json:async()=>({state:'idle',message:'Ready',steps:[]})};
+    }
+    return {ok:true,url:String(url),text:async()=>html};
+  };
+  // Match browser parsing: template.content scripts are inert and aren't in this list.
+  for(const script of w.document.querySelectorAll('script')) {
+    const path=script.getAttribute('src');
+    if(path?.endsWith('/actions.js') || path?.endsWith('/fortinet.js')) {
+      w.eval(fs.readFileSync('static/'+path.split('/').pop(),'utf8'));
+    } else if(!path && script.textContent.trim()==='NetEmActions.mount();') {
+      w.eval(script.textContent);
+    }
+  }
+  await settle();
+  assert.equal(typeof w.NetEmFortinet?.mount,'function');
+  assert.equal(reads,1);
+  assert.match(w.document.querySelector('#fortinet-appliance').textContent,/VDOM: root/);
+  await w.NetEmActions.refresh(); await settle();
+  assert.equal(reads,2);
+  const form=w.document.querySelector('#fortinet-discover');
+  form.dispatchEvent(new w.Event('submit',{bubbles:true,cancelable:true}));
+  await settle();
+  assert.equal(posts,1);
+  assert.equal(w.document.querySelector('#fortinet-status').textContent,'Discovery complete.');
+});
