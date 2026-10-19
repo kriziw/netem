@@ -255,3 +255,125 @@ class BrandWaitingAnimationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SessionStorageFailureTests(unittest.TestCase):
+    """Exercise real report/SQLite access; lifecycle fixtures otherwise mock reports away."""
+    def setUp(self):
+        from contextlib import ExitStack
+        self.stack = ExitStack()
+        self.addCleanup(self.stack.close)
+        root = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
+        self.root = root
+        self.history = []
+        self.active = blank_session()
+        for mock in (
+            patch.object(netem, 'RUNTIME_DIR', root),
+            patch.object(netem, 'TELEMETRY_DB_PATH', root / 'telemetry.db'),
+            patch.object(netem, 'SESSIONS_PATH', root / 'sessions.json'),
+            patch.object(netem, 'EVENT_LOG_PATH', root / 'events.jsonl'),
+            patch.object(netem, 'EVENT_LOG', []),
+            patch.object(netem, 'LAB_SESSIONS', self.history),
+            patch.object(netem, 'ACTIVE_SESSION', self.active),
+            patch.object(netem, 'load_config', return_value=copy.deepcopy(CONFIG)),
+            patch.object(netem, 'appliance_under_test', return_value={'name': 'Direct NetEm path'}),
+            patch.dict(netem.SCENARIO_STATE, active=False, unsaved=False),
+            patch.dict(netem.SITE_PLAN_STATE, active=False),
+            patch.dict(netem.app.config, TESTING=True),
+        ):
+            self.stack.enter_context(mock)
+        netem.SCENARIO_STOP.clear()
+        netem.SITE_PLAN_STOP.clear()
+        self.addCleanup(netem.SCENARIO_STOP.clear)
+        self.addCleanup(netem.SITE_PLAN_STOP.clear)
+        self.client = netem.app.test_client()
+        self.client.post('/sessions/start', data=dict(SITE, name='Direct path test'))
+        self.session_id = self.active['id']
+        self.assertTrue(self.active['active'])
+
+    def test_wal_io_error_cannot_prevent_session_closure_and_report_can_be_retried(self):
+        import sqlite3
+        real_connect = sqlite3.connect
+        class WalFailure:
+            def __init__(self, *args, **kwargs):
+                self.connection = real_connect(*args, **kwargs)
+                self.closed = False
+            def execute(self, statement):
+                if statement == 'PRAGMA journal_mode=WAL':
+                    raise sqlite3.OperationalError('disk I/O error')
+                return self.connection.execute(statement)
+            def close(self):
+                self.closed = True
+                self.connection.close()
+        connections = []
+        def connect(*args, **kwargs):
+            if Path(args[0]) != netem.TELEMETRY_DB_PATH:
+                return real_connect(*args, **kwargs)
+            connection = WalFailure(*args, **kwargs)
+            connections.append(connection)
+            return connection
+        with patch.object(netem.sqlite3, 'connect', side_effect=connect), self.assertLogs(netem.app.logger, 'ERROR') as logs:
+            response = self.client.post('/sessions/stop', headers={'Accept': 'application/json'})
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(response.json['stopped'])
+        self.assertIn('Report unavailable', response.json['warning'])
+        self.assertFalse(self.active['active'])
+        self.assertEqual(self.history[0]['status'], 'completed')
+        self.assertIsNotNone(self.history[0]['ended_at'])
+        self.assertIsNone(self.history[0]['report'])
+        self.assertIn('disk I/O error', '\n'.join(logs.output))
+        self.assertTrue(all(connection.closed for connection in connections))
+        saved = json.loads((self.root / 'sessions.json').read_text())[0]
+        self.assertEqual(saved['status'], 'completed')
+        self.assertIn('report_error', saved)
+        # Idempotent stop does not duplicate completion or retry the failing report.
+        response = self.client.post('/sessions/stop', headers={'Accept': 'application/json'})
+        self.assertTrue(response.json['stopped'])
+        completed = [event for event in netem.EVENT_LOG if event['kind'] == 'session' and event['details'].get('reason')]
+        self.assertEqual(len(completed), 1)
+        # The public screen waits even while reporting storage remains broken.
+        with patch.object(netem, 'build_link_states', side_effect=AssertionError('must remain idle')):
+            self.assertFalse(netem.showroom_snapshot()['session']['active'])
+        # Restored database access rebuilds the report and clears its stored warning.
+        response = self.client.get(f'/sessions/{self.session_id}/report.json')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json['result'], 'unscored')
+        self.assertNotIn('report_error', self.history[0])
+        self.assertEqual(self.history[0]['report']['result'], 'unscored')
+
+    def test_expiry_closes_and_signals_restore_even_when_report_fails(self):
+        netem.SCENARIO_STATE['active'] = True
+        netem.SITE_PLAN_STATE['active'] = True
+        with patch.object(netem, 'build_session_report', side_effect=RuntimeError('report failure')), self.assertLogs(netem.app.logger, 'ERROR'):
+            self.assertTrue(netem.expire_session_if_due(self.active['deadline']))
+        self.assertFalse(self.active['active'])
+        self.assertEqual(self.history[0]['status'], 'timed_out')
+        self.assertTrue(netem.SCENARIO_STOP.is_set())
+        self.assertTrue(netem.SITE_PLAN_STOP.is_set())
+
+    def test_report_failure_does_not_break_html_stop_or_report_routes(self):
+        with patch.object(netem, 'build_session_report', side_effect=RuntimeError('report failure')), self.assertLogs(netem.app.logger, 'ERROR'):
+            response = self.client.post('/sessions/stop', data={'return_to': 'overview'})
+            self.assertEqual(response.status_code, 302)
+            self.assertEqual(response.location, '/')
+            self.assertEqual(self.client.get(f'/sessions/{self.session_id}/report').status_code, 302)
+            self.assertEqual(self.client.get(f'/sessions/{self.session_id}/report.json').status_code, 503)
+        self.assertFalse(self.active['active'])
+        self.assertIn('Report unavailable', self.client.get('/sessions').text)
+
+    def test_report_work_cannot_clear_a_new_session(self):
+        def report_after_new_session(*args, **kwargs):
+            self.assertFalse(self.active['active'])
+            self.active.update(active=True, id='new-session', name='New session')
+            return {'result': 'unscored'}
+        with patch.object(netem, 'build_session_report', side_effect=report_after_new_session):
+            netem.end_session('completed')
+        self.assertEqual(self.active['id'], 'new-session')
+        self.assertTrue(self.active['active'])
+        self.assertEqual(self.history[0]['status'], 'completed')
+
+    def test_expiry_does_not_close_a_replacement_session(self):
+        old_id = self.active['id']
+        self.active.update(id='replacement', deadline=time.time() + 3600)
+        self.assertIsNone(netem.end_session('timed_out', expected_session_id=old_id))
+        self.assertTrue(self.active['active'])

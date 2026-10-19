@@ -402,10 +402,26 @@ window.NetEmActions = (() => {
     const disabled = buttons.map(button => button.disabled);
     buttons.forEach(button => button.disabled = true);
     form.setAttribute('aria-busy', 'true');
-    try { await update(await fetch(action.href, {method:'POST', body:data})); }
+    let sessionStopped = false;
+    try {
+      const stopSession = action.pathname === '/sessions/stop';
+      const response = await fetch(action.href, {method:'POST', body:data,
+        ...(stopSession ? {headers: {Accept: 'application/json'}} : {})});
+      if (stopSession && response.ok && response.headers?.get('content-type')?.includes('application/json')) {
+        const result = await response.json();
+        if (result.stopped !== true) throw new Error('Session closure was not confirmed.');
+        sessionStopped = true;
+        notify(result.message || 'Session stopped.');
+        if (result.warning) notify(result.warning, 'warning');
+        try { await update(await fetch(location.href, {cache: 'no-store'})); }
+        catch (_) { displayError('Session stopped. The page could not refresh; reload to see the current status.'); }
+      } else {
+        await update(response);
+      }
+    }
     catch (error) { displayError(error.message + ' Check live status before retrying; the action may have applied.'); }
     finally {
-      buttons.forEach((button, i) => button.disabled = disabled[i]);
+      buttons.forEach((button, i) => button.disabled = sessionStopped || disabled[i]);
       form.removeAttribute('aria-busy');
       busy = false;
     }

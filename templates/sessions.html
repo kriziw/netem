@@ -145,6 +145,7 @@
           {% elif item.status == 'active' %}
             <span class="status info">ACTIVE</span>
           {% else %}
+            {% if item.report_error %}<div class="session-meta warn-text">{{ item.report_error }}</div>{% endif %}
             <a class="btn btn-sm" href="{{ url_for('session_report', session_id=item.id) }}">Report</a>
           {% endif %}
         </div>
