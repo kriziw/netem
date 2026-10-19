@@ -21,7 +21,7 @@ The current development direction is vendor-neutral: impairments are applied to 
 9. **Persistent history & export** — retain lab events across service restarts and export them as JSON or CSV.
 10. **Bounded packet capture** — short diagnostic PCAPs on configured WAN interfaces with duration, packet-count and snap-length limits.
 
-The current UI organizes these capabilities into dedicated operational workspaces rather than a single Lab Tools page. The implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Vendor-specific adapters can be layered on top of the normalized API later.
+The current UI organizes these capabilities into dedicated operational workspaces rather than a single Lab Tools page. The implementation deliberately avoids coupling the core to Fortinet, Cisco, Palo Alto, Juniper, VMware/VeloCloud or another vendor. Fortinet health monitoring and guided lab provisioning are available as optional adapters; additional vendor adapters remain planned.
 
 See [docs/RESILIENCE-LAB.md](docs/RESILIENCE-LAB.md) for the impairment architecture, [docs/UI-ARCHITECTURE.md](docs/UI-ARCHITECTURE.md) for the interface model, and [docs/ROADMAP.md](docs/ROADMAP.md) for the prioritized next capabilities.
 
@@ -43,6 +43,8 @@ The interface uses progressive disclosure so the full feature set is available w
 - **Help & documentation** — searchable in-app wiki, moved out of primary navigation and available from the lower sidebar plus contextual Guide links.
 
 A global **Activity** rail is available from every page, and **Ctrl+K** opens a command palette for fast navigation and WAN access. The UI has no external CSS, JavaScript or font dependency, so it remains usable on isolated lab networks.
+
+See [FortiGate lab provisioning](docs/FORTINET-LAB.md) for API/token setup, automatic discovery, configuration preview and guided provisioning of one to three WAN links.
 
 See [Appliance inventory](docs/APPLIANCE-INVENTORY.md) for FortiOS/FortiFlex setup,
 monitoring, readiness overrides and simulator compatibility.

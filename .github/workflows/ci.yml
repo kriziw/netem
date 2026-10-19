@@ -31,7 +31,7 @@ jobs:
         run: sudo env PYTHONDONTWRITEBYTECODE=1 "$(command -v python)" -m unittest discover -s tests -p test_access_cli.py -v
 
       - name: Compile Python
-        run: python -m py_compile app.py appliance_inventory.py appliance_platform.py branding.py host_health.py netem_core.py showroom.py site_catalog.py experience_groups.py test_records.py
+        run: python -m py_compile app.py fortinet_lab.py appliance_inventory.py appliance_platform.py branding.py host_health.py netem_core.py showroom.py site_catalog.py experience_groups.py test_records.py
 
       - name: Validate Flask routes and templates
         run: |
@@ -301,6 +301,8 @@ jobs:
           node --check static/actions.js
           node --check static/inventory.js
           node --test tests/inventory.test.js
+          node --check static/fortinet.js
+          node --test tests/fortinet.test.js
 
       - name: Validate release configuration
         run: |

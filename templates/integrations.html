@@ -221,9 +221,9 @@
 </div>
 
 <div class="section-title">SD-WAN vendor adapters</div>
+<section class="card" style="margin-bottom:16px"><div class="card-head"><div><div class="card-title">Fortinet · FortiGate Secure SD-WAN</div><div class="card-sub">API connection, health monitoring and guided lab provisioning for one to three WAN links.</div></div><span class="status good">Available</span></div><div class="card-pad"><p>Discover interfaces, gateways, routes, policies and SD-WAN configuration. Review a proposed lab configuration before applying it to a dedicated or existing appliance.</p><a class="btn btn-primary" href="{{ url_for('fortinet_settings') }}">Set up FortiGate lab</a> <a class="btn" href="{{ url_for('inventory') }}">Manage appliances &amp; credentials</a><p class="field-help">SLA telemetry and selected-path event correlation remain planned.</p></div></section>
 <div class="grid grid-3">
   {% for vendor, description in [
-    ('Fortinet', 'Performance SLA, SD-WAN member health, selected path and event correlation'),
     ('Cisco', 'Catalyst SD-WAN / Meraki health and path telemetry'),
     ('Palo Alto', 'Prisma SD-WAN / firewall path quality and policy state'),
     ('Juniper', 'Session Smart / WAN health and path state'),
