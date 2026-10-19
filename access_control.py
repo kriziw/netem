@@ -33,7 +33,7 @@ OPERATOR_CONTROLS = {'quick_wan_action', 'lab_fault', 'lab_mtu', 'lab_sla', 'cle
     'site_save', 'site_apply_wan', 'wan_egress'}
 ADMIN_READS = {'integrations', 'settings', 'setup', 'updates', 'update_components', 'updates_status',
     'branding_settings', 'branding_preview', 'branding_export', 'traffic_settings', 'traffic_settings_data',
-    'simulator_controller', 'access_settings'}
+    'simulator_controller', 'access_settings', 'storage_settings', 'storage_status'}
 PUBLIC = {'static', 'access_login', 'access_oidc_login', 'access_oidc_callback', 'access_bootstrap'}
 
 
@@ -239,6 +239,8 @@ def init_app(app, store):
     def allowed(endpoint, method='GET'):
         return not enabled() or (bool(getattr(g, 'access_user', None)) and
             ROLES.index(g.access_user['role']) >= ROLES.index(required_role(endpoint, method)))
+
+    app.extensions['netem_access_allowed'] = allowed
 
     @app.before_request
     def access_guard():

@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+{% block title %}Storage &amp; database · {{ branding.name }}{% endblock %}
+{% block crumb %}Storage &amp; database{% endblock %}
+{% block content %}
+<div class="page-head"><div><div class="eyebrow">Administration</div><h1>Storage &amp; database</h1>
+<p class="page-description">Current capacity on the disk holding NetEm data. Administrators are warned at 80% used.</p></div></div>
+<div id="storage-panel" class="grid">
+<section class="card"><div class="card-head"><div class="card-title">Disk capacity</div><span class="status" data-storage-health></span></div>
+<div class="card-pad"><div class="kv">
+<div class="k">Total capacity</div><div class="v" data-storage-total>{{ storage.disk.total|storage_bytes }}</div>
+<div class="k">Used</div><div class="v" data-storage-used>{{ storage.disk.used|storage_bytes }}</div>
+<div class="k">Available to NetEm</div><div class="v" data-storage-free>{{ storage.disk.available|storage_bytes }}</div>
+</div><p class="field-help">Available space excludes filesystem-reserved blocks. Usage follows the disk's usable capacity, as in df.</p></div></section>
+<section class="card"><div class="card-head"><div class="card-title">Logs</div></div><div class="card-pad"><div class="kv">
+<div class="k">NetEm event log</div><div class="v" data-storage-events>{{ storage.event_log_bytes|storage_bytes }}</div>
+<div class="k">System journals</div><div class="v" data-storage-journals>{{ storage.journal.bytes|storage_bytes }}</div>
+</div><p class="field-help" data-storage-log-note>System journals include the host's persistent and volatile journals. Recorded test bundles are separate from these logs.</p></div></section>
+<section class="card"><div class="card-head"><div class="card-title">Databases</div></div><div class="card-pad">
+<div class="table-wrap"><table><thead><tr><th>Database</th><th>Main file</th><th>Write-ahead log</th><th>Shared memory</th><th>Total</th></tr></thead><tbody data-storage-databases>
+{% for db in storage.databases %}<tr><td>{{ db.name }}</td><td>{{ db.main_bytes|storage_bytes }}</td><td>{{ db.wal_bytes|storage_bytes }}</td><td>{{ db.shm_bytes|storage_bytes }}</td><td>{{ db.total_bytes|storage_bytes }}</td></tr>{% endfor %}
+</tbody></table></div>
+<p class="field-help">Sizes refresh about every 10 seconds. Database sidecar files are included in the total.</p>
+</div></section>
+<section class="card"><div class="card-head"><div class="card-title">Compact telemetry database</div></div><div class="card-pad">
+<p>Reclaim unused database pages while preserving every remaining record. This does not delete history or compress active records; the amount reclaimed depends on unused space.</p>
+<p class="field-help">Finish all sessions, tests, captures and simulator workloads first. Compaction runs in the background and needs temporary working space: up to twice the database size plus a 64 MiB margin on its disk, and the database size plus 64 MiB on the temporary-files disk.</p>
+<form method="post" action="{{ url_for('storage_compact') }}" data-native-submit id="storage-compact-form">
+<input type="hidden" name="integration_csrf" value="{{ integration_csrf }}">
+<button class="btn btn-primary" type="submit" data-storage-compact>Compact database</button>
+</form><p role="status" aria-live="polite" data-storage-job>{{ storage.job.message or 'Ready when the lab is idle.' }}</p>
+<p class="field-help" data-storage-updated></p>
+</div></section>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(() => {
+  const root = document.getElementById('storage-panel');
+  if (!root) return;
+  const form = root.querySelector('#storage-compact-form'), button = root.querySelector('[data-storage-compact]');
+  let posting = false;
+  const size = value => {
+    if (value == null) return 'Unavailable';
+    let amount = value, unit = 0; const units = ['B','KiB','MiB','GiB','TiB'];
+    while (amount >= 1024 && unit < units.length - 1) { amount /= 1024; unit++; }
+    return `${amount.toFixed(unit ? 1 : 0)} ${units[unit]}`;
+  };
+  const put = (field, text) => { root.querySelector(`[data-storage-${field}]`).textContent = text; };
+  async function read(url, options = {}) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch(url, {...options, signal: controller.signal});
+      if (response.status === 401) throw new Error('Sign in again before managing storage.');
+      let result;
+      try { result = await response.json(); }
+      catch (_) { throw new Error(`Storage response could not be confirmed (HTTP ${response.status}). Reload the storage page to check status.`); }
+      return {response, result};
+    } catch (error) {
+      if (error.name === 'AbortError') throw new Error('Storage request timed out. Check maintenance status before retrying.');
+      throw error;
+    } finally { clearTimeout(timer); }
+  }
+  function render(data) {
+    const disk = data.disk || {}, job = data.job || {};
+    put('total', size(disk.total)); put('used', size(disk.used)); put('free', size(disk.available));
+    put('health', disk.used_percent == null ? 'Unavailable' : `${disk.used_percent}% used`);
+    root.querySelector('[data-storage-health]').className = `status ${disk.error || disk.warning ? 'warn' : 'good'}`;
+    put('events', size(data.event_log_bytes)); put('journals', size(data.journal?.bytes));
+    put('log-note', data.journal?.error || 'System journals include persistent and volatile journals; recorded test bundles are separate.');
+    const table = root.querySelector('[data-storage-databases]'); table.replaceChildren();
+    for (const db of data.databases || []) {
+      const row = document.createElement('tr');
+      for (const text of [db.name, size(db.main_bytes), size(db.wal_bytes), size(db.shm_bytes), size(db.total_bytes)]) {
+        const cell = document.createElement('td'); cell.textContent = text; row.append(cell);
+      }
+      table.append(row);
+    }
+    if (!posting) put('job', (job.message || 'Ready when the lab is idle.') + (job.reclaimed_bytes == null ? '' : ` Reclaimed ${size(job.reclaimed_bytes)}.`));
+    button.disabled = posting || job.state === 'running';
+    put('updated', data.checked_at ? `Sizes checked at ${new Date(data.checked_at * 1000).toLocaleTimeString()}.` : 'Checking file sizes…');
+  }
+  form.addEventListener('submit', async event => {
+    event.preventDefault(); if (button.disabled || posting) return;
+    posting = true; button.disabled = true; put('job', 'Requesting database compaction…');
+    try {
+      const {response, result} = await read(form.action, {method: 'POST', body: new FormData(form), headers: {Accept: 'application/json'}});
+      if (!response.ok || result.accepted !== true) throw new Error(result.error || `Compaction was not accepted (HTTP ${response.status}).`);
+      put('job', result.job?.message || 'Database compaction accepted.');
+    } catch (error) { put('job', error.message + ' Check maintenance status before retrying.'); }
+    finally { posting = false; }
+  });
+  async function poll() {
+    try {
+      const {response, result} = await read('{{ url_for("storage_status") }}', {cache: 'no-store'});
+      if (!response.ok) throw new Error(`Storage status unavailable (HTTP ${response.status}).`);
+      render(result);
+    } catch (error) { put('updated', error.message); }
+    finally { setTimeout(poll, 5000); }
+  }
+  render({{ storage|tojson }}); poll();
+})();
+</script>
+{% endblock %}
