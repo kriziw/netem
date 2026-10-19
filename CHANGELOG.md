@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.5.0](https://github.com/kriziw/netem/compare/v1.4.4...v1.5.0) (2026-10-19)
+
+
+### Features
+
+* add admin storage monitoring and database compaction ([#160](https://github.com/kriziw/netem/issues/160)) ([2f2e08b](https://github.com/kriziw/netem/commit/2f2e08bbd66e324595da23c8a1f3f82e19972be1))
+
+
+### Bug Fixes
+
+* stop sessions despite telemetry storage failures ([#159](https://github.com/kriziw/netem/issues/159)) ([46d24ec](https://github.com/kriziw/netem/commit/46d24ec61d3c455ac92ebffbef8f94eb10e477df))
+
 ## [1.4.4](https://github.com/kriziw/netem/compare/v1.4.3...v1.4.4) (2026-10-19)
 
 
