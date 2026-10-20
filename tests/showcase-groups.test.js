@@ -29,7 +29,7 @@ test('each traffic group gets its own card with its score, tone and sentence', (
   assert.equal(cards.length, 1); // Unused groups do not fill the customer screen with placeholders.
   assert.ok(cards[0].classList.contains('bad'));
   assert.equal(cards[0].querySelector('strong').textContent, '10 / 100');
-  assert.match(cards[0].querySelector('p').textContent, /Limited by DNS/);
+  assert.match(cards[0].querySelector('p').textContent, /Below target/);
 });
 
 test('cards are grey and show no score when the simulator is not live', () => {
@@ -51,5 +51,7 @@ test('expected applications keep their group visible before the first transactio
     applications: [{label: 'Voice', requests: 0, score: null}], text: 'No traffic in this group in the window.'}], true);
   assert.ok(card.classList.contains('unknown'));
   assert.equal(card.querySelector('strong').textContent, '—');
-  assert.match(card.querySelector('details').textContent, /Voice: unscored/);
+  assert.equal(card.querySelector('details'), null);
+  assert.equal(card.querySelector('.group-status').textContent, 'Measuring');
 });
+

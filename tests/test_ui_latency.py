@@ -84,6 +84,21 @@ class UiLatencyTests(unittest.TestCase):
         # The shared raw snapshot is intact for another caller; filtering uses a copy.
         self.assertEqual(cache.read('status', 'source', lambda: {}, {})['status']['dem']['experience_score'], 100)
 
+    def test_baseline_startup_does_not_reuse_a_previous_run_score(self):
+        cache = PresentationCache()
+        raw = {'configured': True, 'connected': True, 'status': {'users': 16, 'run': {'run_id': 'previous'},
+               'dem': {'experience_score': 100, 'scoring_complete': True}}}
+        cache.fresh('status', 'source', lambda: raw)
+        with patch.object(netem, 'PRESENTATION_READS', cache), \
+                patch.object(netem, 'presentation_source', return_value='source'), \
+                patch.object(netem, 'traffic_generator_empty_snapshot', return_value={'configured': True}), \
+                patch.object(netem, 'SCENARIO_STATE', dict(active=True, preparing_workload=True, workload_supervised=False)):
+            result = netem.traffic_generator_snapshot(cached=True)
+        self.assertTrue(result['connected'])
+        self.assertIsNone(result['status']['dem']['experience_score'])
+        self.assertEqual(result['status']['dem']['evidence_issues'], ['baseline_starting'])
+        self.assertEqual(raw['status']['dem']['experience_score'], 100)
+
     def test_status_connection_outlives_evidence_but_not_forever(self):
         now = [0.0]
         cache = PresentationCache(clock=lambda: now[0])
@@ -158,3 +173,4 @@ class UiLatencyTests(unittest.TestCase):
             snapshot = netem._traffic_generator_snapshot()
         self.assertTrue(snapshot['connected'])
         api.assert_called_once_with('/api/v1/status', timeout=7.0)
+

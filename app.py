@@ -583,8 +583,14 @@ def traffic_generator_snapshot(include_catalog=False, cached=False):
             result['status']['dem'] = pending_simulator_dem('status_refresh_pending')
     if result.get('connected') and result.get('status'):
         with RUNTIME_LOCK:
+            preparing = SCENARIO_STATE.get('active') and SCENARIO_STATE.get('preparing_workload')
             expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
-        if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
+        if preparing:
+            # The dashboard opens as soon as the announcement ends, but an old
+            # run's cached score is not the new baseline. WAN telemetry is live.
+            result['status']['dem'] = pending_simulator_dem('baseline_starting', SCENARIO_STATE.get('live_window_seconds', 15))
+            result['status']['users'] = None
+        elif expected and ((result['status'].get('run') or {}).get('run_id') != expected or
                          (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
                          bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
             result['status']['dem'] = pending_simulator_dem('live_phase_pending', SCENARIO_STATE.get('live_window_seconds', 15))
@@ -10312,6 +10318,7 @@ def showroom_outcome(diagnosis, site_plan):
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
             "user_impact": " ".join(showcase_summary.application_impact(dem)),
+            "user_effects": showcase_summary.user_effects(dem),
         },
         "findings": [{
             "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),
@@ -10414,13 +10421,10 @@ def impairment_text(link):
     fault = link.get("fault") or "normal"
     if fault != "normal":
         return FAULT_WORDS.get(fault, fault.replace("_", " ").capitalize() + " injected")
-    quality = link.get("quality")
-    if quality is None or quality >= 100:
-        return "No impairment"
     parts = [f"{link['delay_ms']:g} ms delay" if link.get("delay_ms") else None,
+             f"{link['jitter_ms']:g} ms jitter" if link.get("jitter_ms") else None,
              f"{link['loss_pct']:g}% loss" if link.get("loss_pct") else None]
-    parts = [part for part in parts if part]
-    return f"Impaired to {quality:g}% quality" + (": " + ", ".join(parts) if parts else "")
+    return " · ".join(part for part in parts if part) or "No impairment"
 
 
 def cause_text(kinds, link):

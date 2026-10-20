@@ -284,8 +284,10 @@ class StoryTests(unittest.TestCase):
         self.assertEqual(netem.impairment_text({"fault": "blackhole"}), "Outage injected")
         self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 100}), "No impairment")
         self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 60, "delay_ms": 45, "loss_pct": 2}),
-                         "Impaired to 60% quality: 45 ms delay, 2% loss")
+                         "45 ms delay · 2% loss")
         link = {"name": "WAN1", "loss_pct": 2, "delay_ms": 45}
+        self.assertEqual(netem.impairment_text({"fault": "normal", "quality": 100, "delay_ms": 80, "jitter_ms": 12}),
+                         "80 ms delay · 12 ms jitter")
         self.assertEqual(netem.cause_text(["queue_drops"], link), "queue drops measured on WAN1")
         self.assertEqual(netem.cause_text(["injected_loss", "queue_drops"], link), "2% packet loss on WAN1")
         self.assertEqual(netem.cause_text(["fault"], link), "WAN1 is down")

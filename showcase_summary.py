@@ -38,6 +38,39 @@ def application_impact(dem):
     return [effects[kind][1] for kind in ('realtime', 'interactive', 'bulk') if kind in effects]
 
 
+USER_GROUPS = (
+    ('realtime', 'Calls & meetings', 'Calls and meetings are performing within their measured targets.'),
+    ('interactive', 'Business tasks', 'Business tasks are completing within their measured targets.'),
+    ('bulk', 'Files & backups', 'Uploads and downloads are completing within their measured targets.'),
+)
+
+
+def user_effects(dem):
+    """Three customer implications, derived from application evidence, never WAN settings."""
+    from experience_presentation import INVALID_EVIDENCE
+    invalid = dem.get('truncated') or INVALID_EVIDENCE.intersection(dem.get('evidence_issues') or [])
+    uncertain = bool(dem.get('at_risk') or dem.get('evidence_issues'))
+    result = []
+    for key, label, healthy in USER_GROUPS:
+        apps = {name: item for name, item in (dem.get('applications') or {}).items()
+                if (item.get('class') or 'interactive') == key}
+        messages = application_impact({**dem, 'applications': apps}) if not invalid and not dem.get('live_paused') else []
+        if dem.get('live_paused'):
+            state, text = 'unknown', 'Test paused; current user impact is not being measured.'
+        elif invalid:
+            state, text = 'unknown', 'Measurements need attention; current user impact cannot be confirmed.'
+        elif messages:
+            state, text = 'bad', messages[0]
+        elif not uncertain and apps and all(item.get('requests') and item.get('scoring_complete') is True
+                          and not item.get('evidence_issues') and not item.get('target_observations')
+                          and not item.get('target_violations') for item in apps.values()):
+            state, text = 'good', healthy
+        else:
+            state, text = 'unknown', 'Still measuring; the effect on users is not yet confirmed.'
+        result.append(dict(key=key, label=label, state=state, text=text))
+    return result
+
+
 def observed_impact(summary):
     messages = list(dict.fromkeys(line for phase in summary.get('phases') or []
                                  if phase.get('reached') is not False for line in phase.get('user_impact') or []))
@@ -125,3 +158,4 @@ def briefing(scenario, targets, window_seconds=15):
         watch.append('In recovery, look for applications returning toward baseline; recovery is confirmed by measurements.')
     watch.append(f'Live results use the selected {window_seconds:g}-second window within each phase. Limited evidence is labelled; the final report retains the full phase.')
     return {'measurements': measurements, 'watch': watch}
+

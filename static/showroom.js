@@ -211,33 +211,20 @@
 
   // What fills the screen: a waiting screen before the session, a test's announcement for the
   // few seconds before it starts, a run sequence's results, and otherwise the live dashboard.
-  function stageMode(data, baselineDismissed = false) {
+  function stageMode(data) {
     const scenario = (data && data.scenario) || {};
     if (scenario.active && scenario.intro) return 'intro';
-    if (scenario.active && !baselineDismissed && ((data && data.traffic || {}).monitoring || {}).preparing &&
-        ((data && data.experience || {}).verdicts || {}).experience !== 'fail') return 'preparing';
     if (!scenario.active && (data && data.session || {}).active) return 'session';
     if (showPlanSummary(data)) return 'summary';
     if (data && !(data.session || {}).active && !scenario.active && !(data.plan || {}).active && !showReport(data)) return 'waiting';
     return 'live';
   }
 
-  // Preparation is an initial screen, never a replacement for a test already shown live.
-  function createStageController() {
-    let active = false, startedAt = null, intro = false, liveShown = false;
-    return data => {
-      const scenario = (data && data.scenario) || {};
-      const identity = scenario.started_at ?? null;
-      if (!scenario.active || !active || (identity !== null && identity !== startedAt) || (scenario.intro && !intro)) {
-        liveShown = false;
-      }
-      active = Boolean(scenario.active);
-      if (identity !== null || !active) startedAt = identity;
-      intro = Boolean(scenario.intro);
-      const mode = stageMode(data, liveShown);
-      if (active && mode === 'live') liveShown = true;
-      return mode;
-    };
+  function baselineMeasuring(data) {
+    const scenario = (data && data.scenario) || {};
+    return Boolean(scenario.active && !scenario.intro && (scenario.preparing_workload
+      || ['Warm-up', 'Baseline', 'Steady state'].includes(scenario.phase)
+      || (scenario.phase_index == null && ((data.traffic || {}).monitoring || {}).preparing)));
   }
 
   function waitingView(site) {
@@ -414,13 +401,13 @@
   }
   window.ShowroomUI = {format, total, chart, siteView, resultView, phaseTimeline, summaryRows, reportView, showReport, clock,
     phaseCountdown, advance, smoothedRate, rateText, carriesText, routeView, planProgress, stageMode, waitingView, introView,
-    showPlanSummary, planSummaryView, waitingMedia, embedAddress, groupCards, sessionProgressView};
+    showPlanSummary, planSummaryView, waitingMedia, embedAddress, groupCards, sessionProgressView, scoreStatus, baselineMeasuring};
 
   if (typeof document === 'undefined' || !document.getElementById) return;
   const histories = new Map();
   let latest = null, online = false, page = 0, receivedAt = 0;
   const outcomeContinuity = createOutcomeContinuity();
-  const selectStage = createStageController();
+  const selectStage = stageMode;
   const text = (id, value) => setText(document.getElementById(id), value);
   const element = (tag, className, content) => {
     const node = document.createElement(tag);
@@ -428,7 +415,7 @@
     if (content != null) node.textContent = content;
     return node;
   };
-  const pageSize = () => window.innerWidth <= 850 ? 1 : window.innerHeight >= 1400 ? 3 : 2;
+  const pageSize = () => 3;
 
   // The SD-WAN vendor under test, next to the MSP brand in the header.
   function renderPartner() {
@@ -443,13 +430,14 @@
   }
 
   function renderSite() {
-    const view = siteView(latest.site, latest.session);
+    const site = latest.site && number((latest.traffic || {}).users) ? {...latest.site, simulated_users: latest.traffic.users} : latest.site;
+    const view = siteView(site, latest.session);
     text('site-title', view.title);
     text('site-meta', view.meta);
     text('site-people', view.people);
     const session = latest.session || {};
-    text('session-name', (latest.scenario || {}).unsaved ? 'Test mode · not saved' : session.active ? session.name || 'Lab session' : 'No session running');
-    text('session-site', session.active ? (session.site ? `Validating ${session.site}` : 'Session without a recorded site') : '');
+    text('session-name', (latest.scenario || {}).unsaved ? 'Live demonstration' : session.active ? session.name || 'Lab session' : 'No session running');
+    text('session-site', session.active ? (session.site ? `Validating ${session.site}` : '') : '');
   }
 
   // ---- Smooth updates: panels keep their elements between samples, numbers ease to their new values, and the
@@ -528,13 +516,14 @@
 
   function renderRunning() {
     const scenario = advance(latest.scenario || {}, online ? Math.min(5, (Date.now() - receivedAt) / 1000) : 0);
-    const plan = latest.plan || {}, traffic = latest.traffic || {};
+    const plan = latest.plan || {};
     setText(document.getElementById('demo-name'), `${online ? '' : 'Last known: '}${scenario.active ? scenario.scenario_name || 'Running test'
       : plan.active ? plan.label || 'Site test plan' : 'Live network observation'}`);
     const phases = scenario.active ? phaseTimeline(scenario) : [];
     setText(document.getElementById('demo-stage'), scenario.active
-      ? [scenario.link && `On ${scenario.link}`, phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}: ${scenario.phase}` : null,
-        scenario.step_label].filter(Boolean).join(' · ')
+      ? [scenario.link && `On ${scenario.link}`, baselineMeasuring(latest) ? 'Measuring baseline' : null,
+        phases.length ? `Phase ${(scenario.phase_index || 0) + 1} of ${phases.length}` + (baselineMeasuring(latest) ? '' : `: ${scenario.phase}`) : null,
+        baselineMeasuring(latest) ? null : scenario.step_label].filter(Boolean).join(' · ')
       : showReport(latest) ? `Last test: ${latest.last_test.name} ${latest.last_test.result || 'finished'} · report on the right`
       : plan.result ? `Last site test plan: ${plan.result}` : 'Waiting for the next test');
     const track = document.getElementById('demo-phases');
@@ -554,152 +543,103 @@
     setText(document.getElementById('demo-time'), scenario.active && phases.length ? [`${clock(scenario.elapsed_s)} of about ${clock(scenario.planned_s)}`,
       scenario.paused ? `Paused by the operator, holding ${scenario.phase}` : null, phaseCountdown(scenario)].filter(Boolean).join(' · ') : '');
     setText(document.getElementById('plan-progress'), planProgress(plan));
-    const running = ['starting', 'running'].includes(traffic.status);
-    showNumber(document.getElementById('workload-users'), running && number(traffic.users) ? traffic.users : null,
-      value => number(value) ? Math.round(value).toLocaleString() : traffic.connected ? 'Idle' : '—');
-    setText(document.getElementById('workload-summary'), !traffic.configured ? 'Traffic Simulator not connected'
-      : !traffic.connected ? 'Traffic Simulator unavailable'
-      : [traffic.label, traffic.activity && `${traffic.activity} activity`, traffic.media_mode && `${traffic.media_mode} voice/video`]
-        .filter(Boolean).join(' · ') || (running ? 'Simulated corporate users' : 'No workload running'));
+
   }
 
-  function groupHeadline(group) {
-    if (group.previous_phase) return `Previous phase · ${group.previous_phase}`;
-    if (group.score_adjusted) return group.text;
-    if (group.scoring_complete !== false) return group.text;
-    if (!number(group.score)) return group.text || 'Application checks are running.';
-    if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
-    return 'Observed application performance. Monitoring continues.';
-  }
-
-  // Detailed confidence belongs with the expandable measurements, not in every headline.
+  // Small score rows; application-level diagnostics belong in the operator UI.
   function groupCards(groups, live) {
     return (Array.isArray(groups) ? groups : []).filter(group => group.keep_visible || group.requests || (group.applications || []).length).map(group => {
       const card = element('article', 'subscore ' + (live ? group.tone : 'unknown'));
       card.dataset.group = group.key || group.label;
-      const score = live && number(group.score) ? group.score + ' / 100' : '—';
-      card.append(element('span', '', group.label), element('strong', '', score), element('p', 'group-status', live ? groupHeadline(group) : 'Application checks are collecting measurements.'));
-      {
-        const details = element('details');
-        details.append(element('summary', '', 'Application measurements'));
-        if (group.score_adjusted) details.append(element('p', '', `Measured group average: ${group.average_score}/100. Confirmed critical target misses keep the headline below the passing band.`));
-        if (group.scoring_complete === false) details.append(element('p', '', group.text));
-        if (!(group.applications || []).length) details.append(element('p', '', 'Application measurements will appear as checks complete.'));
-        for (const app of group.applications || []) {
-          const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
-          const reason = [...(app.evidence_issues || []), ...(app.missing_measurements || [])].map(words).join(', ');
-          const confidence = app.scoring_complete === false ? (app.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · incomplete evidence') : '';
-          details.append(element('p', '', `${app.label}: ${measurement}${confidence}${reason ? ' · ' + reason : ''} · ${app.requests} transactions${number(app.age_s) ? ' · latest ' + Math.round(app.age_s) + ' s ago' : ''}${number(app.p95_ms) ? ' · ' + (app.class === 'realtime' ? 'operation timing' : 'completion P95') + ' ' + Math.round(app.p95_ms) + ' ms' : ''}`));
-        }
-        card.append(details);
-      }
+      const score = live && number(group.score) ? `${Math.round(group.score)} / 100` : '—';
+      card.append(element('span', '', group.label), element('strong', '', score),
+        element('p', 'group-status', group.previous_phase ? `Previous phase · ${group.previous_phase}`
+          : !live || !number(group.score) ? 'Measuring' : group.scoring_complete === false ? 'Observed · not confirmed'
+          : group.tone === 'good' ? 'Within target' : group.tone === 'unknown' ? 'Not confirmed' : 'Below target'));
       return card;
     });
   }
 
+  function scoreStatus(experience, connected, previousPhase) {
+    if (!connected) return 'Connection lost · reconnecting';
+    if (previousPhase) return `Previous phase · ${previousPhase}`;
+    if (experience.live_paused) return 'Test paused';
+    if ((experience.verdicts || {}).experience === 'fail') return 'Targets missed';
+    if ((experience.verdicts || {}).experience === 'pass' && experience.scoring_complete === true
+        && !(experience.evidence_issues || []).length && !experience.at_risk) return 'Targets met';
+    if (number(experience.experience_score) && experience.available) return 'Observed · not yet confirmed';
+    return 'Measuring experience';
+  }
+
   function renderOutcome() {
-    const display = outcomeContinuity(latest);
-    const experience = display.experience;
-    const previousPhase = display.previousPhase;
-    const view = resultView(experience);
-    const live = online && Boolean(experience.available);
-    const scoreText = value => number(value) ? `${Math.round(value)} / 100` : '—';
-    const latencyText = value => number(value) ? `${Math.round(value)} ms` : '—';
+    const display = outcomeContinuity(latest), experience = display.experience;
+    const current = latest.experience || {}, previousPhase = display.previousPhase;
+    const traffic = latest.traffic || {};
+    const sourceOnline = online && traffic.connected !== false && traffic.configured !== false;
+    const view = resultView(experience), live = sourceOnline && Boolean(experience.available);
     const tiles = {
-      experience: [experience.experience_score, scoreText],
+      experience: [experience.experience_score, value => number(value) ? `${Math.round(value)} / 100` : '—'],
       success: [experience.success_pct, value => pct(value, 2)],
-      interactive: [experience.interactive_p95_ms, latencyText],
+      interactive: [experience.interactive_p95_ms, value => number(value) ? `${Math.round(value)} ms` : '—'],
     };
-    for (const key of ['experience', 'success', 'interactive']) {
-      const tile = document.getElementById(`result-${key}`);
-      const retained = (display.previousMetrics || []).includes(key);
+    for (const key of Object.keys(tiles)) {
+      const tile = document.getElementById(`result-${key}`), retained = (display.previousMetrics || []).includes(key);
       const target = retained ? resultView(display.previousExperience)[key].target : view[key].target;
-      tile.className = `result ${online && !retained ? view[key].verdict : 'unknown'}`;
+      tile.className = `result ${sourceOnline && !retained ? view[key].verdict : 'unknown'}`;
       const [raw, format] = tiles[key];
       showNumber(tile.querySelector('[data-value]'), live ? raw : null, format);
       setText(tile.querySelector('[data-target]'), (retained ? `Previous phase · ${previousPhase} · ` : '') + target);
+      if (key === 'experience') tile.style.setProperty('--score', live && number(raw) ? Math.max(0, Math.min(100, raw)) : 0);
     }
+    text('score-status', online && !sourceOnline ? 'Measurements unavailable' : sourceOnline && baselineMeasuring(latest) && !number(current.experience_score) ? 'Measuring baseline'
+      : scoreStatus(current, online, (display.previousMetrics || []).includes('experience') ? previousPhase : null));
     const transition = document.getElementById('outcome-transition');
-    if (transition) {
-      transition.hidden = !previousPhase || !online;
-      setText(transition, previousPhase ? `Retaining labelled measurements from ${previousPhase} while ${latest.scenario.phase || 'the new phase'} starts. Each value updates when its current-phase measurement arrives.` : '');
-    }
+    transition.hidden = !previousPhase || !online;
+    setText(transition, previousPhase ? 'Current-phase measurements are being collected.' : '');
     const groupHolder = document.getElementById('experience-groups');
-    const retainedScore = (display.previousMetrics || []).includes('experience');
-    const scoreEvidence = retainedScore ? display.previousExperience : experience;
-    const scoreImpact = document.getElementById('score-impact');
-    if (scoreImpact) {
-      scoreImpact.hidden = !live || !(scoreEvidence.target_failures || []).length;
-      setText(scoreImpact, (retainedScore ? `Previous phase · ${previousPhase}: ` : '') + (scoreEvidence.target_failures || []).join(' · '));
-    }
-    const scoreDetails = document.getElementById('score-details');
-    if (scoreDetails) {
-      scoreDetails.hidden = !live || !number(scoreEvidence.average_experience_score);
-      setText(document.getElementById('score-explanation'), (retainedScore ? `Previous phase · ${previousPhase}. ` : '') + `Measured application average: ${format(scoreEvidence.average_experience_score)} / 100. ` +
-        (scoreEvidence.score_adjusted ? 'The headline uses the worst confirmed critical impact and stays below the passing band when a critical application or site target is missed.'
-          : 'The headline follows measured application performance. Confirmed critical or site target misses keep it below the passing band.'));
-    }
-    const timing = experience.target_rtd || {};
-    const timingNode = document.getElementById('network-timing');
-    if (timingNode) {
-      timingNode.hidden = !live || !number(timing.p95_ms);
-      setText(timingNode, `Target round-trip time · P95 ${format(timing.p95_ms)} ms${timing.no_reply ? ' · ' + timing.no_reply + ' unanswered checks' : ''}`);
-    }
-    if (groupHolder) {
-      // Keep card, score and disclosure elements alive so colours can transition
-      // and an open/focused disclosure stays open while measurements refresh.
-      const groups = experience.groups && experience.groups.length ? experience.groups
-        : Array.from(groupHolder.children).map(card => ({key: card.dataset.group,
-          label: card.querySelector('span').textContent, score: null, tone: 'unknown', scoring_complete: false, keep_visible: true}));
-      const visibleGroups = new Set(Array.from(groupHolder.children).map(card => card.dataset.group));
-      const cards = groupCards(groups.map(group => ({...group, keep_visible: group.keep_visible ||
-        !latest.experience.available && visibleGroups.has(group.key || group.label)})), live);
-      reconcile(groupHolder, cards, card => card.dataset.group, card => card, (card, next) => {
-        if (card === next) return;
-        card.className = next.className;
-        for (const selector of ['span', 'strong', '.group-status']) setText(card.querySelector(selector), next.querySelector(selector).textContent);
-        const details = card.querySelector('details');
-        for (const child of [...details.children]) if (child.tagName !== 'SUMMARY') child.remove();
-        details.append(...Array.from(next.querySelector('details').children).filter(child => child.tagName !== 'SUMMARY'));
-      });
-    }
-    const traffic = latest.traffic || {};
-    const monitoring = traffic.monitoring || {};
-    setText(document.getElementById('outcome-window'), previousPhase ? `Previous phase · ${previousPhase} · retained values labelled` : number(traffic.requests) ? `Last ${Math.max(0, Math.round(traffic.window_seconds || 0))} s · ${traffic.requests.toLocaleString()} transactions` +
-      (monitoring.enabled ? ` · includes ${format(monitoring.checks)} application checks` : '') : '');
-    const measurementNote = document.getElementById('measurement-note');
-    if (measurementNote) {
-      measurementNote.hidden = !monitoring.enabled;
-      setText(measurementNote, `${format(traffic.users)} simulated users + continuous application monitoring · ${monitoring.measured_apps}/${monitoring.expected_apps} applications measured` +
-        (monitoring.worker_errors ? ' · monitoring needs operator attention' : ''));
-    }
-    const story = latest.story || {};
-    setText(document.getElementById('user-impact'), !online ? 'Connection lost; current user impact cannot be confirmed.'
-      : latest.experience && latest.experience.user_impact ? latest.experience.user_impact
-        : latest.experience && latest.experience.business_acceptance === 'pass' && latest.experience.scoring_complete === true
-          && !latest.experience.at_risk && !latest.experience.live_paused && !(latest.experience.evidence_issues || []).length
-          && Object.values(latest.experience.verdicts || {}).length && Object.values(latest.experience.verdicts).every(value => value === 'pass')
-          ? 'Application checks met the configured targets; no user impact was detected in this measurement window.'
-          : 'Application checks are measuring the effect on users; the current impact is not yet confirmed.');
-    setText(document.getElementById('story-status'), online ? story.status || 'Waiting for measurements…' : 'Connection lost · showing the last known state.');
-    reconcile(document.getElementById('impacts'), story.impacts || [], item => `${item.impact}|${item.cause}`,
-      () => { const card = element('article', 'impact'); card.append(element('strong'), element('span')); return card; },
+    const groups = experience.groups && experience.groups.length ? experience.groups
+      : Array.from(groupHolder.children).map(card => ({key: card.dataset.group, label: card.querySelector('span').textContent,
+        score: null, tone: 'unknown', keep_visible: true}));
+    const cards = groupCards(groups, live);
+    reconcile(groupHolder, cards, card => card.dataset.group, card => card, (card, next) => {
+      if (card === next) return;
+      card.className = next.className;
+      for (const selector of ['span', 'strong', '.group-status']) setText(card.querySelector(selector), next.querySelector(selector).textContent);
+    });
+    text('outcome-window', previousPhase ? `Previous phase · ${previousPhase} · retained values labelled`
+      : number(traffic.window_seconds) ? `Measured over the last ${Math.round(traffic.window_seconds)} seconds` : 'Waiting for measurements');
+    const accepted = current.business_acceptance === 'pass' && current.scoring_complete === true
+      && !current.at_risk && !current.live_paused && !(current.evidence_issues || []).length
+      && Object.values(current.verdicts || {}).length && Object.values(current.verdicts).every(value => value === 'pass');
+    const failed = current.business_acceptance === 'fail' || (current.verdicts || {}).experience === 'fail';
+    const effects = current.user_effects || [];
+    const affected = effects.some(item => item.state === 'bad');
+    text('story-status', !sourceOnline ? 'Current impact unavailable' : current.live_paused ? 'Test paused'
+      : affected || (failed && !effects.length) ? 'Some tasks are affected'
+      : failed ? 'Experience needs attention' : accepted ? 'Work is continuing normally' : 'Measuring the effect on users');
+    text('user-impact', !sourceOnline ? 'Current measurements are unavailable; user impact cannot be confirmed.'
+      : effects.length ? 'Based on application checks through the appliance.'
+      : current.user_impact || (accepted ? 'Application checks met the configured targets; no user impact was detected in this measurement window.'
+        : 'Application checks are measuring the effect on users; the current impact is not yet confirmed.'));
+    const fallback = [
+      {key: 'realtime', label: 'Calls & meetings'}, {key: 'interactive', label: 'Business tasks'}, {key: 'bulk', label: 'Files & backups'}
+    ];
+    reconcile(document.getElementById('user-effects'), effects.length ? effects : fallback, item => item.key,
+      () => { const card = element('article', 'user-effect'); card.append(element('span', 'effect-state'), element('h3'), element('p')); return card; },
       (card, item) => {
-        card.className = `impact ${item.state} ${item.severity}`;
-        setText(card.querySelector('strong'), item.impact);
-        setText(card.querySelector('span'), `${item.state === 'resolved' ? 'Resolved · ' : item.state === 'unconfirmed' ? 'No longer confirmed · ' : ''}${item.cause}`);
+        const state = sourceOnline && !current.live_paused ? item.state || 'unknown' : 'unknown';
+        card.className = `user-effect ${state}`;
+        setText(card.querySelector('h3'), item.label);
+        setText(card.querySelector('.effect-state'), state === 'good' ? 'Within target' : state === 'bad' ? 'Affected' : !sourceOnline ? 'Unavailable' : current.live_paused ? 'Paused' : 'Measuring');
+        setText(card.querySelector('p'), !sourceOnline ? 'Current user impact cannot be confirmed.'
+          : item.text || 'Still measuring; the effect on users is not yet confirmed.');
       });
-    const routesBox = document.getElementById('routes');
-    const routes = (story.routes || []).filter(route => route.wan);
-    if (routesBox.parentElement) routesBox.parentElement.hidden = !routes.length;
+    const routesBox = document.getElementById('routes'), routes = ((latest.story || {}).routes || []).filter(route => route.wan);
+    routesBox.parentElement.hidden = !routes.length;
     reconcile(routesBox, routes, route => route.label,
       () => { const row = element('div', 'route'); row.append(element('span'), element('strong')); return row; },
-      (row, route) => {
-        const view = routeView(route);
-        row.className = `route ${view.tone}`;
-        setText(row.querySelector('span'), view.label);
-        setText(row.querySelector('strong'), view.text);
-      });
+      (row, route) => { const view = routeView(route); row.className = `route ${view.tone}`;
+        setText(row.querySelector('span'), view.label); setText(row.querySelector('strong'), view.text); });
   }
 
   function renderReport() {
@@ -738,7 +678,7 @@
   const scales = new Map();
   function updatePath(node, link) {
     const field = name => node.querySelector(`[data-field="${name}"]`);
-    const health = link.display_health || (link.fault !== 'normal' ? 'failed' : link.health || 'healthy');
+    const health = link.display_health || ((link.fault || 'normal') !== 'normal' ? 'failed' : link.health || 'healthy');
     node.className = `path ${({healthy: 'good', congested: 'warn', queue_pressure: 'warn', degraded: 'bad', failed: 'bad'}[health] || 'good')}`;
     setText(field('name'), link.name);
     setText(field('profile'), [link.profile, number(link.download_limit_mbit) && number(link.upload_limit_mbit)
@@ -761,6 +701,7 @@
       return;
     }
     const visible = links.slice(page * pageSize(), (page + 1) * pageSize());
+    container.dataset.count = visible.length;
     reconcile(container, visible, link => link.id,
       () => document.getElementById('path-template').content.firstElementChild.cloneNode(true), updatePath);
     drawSparklines();
@@ -814,7 +755,7 @@
     const mode = selectStage(latest);
     document.body.dataset.mode = mode;
     document.getElementById('stage').hidden = mode === 'live';
-    document.getElementById('waiting').hidden = !['waiting', 'session', 'preparing'].includes(mode);
+    document.getElementById('waiting').hidden = !['waiting', 'session'].includes(mode);
     const sessionProgress = document.getElementById('session-progress');
     if (sessionProgress) sessionProgress.hidden = mode !== 'session';
     document.getElementById('intro').hidden = mode !== 'intro';
@@ -842,12 +783,10 @@
         document.getElementById('ps-insights').replaceChildren(...view.insights.map(item => element('li', item.tone, item.text)));
       }
     }
-    if (mode === 'waiting' || mode === 'session' || mode === 'preparing') {
+    if (mode === 'waiting' || mode === 'session') {
       renderWaitingMedia(latest.showcase_video);
-      text('waiting-title', mode === 'preparing' ? 'Establishing application baseline' : mode === 'session' ? 'Session so far' : 'Waiting for the session to start');
-      const monitoring = (latest.traffic || {}).monitoring || {};
-      text('waiting-note', mode === 'preparing' ? `Exercising the site applications through the appliance · ${monitoring.measured_apps}/${monitoring.expected_apps} applications measured`
-        : mode === 'session' ? 'Between tests · the next test will be introduced before it starts.' : 'The client, the appliance and the tests appear here once the operator starts the session.');
+      text('waiting-title', mode === 'session' ? 'Session so far' : 'Waiting for the session to start');
+      text('waiting-note', mode === 'session' ? 'Between tests · the next test will be introduced before it starts.' : 'The client, the appliance and the tests appear here once the operator starts the session.');
       if (mode === 'session') {
         const view = sessionProgressView(latest.session_progress);
         text('session-progress-name', (latest.session || {}).name || 'Current session');

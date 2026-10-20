@@ -53,14 +53,12 @@ test('screen rotates paths, handles untrusted names, blanks disconnected rates, 
   assert.equal(win.document.getElementById('waiting').hidden, false);
   // Nothing about the client is shown while waiting: the screen has no client details to hide or show.
   assert.equal(win.document.getElementById('waiting-site'), null);
-  assert.equal(win.document.querySelectorAll('.path').length, 2);
+  assert.equal(win.document.querySelectorAll('.path').length, 3);
   assert.equal(win.document.querySelector('.path h3').textContent, '<img src=x onerror=alert(1)>');
   assert.equal(win.document.querySelectorAll('.path img').length, 0);
   rotate();
-  assert.equal(win.document.querySelector('.path h3').textContent, 'WAN 2');
-  rotate();
-  assert.equal(win.document.querySelectorAll('.path').length, 1);
-  assert.equal(win.document.querySelector('.path h3').textContent, 'WAN 4');
+  assert.equal(win.document.querySelector('.path h3').textContent, 'WAN 3');
+  assert.equal(win.document.querySelectorAll('.path').length, 2);
   failed = true;
   await nextPoll();
   assert.equal(win.document.querySelector('[data-field="down"]').textContent, '—');
@@ -204,14 +202,16 @@ test('calm view helpers smooth rates and phrase carried traffic, routes and plan
   assert.equal(ui.planProgress({active: false, tests: []}), '');
 });
 
-test('the live view shows the story, impacts with causes and where traffic goes', async () => {
+test('the three-part view separates network facts, score and evidence-based user effects', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window, doc = win.document;
   win.setTimeout = () => 1;
   win.clearTimeout = () => {};
   win.setInterval = () => {};
   const snapshot = {timestamp: 100, scenario: {active: false}, session: {active: false}, plan: {}, last_test: null,
-    experience: {available: true, targets: {}, verdicts: {}}, traffic: {},
+    experience: {available: true, targets: {}, verdicts: {experience: 'fail'}, user_effects: [
+      {key: 'realtime', label: 'Calls & meetings', state: 'bad', text: 'Calls may break up.'},
+      {key: 'interactive', label: '<img src=x>', state: 'unknown', text: 'Still measuring.'}]}, traffic: {},
     links: [{id: 'wan1', name: 'WAN1', profile: 'DIA', fault: 'normal', display_health: 'degraded', download_limit_mbit: 100,
              upload_limit_mbit: 100, impairment: 'Impaired to 60% quality: 45 ms delay, 2% loss', down_mbps: 47.3, up_mbps: 44.4,
              carries: ['file transfers']}],
@@ -223,13 +223,13 @@ test('the live view shows the story, impacts with causes and where traffic goes'
   win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
   win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
-  assert.match(doc.getElementById('story-status').textContent, /^Users are affected/);
-  const impacts = [...doc.querySelectorAll('#impacts .impact')];
-  assert.equal(impacts.length, 2);
-  assert.equal(impacts[0].querySelector('strong').textContent, 'Voice and video: breaking up');
-  assert.equal(impacts[0].querySelector('span').textContent, '2% packet loss on WAN1');
-  assert.equal(impacts[1].querySelector('span').textContent, 'Resolved · WAN1 is full');
-  assert.equal(doc.querySelectorAll('#impacts img').length, 0);
+  assert.equal(doc.querySelectorAll('.showcase-grid > section').length, 3);
+  assert.equal(doc.getElementById('story-status').textContent, 'Some tasks are affected');
+  const effects = [...doc.querySelectorAll('.user-effect')];
+  assert.equal(effects.length, 2);
+  assert.equal(effects[0].querySelector('p').textContent, 'Calls may break up.');
+  assert.equal(effects[1].querySelector('h3').textContent, '<img src=x>');
+  assert.equal(doc.querySelectorAll('#user-effects img').length, 0);
   assert.deepEqual([...doc.querySelectorAll('#routes .route')].map(row => [row.className, row.textContent]),
     [['route pass', 'Voice and videoWAN2'], ['route warn', 'File transfersWAN1']]);
   const card = doc.querySelector('.path');
@@ -238,7 +238,7 @@ test('the live view shows the story, impacts with causes and where traffic goes'
   assert.equal(card.querySelector('[data-field="profile"]').textContent, 'DIA · 100/100 Mbit/s');
   assert.equal(card.querySelector('[data-field="impairment"]').textContent, 'Impaired to 60% quality: 45 ms delay, 2% loss');
   assert.equal(card.querySelector('[data-field="down"]').textContent, '47');
-  assert.equal(card.querySelector('[data-field="carries"]').textContent, 'Carries file transfers');
+  assert.equal(card.querySelector('[data-field="carries"]'), null);
   dom.window.close();
 });
 
@@ -414,9 +414,9 @@ test('observed experience keeps numeric utility without declaring a pass', () =>
   assert.match(view.experience.target, /observed/);
 });
 
-test('baseline preparation yields immediately to failures and ends when evidence is ready', () => {
+test('countdown opens live baseline immediately without waiting for full evidence', () => {
   const data = {scenario: {active: true}, traffic: {monitoring: {preparing: true}}, experience: {verdicts: {experience: 'unknown'}}};
-  assert.equal(ui.stageMode(data), 'preparing');
+  assert.equal(ui.stageMode(data), 'live');
   data.experience.verdicts.experience = 'fail';
   assert.equal(ui.stageMode(data), 'live');
   data.experience.verdicts.experience = 'pass';
@@ -426,7 +426,7 @@ test('baseline preparation yields immediately to failures and ends when evidence
   assert.equal(ui.stageMode(data), 'intro');
 });
 
-test('baseline screen stays dismissed after live display and resets for the next test', async () => {
+test('every countdown opens directly into live baseline data and never hides behind readiness', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
   let nextPoll;
@@ -439,7 +439,9 @@ test('baseline screen stays dismissed after live display and resets for the next
   win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
   await new Promise(setImmediate);
   const doc = win.document;
-  assert.equal(doc.body.dataset.mode, 'preparing');
+  assert.equal(doc.body.dataset.mode, 'live');
+  assert.equal(doc.getElementById('score-status').textContent, 'Measuring baseline');
+  assert.match(doc.getElementById('demo-stage').textContent, /Measuring baseline/);
   data.traffic.monitoring.preparing = false;
   await nextPoll();
   assert.equal(doc.body.dataset.mode, 'live');
@@ -456,7 +458,7 @@ test('baseline screen stays dismissed after live display and resets for the next
   assert.equal(doc.body.dataset.mode, 'intro');
   data.scenario.intro = false;
   await nextPoll();
-  assert.equal(doc.body.dataset.mode, 'preparing');
+  assert.equal(doc.body.dataset.mode, 'live');
   data.experience.verdicts.experience = 'fail';
   await nextPoll();
   assert.equal(doc.body.dataset.mode, 'live');
@@ -492,7 +494,7 @@ test('phase transitions retain labelled neutral outcomes until new measurements 
     assert.equal(value('success'), '100.00%');
     assert.equal(value('interactive'), '45 ms');
     assert.equal(doc.getElementById('result-experience').className, 'result unknown');
-    assert.match(doc.getElementById('outcome-transition').textContent, /from Baseline while Brownout starts/);
+    assert.match(doc.getElementById('outcome-transition').textContent, /Current-phase measurements/);
     assert.equal(doc.querySelector('.subscore strong').textContent, '85 / 100');
     assert.match(doc.querySelector('.subscore .group-status').textContent, /Previous phase/);
     assert.equal(doc.querySelector('.subscore').className, 'subscore unknown');
@@ -530,7 +532,7 @@ test('phase transitions retain labelled neutral outcomes until new measurements 
   dom.window.close();
 });
 
-test('customer display separates monitoring, keeps confidence in details and shows only attributed routes', async () => {
+test('customer display keeps provisional scores neutral without technical detail or unattributed routes', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
   win.setTimeout = () => 1; win.setInterval = () => 1;
@@ -545,12 +547,12 @@ test('customer display separates monitoring, keeps confidence in details and sho
   win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
   await new Promise(resolve => setImmediate(resolve));
   const doc = win.document;
-  assert.match(doc.getElementById('measurement-note').textContent, /2 simulated users \+ continuous application monitoring/);
-  assert.match(doc.getElementById('outcome-window').textContent, /includes 20 application checks/);
-  assert.match(doc.querySelector('.subscore > p').textContent, /Observed application performance/);
-  assert.match(doc.querySelector('.subscore details').textContent, /Limited sample/);
+  assert.match(doc.getElementById('outcome-window').textContent, /last 15 seconds/);
+  assert.match(doc.querySelector('.subscore > p').textContent, /Observed · not confirmed/);
+  assert.equal(doc.querySelector('.subscore details'), null);
   assert.equal(doc.getElementById('routes').parentElement.hidden, true);
-  assert.equal(doc.getElementById('network-timing').hidden, true);
+  assert.equal(doc.getElementById('network-timing'), null);
+  assert.equal(doc.getElementById('score-status').textContent, 'Observed · not yet confirmed');
   assert.equal(doc.getElementById('result-experience').className, 'result unknown');
   dom.window.close();
 });
@@ -569,12 +571,12 @@ test('queue pressure and unconfirmed recovery are displayed without implying sat
   await new Promise(setImmediate);
   assert.equal(win.document.querySelector('[data-field="health"]').textContent, 'Queue pressure');
   assert.ok(win.document.querySelector('.path').classList.contains('warn'));
-  assert.match(win.document.querySelector('#impacts span').textContent, /^No longer confirmed/);
-  assert.doesNotMatch(win.document.querySelector('#impacts span').textContent, /Resolved/);
+  assert.match(win.document.getElementById('story-status').textContent, /Measuring/);
+  assert.doesNotMatch(win.document.getElementById('user-effects').textContent, /Resolved|recovered/);
   dom.window.close();
 });
 
-test('critical failure headline names the target and keeps measured average in details', async () => {
+test('critical failure shows the target-aligned score and missed-target status', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
   win.setTimeout = () => 1; win.setInterval = () => 1;
@@ -590,16 +592,15 @@ test('critical failure headline names the target and keeps measured average in d
   const doc = win.document;
   assert.equal(doc.querySelector('#result-experience [data-value]').textContent, '74 / 100');
   assert.equal(doc.getElementById('result-experience').className, 'result fail');
-  assert.equal(doc.getElementById('score-impact').hidden, false);
-  assert.match(doc.getElementById('score-impact').textContent, /413 ms P95/);
-  assert.match(doc.getElementById('score-explanation').textContent, /Measured application average: 97/);
-  assert.match(doc.querySelector('.subscore > p').textContent, /Critical targets missed/);
-  assert.match(doc.querySelector('.subscore details').textContent, /Measured group average: 97/);
+  assert.equal(doc.getElementById('score-status').textContent, 'Targets missed');
+  assert.equal(doc.getElementById('result-experience').style.getPropertyValue('--score'), '74');
+  assert.equal(doc.querySelector('.subscore details'), null);
+  assert.equal(doc.getElementById('score-explanation'), null);
   dom.window.close();
 });
 
 
-test('outcome cards keep their elements, disclosures and score formatting across status changes', async () => {
+test('outcome rows keep their elements and score formatting across status changes', async () => {
   const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
   const win = dom.window;
   let poll;
@@ -613,8 +614,8 @@ test('outcome cards keep their elements, disclosures and score formatting across
   win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
   await new Promise(setImmediate);
   const card = win.document.querySelector('.subscore');
-  const score = card.querySelector('strong'), details = card.querySelector('details'), toggle = details.querySelector('summary');
-  details.open = true; toggle.focus();
+  const score = card.querySelector('strong');
+  assert.equal(card.querySelector('details'), null);
   assert.equal(score.textContent, '80 / 100');
   for (const tone of ['good', 'bad', 'unknown']) {
     data.experience.groups[0].tone = tone;
@@ -623,9 +624,7 @@ test('outcome cards keep their elements, disclosures and score formatting across
     await poll();
     assert.equal(win.document.querySelector('.subscore'), card);
     assert.equal(card.querySelector('strong'), score);
-    assert.equal(card.querySelector('details'), details);
-    assert.equal(details.open, true);
-    assert.equal(win.document.activeElement, toggle);
+    assert.equal(card.querySelector('details'), null);
     assert.doesNotMatch(score.textContent, /observed|previous|waiting/i);
   }
   data.experience.user_impact = 'Some business requests failed; users may need to retry a task.';
@@ -693,7 +692,7 @@ test('standalone scenario renders measurements and automatically returns to the 
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(doc.body.dataset.mode, 'live');
     assert.equal(doc.getElementById('waiting').hidden, true);
-    assert.equal(doc.getElementById('session-name').textContent, 'Test mode · not saved');
+    assert.equal(doc.getElementById('session-name').textContent, 'Live demonstration');
     assert.equal(doc.querySelector('[data-field="down"]').textContent, '13');
     snapshot.timestamp = 102;
     snapshot.scenario = {active: false};
@@ -739,5 +738,56 @@ test('reconnection rebuilds the chart from recorded samples, replacing browser g
   const drawing = win.document.querySelector('.spark .download').getAttribute('d');
   assert.equal((drawing.match(/M/g) || []).length, 1);
   assert.equal((drawing.match(/C/g) || []).length, 6);
+  dom.window.close();
+});
+
+test('score status distinguishes confirmed results, provisional observations and unavailable data', () => {
+  const score = {available: true, experience_score: 99, scoring_complete: false, verdicts: {experience: 'unknown'}};
+  assert.equal(ui.scoreStatus(score, true), 'Observed · not yet confirmed');
+  assert.equal(ui.scoreStatus({...score, scoring_complete: true, verdicts: {experience: 'pass'}}, true), 'Targets met');
+  assert.equal(ui.scoreStatus({...score, verdicts: {experience: 'fail'}}, true), 'Targets missed');
+  assert.equal(ui.scoreStatus(score, false), 'Connection lost · reconnecting');
+  assert.equal(ui.scoreStatus({...score, experience_score: null}, true), 'Measuring experience');
+  assert.equal(ui.scoreStatus(score, true, 'Baseline'), 'Previous phase · Baseline');
+});
+
+test('countdown, live baseline and impairment sequence use one dashboard without a readiness gate', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window, doc = win.document;
+  let poll;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) poll = fn; return 1; };
+  win.clearTimeout = () => {}; win.setInterval = () => 1;
+  const data = {timestamp: 100, scenario: {active: true, intro: true, started_at: 100, starts_in_s: 1,
+      scenario_name: 'Brownout', phases: [{name: 'Baseline', planned_s: 60}, {name: 'Degradation', planned_s: 60}]},
+    session: {active: true}, traffic: {monitoring: {preparing: true}},
+    experience: {available: false, verdicts: {experience: 'unknown'}},
+    links: [1,2,3].map(i => ({id: 'wan'+i, name: 'WAN'+i, fault: 'normal', down_mbps: 2, up_mbps: 1}))};
+  win.fetch = async () => ({ok: true, json: async () => data});
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8')); win.eval(source);
+  await new Promise(setImmediate);
+  assert.equal(doc.body.dataset.mode, 'intro');
+  data.scenario.intro = false; data.scenario.preparing_workload = true;
+  await poll();
+  assert.equal(doc.body.dataset.mode, 'live');
+  assert.equal(doc.getElementById('score-status').textContent, 'Measuring baseline');
+  assert.equal(doc.querySelectorAll('#paths .path').length, 3);
+  assert.equal(doc.querySelector('[data-field="down"]').textContent, '2');
+  data.scenario.preparing_workload = false; data.scenario.phase = 'Baseline'; data.scenario.phase_index = 0;
+  data.experience = {available: true, experience_score: 93, scoring_complete: false, verdicts: {experience: 'unknown'}};
+  await poll();
+  assert.equal(doc.querySelector('#result-experience [data-value]').textContent, '93 / 100');
+  assert.match(doc.getElementById('demo-stage').textContent, /Measuring baseline/);
+  const panel = doc.querySelector('.people-panel');
+  data.scenario.phase = 'Degradation'; data.scenario.phase_index = 1;
+  await poll();
+  assert.equal(doc.body.dataset.mode, 'live');
+  assert.doesNotMatch(doc.getElementById('demo-stage').textContent, /Measuring baseline/);
+  assert.equal(doc.querySelector('.people-panel'), panel);
+  assert.equal(doc.querySelector('.people-panel .user-effect').className, 'user-effect unknown');
+  data.traffic.connected = false;
+  await poll();
+  assert.equal(doc.querySelector('#result-experience [data-value]').textContent, '—');
+  assert.equal(doc.getElementById('score-status').textContent, 'Measurements unavailable');
+  assert.equal(doc.querySelector('.effect-state').textContent, 'Unavailable');
   dom.window.close();
 });
