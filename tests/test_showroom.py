@@ -52,6 +52,27 @@ class SnapshotTests(unittest.TestCase):
         with patch.object(netem, "latest_telemetry_sample", return_value=sample):
             return netem.showroom_snapshot()
 
+    def test_recorded_history_preserves_missing_samples_and_excludes_future(self):
+        import sqlite3
+        from contextlib import contextmanager
+        conn = sqlite3.connect(':memory:')
+        conn.row_factory = sqlite3.Row
+        conn.execute('CREATE TABLE telemetry_samples (link_id, timestamp, rate_valid, down_mbps, up_mbps)')
+        conn.executemany('INSERT INTO telemetry_samples VALUES (?, ?, ?, ?, ?)', [
+            ('wan1', -21, 1, 5, 5), ('wan1', 98, 1, 2, 1),
+            ('wan1', 99, 0, 0, 0), ('wan1', 100, 1, 3, 0),
+            ('wan1', 101, 1, 9, 9), ('wan2', 99, 1, 8, 8)])
+        @contextmanager
+        def connection(**kwargs):
+            yield conn
+        with patch.object(netem, 'telemetry_connect', connection):
+            result = netem.showroom_traffic_history('wan1', 100)
+        self.assertEqual(result, [
+            {'timestamp': 98, 'down_mbps': 2, 'up_mbps': 1},
+            {'timestamp': 99, 'down_mbps': None, 'up_mbps': None},
+            {'timestamp': 100, 'down_mbps': 3, 'up_mbps': 0}])
+        conn.close()
+
     def test_live_and_idle_rates_and_allowlisted_data(self):
         result = self.snapshot({"timestamp": 99, "rate_valid": 1,
                                 "down_mbps": 0, "up_mbps": 1.5})
@@ -418,3 +439,4 @@ class OverdueNarrationTests(unittest.TestCase):
         story, experience = self.present(100, risk=True, acceptance='unknown')
         self.assertEqual(story['status'], 'Application monitoring is collecting measurements.')
         self.assertEqual(story['status'], experience['user_impact'])
+

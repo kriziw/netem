@@ -12,8 +12,10 @@
     let run = null;
     for (const point of points) {
       if (!number(point[key])) { run = null; continue; }
+      // Missing sampler intervals remain unknown even without an explicit null row.
+      if (run && point.timestamp - run[run.length - 1].timestamp > 3) run = null;
       if (!run) runs.push(run = []);
-      run.push({x: Math.max(0, Math.min(300, (point.timestamp - now + 120) / 120 * 300)), value: point[key]});
+      run.push({x: Math.max(0, Math.min(300, (point.timestamp - now + 120) / 120 * 300)), value: point[key], timestamp: point.timestamp});
     }
     let drawing = '';
     for (const items of runs) {
@@ -565,7 +567,7 @@
     if (group.previous_phase) return `Previous phase · ${group.previous_phase}`;
     if (group.score_adjusted) return group.text;
     if (group.scoring_complete !== false) return group.text;
-    if (!number(group.score)) return 'Application checks are running.';
+    if (!number(group.score)) return group.text || 'Application checks are running.';
     if (group.score < 75) return `Observed application impact · ${Math.round(group.score)} / 100.`;
     return 'Observed application performance. Monitoring continues.';
   }
@@ -585,8 +587,9 @@
         if (!(group.applications || []).length) details.append(element('p', '', 'Application measurements will appear as checks complete.'));
         for (const app of group.applications || []) {
           const measurement = live && number(app.score) ? `${Math.round(app.score)}/100` : 'unscored';
+          const reason = [...(app.evidence_issues || []), ...(app.missing_measurements || [])].map(words).join(', ');
           const confidence = app.scoring_complete === false ? (app.sample_confidence === 'limited_sample' ? ' · limited sample' : ' · incomplete evidence') : '';
-          details.append(element('p', '', `${app.label}: ${measurement}${confidence} · ${app.requests} transactions${number(app.age_s) ? ' · latest ' + Math.round(app.age_s) + ' s ago' : ''}${number(app.p95_ms) ? ' · ' + (app.class === 'realtime' ? 'operation timing' : 'completion P95') + ' ' + Math.round(app.p95_ms) + ' ms' : ''}`));
+          details.append(element('p', '', `${app.label}: ${measurement}${confidence}${reason ? ' · ' + reason : ''} · ${app.requests} transactions${number(app.age_s) ? ' · latest ' + Math.round(app.age_s) + ' s ago' : ''}${number(app.p95_ms) ? ' · ' + (app.class === 'realtime' ? 'operation timing' : 'completion P95') + ' ' + Math.round(app.p95_ms) + ' ms' : ''}`));
         }
         card.append(details);
       }
@@ -743,8 +746,8 @@
     setText(field('health'), `${online ? '' : 'Last known · '}${HEALTH[health] || words(health)}`);
     setText(field('impairment'), link.impairment || '');
     const points = histories.get(link.id) || [];
-    showNumber(field('down'), online ? smoothedRate(points, 'down_mbps') : null, rateText);
-    showNumber(field('up'), online ? smoothedRate(points, 'up_mbps') : null, rateText);
+    showNumber(field('down'), online && number(link.down_mbps) ? smoothedRate(points, 'down_mbps') : null, rateText);
+    showNumber(field('up'), online && number(link.up_mbps) ? smoothedRate(points, 'up_mbps') : null, rateText);
     setText(field('carries'), online ? carriesText(link.carries) : '');
   }
   function renderPaths() {
@@ -944,8 +947,11 @@
       const ids = new Set(data.links.map(link => link.id));
       for (const id of histories.keys()) if (!ids.has(id)) histories.delete(id);
       for (const link of data.links) {
-        const points = (histories.get(link.id) || []).filter(point => point.timestamp >= data.timestamp - 120 && point.timestamp <= data.timestamp).slice(-130);
-        points.push({timestamp: data.timestamp, down_mbps: link.down_mbps, up_mbps: link.up_mbps});
+        const points = (Array.isArray(link.history) ? link.history : histories.get(link.id) || []).filter(point => point.timestamp >= data.timestamp - 120 && point.timestamp <= data.timestamp).slice(-130);
+        // Recorded samples repair browser/proxy outages; never stamp an old rate as new.
+        if (!Array.isArray(link.history)) {
+          points.push({timestamp: link.sample_timestamp ?? data.timestamp, down_mbps: link.down_mbps, up_mbps: link.up_mbps});
+        }
         histories.set(link.id, points);
       }
       text('updated', `Updated ${window.NetEmTime.clock(data.timestamp)}`);
@@ -968,6 +974,7 @@
   // The WAN pages turn with a short fade, so the change reads as a turn rather than a cut.
   setInterval(() => {
     if (!latest) return;
+    if (latest.links.length <= pageSize()) return;
     const container = document.getElementById('paths');
     if (!frameLoop || !container) { page += 1; render(); return; }
     container.classList.add('turning');
@@ -982,3 +989,4 @@
   }
   poll();
 })();
+

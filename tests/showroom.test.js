@@ -707,3 +707,37 @@ test('standalone scenario renders measurements and automatically returns to the 
     assert.equal(doc.getElementById('intro').hidden, true);
   } finally { win.close(); }
 });
+
+
+test('recorded sampler outages break the line even without a null sample', () => {
+  const drawing = ui.chart([{timestamp: 90, down_mbps: 2}, {timestamp: 91, down_mbps: 2},
+    {timestamp: 98, down_mbps: 2}, {timestamp: 99, down_mbps: 2}], 'down_mbps', 100, 2);
+  assert.equal((drawing.match(/M/g) || []).length, 2);
+});
+
+test('reconnection rebuilds the chart from recorded samples, replacing browser gaps', async () => {
+  const dom = new JSDOM(fs.readFileSync('templates/showroom.html', 'utf8'), {runScripts: 'outside-only'});
+  const win = dom.window;
+  let nextPoll, failed = false;
+  win.setTimeout = (fn, ms) => { if (ms !== 5000) nextPoll = fn; return 1; };
+  win.clearTimeout = () => {};
+  win.setInterval = () => {};
+  const history = [90, 91, 92, 93].map(timestamp => ({timestamp, down_mbps: 2, up_mbps: 1}));
+  const snapshot = {timestamp: 94, scenario: {active: true}, session: {active: true},
+    links: [{id: 'wan1', name: 'WAN1', fault: 'normal', down_mbps: 2, up_mbps: 1, history}]};
+  win.fetch = async () => { if (failed) throw new Error('proxy unavailable');
+    return {ok: true, json: async () => snapshot}; };
+  win.eval(fs.readFileSync('static/time-format.js', 'utf8'));
+  win.eval(source);
+  await new Promise(resolve => setImmediate(resolve));
+  failed = true;
+  await nextPoll();
+  failed = false;
+  history.push(...[94, 95, 96].map(timestamp => ({timestamp, down_mbps: 2, up_mbps: 1})));
+  snapshot.timestamp = 97;
+  await nextPoll();
+  const drawing = win.document.querySelector('.spark .download').getAttribute('d');
+  assert.equal((drawing.match(/M/g) || []).length, 1);
+  assert.equal((drawing.match(/C/g) || []).length, 6);
+  dom.window.close();
+});
