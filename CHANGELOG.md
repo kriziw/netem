@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.6.3](https://github.com/kriziw/netem/compare/v1.6.2...v1.6.3) (2026-10-21)
+
+
+### Bug Fixes
+
+* simplify customer showcase and show live baseline immediately ([#169](https://github.com/kriziw/netem/issues/169)) ([4a89c02](https://github.com/kriziw/netem/commit/4a89c021668bd100e89099528d842336498de643))
+
 ## [1.6.2](https://github.com/kriziw/netem/compare/v1.6.1...v1.6.2) (2026-10-19)
 
 
