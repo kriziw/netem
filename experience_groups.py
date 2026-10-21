@@ -67,7 +67,14 @@ def group_summary(key, label, members, label_for, evidence=None):
     incomplete = any(item.get("scoring_complete") is False for item in members.values())
     if not scored:
         return {**summary, "score": None, "tone": "unknown",
-                "text": f"Too few transactions to score yet: {requests} in the window."}
+                "scoring_complete": False,
+                "text": ("Measurements are unavailable: " + ", ".join(sorted({
+                    str(issue).replace('_', ' ') for item in members.values()
+                    for issue in (item.get('evidence_issues') or [])})) + "."
+                    if any(item.get('evidence_issues') for item in members.values()) else
+                    "Required application measurements are missing; see application details."
+                    if any(item.get('missing_measurements') for item in members.values()) else
+                    f"Too few transactions to score yet: {requests} in the window.")}
     worst = min(scored, key=lambda name: scored[name]["experience_score"])
     weights = {name: item.get("weight") if item.get("weight") is not None else 1 for name, item in scored.items()}
     total_weight = sum(weights.values())
@@ -115,7 +122,9 @@ def experience_groups(dem, label_for=None):
         group = group_summary(key, label, members, label_for, dem)
         group['applications'] = [{'label': label_for(name), 'score': item.get('experience_score'),
             'requests': item.get('requests') or 0, 'sample_confidence': item.get('sample_confidence'),
-            'scoring_complete': item.get('scoring_complete'), 'success_pct': item.get('availability_pct'),
+            'scoring_complete': item.get('scoring_complete'),
+            'missing_measurements': item.get('missing_measurements') or [],
+            'evidence_issues': item.get('evidence_issues') or [], 'success_pct': item.get('availability_pct'),
             'p95_ms': item.get('p95_ms'), 'class': item.get('class') or 'interactive',
             'age_s': max(0, (dem.get('until') or 0) - item['last_observation_at'])
                      if dem.get('until') is not None and item.get('last_observation_at') is not None else None}
@@ -129,3 +138,4 @@ def attach_experience_groups(dem, label_for=None):
     if isinstance(dem, dict):
         dem["experience_groups"] = experience_groups(dem, label_for)
     return dem
+

@@ -95,51 +95,58 @@
       </div>
       <div class="site-session"><span class="eyebrow">Lab session</span><strong id="session-name">No session running</strong><p id="session-site"></p></div>
     </section>
-    <div class="columns">
-      <section class="column" aria-label="Network and activity">
-        <div class="section-heading"><h2>Network &amp; activity</h2><span id="page-number"></span></div>
+    <div class="columns showcase-grid">
+      <section class="column showcase-panel network-panel" aria-labelledby="network-heading">
+        <div class="section-heading"><h2 id="network-heading"><span class="part-number">01</span> What's happening</h2><span id="page-number"></span></div>
         <section class="demo" aria-label="Running now">
           <div class="demo-main"><span class="eyebrow">Running now</span><h3 id="demo-name">Waiting for live data</h3><p id="demo-stage"></p><div id="demo-phases" class="phases" hidden></div><p id="demo-time" class="demo-time"></p><p id="plan-progress" class="plan-progress"></p></div>
-          <div class="workload"><span class="eyebrow">Simulated users</span><strong id="workload-users">—</strong><p id="workload-summary"></p></div>
         </section>
         <section id="paths" class="paths" aria-label="WAN status"><p class="empty">Waiting for the first snapshot…</p></section>
+        <section class="route-summary" aria-label="Where traffic goes"><span class="eyebrow">Where traffic goes</span><div id="routes" class="routes"></div></section>
       </section>
-      <section class="column" aria-label="Experience outcome">
-        <div class="section-heading"><h2>Experience outcome</h2><span id="outcome-window"></span></div>
-        <section class="results" aria-label="Result against targets">
-          <article class="result unknown" id="result-experience"><span>Target-aligned experience</span><strong data-value>—</strong><small data-target></small></article>
-          <article class="result unknown" id="result-success"><span>Request success</span><strong data-value>—</strong><small data-target></small></article>
-          <article class="result unknown" id="result-interactive"><span>Application completion · P95</span><strong data-value>—</strong><small data-target></small></article>
-        </section>
+      <section class="column showcase-panel score-panel" aria-labelledby="score-heading">
+        <div class="section-heading"><h2 id="score-heading"><span class="part-number">02</span> Impact on score</h2></div>
+        <article class="result unknown score-hero" id="result-experience">
+          <div class="score-dial" aria-hidden="true"><svg viewBox="0 0 120 120"><circle class="score-track" cx="60" cy="60" r="52"/><circle class="score-fill" cx="60" cy="60" r="52" pathLength="100"/></svg></div>
+          <div class="score-value"><span>Experience score</span><strong data-value>—</strong><small data-target></small></div>
+        </article>
+        <p id="score-status" class="score-status" role="status">Measuring experience</p>
         <p class="field-help" id="outcome-transition" hidden></p>
-        <details id="score-details" hidden><summary>Experience score details</summary><p class="field-help" id="score-impact" hidden></p><p class="field-help" id="score-explanation"></p><p class="field-help">Application completion includes the request, target processing and the full response transfer; it is not network latency.</p></details>
-        <p class="field-help" id="measurement-note" hidden></p>
-        <p class="field-help" id="network-timing" hidden></p>
+        <section class="results results-support" aria-label="Supporting measurements">
+          <article class="result unknown" id="result-success"><span>Requests completed</span><strong data-value>—</strong><small data-target></small></article>
+          <article class="result unknown" id="result-interactive"><span>App response · P95</span><strong data-value>—</strong><small data-target></small></article>
+        </section>
         <section class="subscores" id="experience-groups" aria-label="Experience by traffic group"></section>
+        <p id="outcome-window" class="sample"></p>
+      </section>
+      <section class="column showcase-panel people-panel" aria-labelledby="people-heading">
+        <div class="section-heading"><h2 id="people-heading"><span class="part-number">03</span> Impact on users</h2></div>
+        <div id="live-outcome" class="live-outcome">
+          <p id="story-status" class="story-status">Waiting for measurements…</p>
+          <p id="user-impact" class="user-impact">The effect on users is not yet confirmed.</p>
+          <section id="user-effects" class="user-effects" aria-label="What this means for users"></section>
+        </div>
         <section class="panel report" id="report" aria-label="Test report" hidden>
           <div class="report-head"><div><span class="eyebrow">Test report</span><h3 id="report-name"></h3><p id="report-meta"></p></div><strong class="pill" id="report-result"></strong></div>
           <ul id="report-conclusion" class="conclusion"></ul>
           <table class="phase-table"><thead><tr><th>Phase</th><th>Experience</th><th>Success</th><th>Response P95</th><th>WAN traffic · Mbit/s</th><th>SD-WAN steering</th></tr></thead><tbody id="report-phases"></tbody></table>
           <div class="remediation"><span class="eyebrow">SD-WAN remediation</span><div id="report-remediation"></div></div>
         </section>
-        <div id="live-outcome" class="live-outcome">
-          <section class="panel story" aria-label="What's happening"><span class="eyebrow">What's happening</span><p id="story-status" class="story-status">Waiting for measurements…</p><p id="user-impact" class="user-impact">Application checks are measuring the effect on users.</p><div id="impacts" class="impacts"></div></section>
-          <section class="panel" aria-label="Where the appliance sends traffic"><span class="eyebrow">Where the appliance sends traffic</span><div id="routes" class="routes"></div></section>
-        </div>
       </section>
     </div>
   </main>
-  <footer><span>Read-only display · values settle over a few seconds</span><span>Traffic and experience are measured. Impairments are what NetEm applies to each WAN.</span></footer>
+  <footer><span>Live measurements · read-only showcase</span><span>Injected faults describe the test. User impact comes from measured application checks.</span></footer>
   <template id="path-template">
     <article class="path">
       <div class="path-heading"><div><h3 data-field="name"></h3><span data-field="profile"></span></div><strong class="badge" data-field="health"></strong></div>
-      <p class="impairment" data-field="impairment"></p>
+      <div class="faults"><span>Injected</span><p class="impairment" data-field="impairment"></p></div>
       <div class="traffic"><div><span>Download · Mbit/s</span><strong data-field="down"></strong></div><div><span>Upload · Mbit/s</span><strong data-field="up"></strong></div></div>
       <svg class="spark" viewBox="0 0 300 52" preserveAspectRatio="none" role="img" aria-label="Measured download and upload over the last two minutes"><path class="download"></path><path class="upload"></path></svg>
       <div class="legend"><span>Download</span><span>Upload</span><span>Last 2 minutes</span></div>
-      <p class="carries" data-field="carries"></p>
+
     </article>
   </template>
 <script src="/assets/branding-live.js"></script>
 </body>
 </html>
+

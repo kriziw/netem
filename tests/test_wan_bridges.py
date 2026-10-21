@@ -144,3 +144,42 @@ class ReportTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class SamplerIsolationTests(unittest.TestCase):
+    def test_slow_bridge_check_does_not_hold_up_rate_samples(self):
+        import threading
+        stop, checking, release = threading.Event(), threading.Event(), threading.Event()
+        samples = []
+        def slow_check():
+            checking.set()
+            release.wait(2)
+        def collect():
+            samples.append(True)
+            if len(samples) >= 3:
+                stop.set()
+        with patch.object(netem, 'BACKGROUND_STOP', stop), \
+             patch.object(netem, 'BRIDGE_CHECK_SECONDS', .001), \
+             patch.object(netem, 'TELEMETRY_SAMPLE_SECONDS', .01), \
+             patch.object(netem, 'check_wan_bridges', side_effect=slow_check), \
+             patch.object(netem, 'init_telemetry_db'), \
+             patch.object(netem, 'discard_future_samples', return_value=0), \
+             patch.object(netem, 'collect_telemetry_sample', side_effect=collect), \
+             patch.object(netem, 'record_host_sample'):
+            bridge = threading.Thread(target=netem.bridge_worker, daemon=True)
+            sampler = threading.Thread(target=netem.telemetry_worker, daemon=True)
+            bridge.start()
+            try:
+                self.assertTrue(checking.wait(1))
+                sampler.start()
+                sampler.join(1)
+                self.assertFalse(sampler.is_alive())
+                self.assertEqual(len(samples), 3)
+                self.assertFalse(release.is_set())
+            finally:
+                stop.set()
+                release.set()
+                bridge.join(2)
+                if sampler.ident is not None:
+                    sampler.join(2)

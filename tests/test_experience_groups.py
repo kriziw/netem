@@ -71,3 +71,15 @@ class GroupScoreTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MissingEvidenceTests(unittest.TestCase):
+    def test_missing_scores_explain_invalid_evidence_instead_of_low_counts(self):
+        groups = experience_groups({'until': 100, 'applications': {'web': {
+            'class': 'interactive', 'requests': 16, 'experience_score': None,
+            'scoring_complete': False, 'evidence_issues': ['application_check_generator_lag'],
+            'missing_measurements': ['deadline']}}})
+        group = next(item for item in groups if item['key'] == 'interactive')
+        self.assertIn('application check generator lag', group['text'])
+        self.assertNotIn('Too few', group['text'])
+        self.assertEqual(group['applications'][0]['missing_measurements'], ['deadline'])

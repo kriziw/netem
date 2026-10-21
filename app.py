@@ -210,6 +210,7 @@ ORIGINAL_MTUS = {}
 CAPTURE_PROCESS = None
 BACKGROUND_STOP = threading.Event()
 TELEMETRY_THREAD = None
+BRIDGE_THREAD = None
 PROBE_THREAD = None
 TELEMETRY_PREVIOUS = {}
 TELEMETRY_SAMPLER_ID = uuid.uuid4().hex
@@ -582,8 +583,14 @@ def traffic_generator_snapshot(include_catalog=False, cached=False):
             result['status']['dem'] = pending_simulator_dem('status_refresh_pending')
     if result.get('connected') and result.get('status'):
         with RUNTIME_LOCK:
+            preparing = SCENARIO_STATE.get('active') and SCENARIO_STATE.get('preparing_workload')
             expected = SCENARIO_STATE.get('workload_run_id') if SCENARIO_STATE.get('active') and SCENARIO_STATE.get('workload_supervised') else None
-        if expected and ((result['status'].get('run') or {}).get('run_id') != expected or
+        if preparing:
+            # The dashboard opens as soon as the announcement ends, but an old
+            # run's cached score is not the new baseline. WAN telemetry is live.
+            result['status']['dem'] = pending_simulator_dem('baseline_starting', SCENARIO_STATE.get('live_window_seconds', 15))
+            result['status']['users'] = None
+        elif expected and ((result['status'].get('run') or {}).get('run_id') != expected or
                          (result['status'].get('dem') or {}).get('live_phase_id') != test_live_context()['phase_id'] or
                          bool((result['status'].get('dem') or {}).get('live_paused')) != bool(SCENARIO_STATE.get('paused'))):
             result['status']['dem'] = pending_simulator_dem('live_phase_pending', SCENARIO_STATE.get('live_window_seconds', 15))
@@ -2835,14 +2842,14 @@ def end_unsaved_telemetry():
 
 
 @contextmanager
-def telemetry_connect():
+def telemetry_connect(timeout=5):
     with EPHEMERAL_TELEMETRY_LOCK:
         if EPHEMERAL_TELEMETRY is not None:
             with EPHEMERAL_TELEMETRY:
                 yield EPHEMERAL_TELEMETRY
             return
     RUNTIME_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=5)
+    conn = sqlite3.connect(TELEMETRY_DB_PATH, timeout=timeout)
     conn.row_factory = sqlite3.Row
     try:
         conn.execute("PRAGMA journal_mode=WAL")
@@ -3639,13 +3646,21 @@ def note_clock_step(step_s, removed):
               step_s=round(step_s, 1), discarded=removed)
 
 
+def bridge_worker():
+    """Bridge inspection/repair may block on commands or BRIDGE_LOCK, never rates."""
+    while not BACKGROUND_STOP.wait(BRIDGE_CHECK_SECONDS):
+        try:
+            check_wan_bridges()
+        except Exception as exc:
+            log_event("bridge", "WAN bridge check failed", error=str(exc)[:240])
+
+
 def telemetry_worker():
     init_telemetry_db()
     removed = discard_future_samples()
     if removed:
         note_clock_step(0.0, removed)
     next_prune = time.monotonic() + 300
-    next_bridge_check = time.monotonic() + BRIDGE_CHECK_SECONDS
     wall, clock = time.time(), time.monotonic()
     last_started = None
     while not BACKGROUND_STOP.is_set():
@@ -3654,12 +3669,6 @@ def telemetry_worker():
         # so the rates computed from its samples are less exact.
         lag_ms = 0.0 if last_started is None else max(0.0, (started - last_started - TELEMETRY_SAMPLE_SECONDS) * 1000)
         last_started = started
-        if started >= next_bridge_check:
-            next_bridge_check = started + BRIDGE_CHECK_SECONDS
-            try:
-                check_wan_bridges()
-            except Exception as exc:
-                log_event("bridge", "WAN bridge check failed", error=str(exc)[:240])
         try:
             # Wall time should advance with the monotonic clock; a difference is a clock step.
             step = (time.time() - wall) - (time.monotonic() - clock)
@@ -3712,7 +3721,7 @@ def query_telemetry_history(link_id: str, since: float, max_points=1200):
 def latest_telemetry_sample(link_id: str):
     # A plain read: schema setup takes a write lock and the telemetry worker already did it.
     try:
-        with telemetry_connect() as conn:
+        with telemetry_connect(timeout=.05) as conn:
             row = conn.execute(
                 """
                 SELECT * FROM telemetry_samples
@@ -5066,7 +5075,7 @@ def clock_finding(status):
 
 
 def start_background_workers():
-    global TELEMETRY_THREAD, PROBE_THREAD, DIAGNOSIS_THREAD
+    global TELEMETRY_THREAD, BRIDGE_THREAD, PROBE_THREAD, DIAGNOSIS_THREAD
     init_telemetry_db()
     BACKGROUND_STOP.clear()
     APPLIANCE_PLATFORM.start()
@@ -5079,6 +5088,9 @@ def start_background_workers():
             daemon=True,
         )
         TELEMETRY_THREAD.start()
+    if BRIDGE_THREAD is None or not BRIDGE_THREAD.is_alive():
+        BRIDGE_THREAD = threading.Thread(target=bridge_worker, name="netem-bridge-check", daemon=True)
+        BRIDGE_THREAD.start()
     if PROBE_THREAD is None or not PROBE_THREAD.is_alive():
         PROBE_THREAD = threading.Thread(
             target=probe_worker,
@@ -10010,6 +10022,22 @@ def showroom_session_progress(session):
         return copy.deepcopy(value)
 
 
+def showroom_traffic_history(link_id, now):
+    """Read recorded rates without schema writes or publishing internal telemetry."""
+    try:
+        with telemetry_connect(timeout=.05) as conn:
+            rows = conn.execute(
+                "SELECT timestamp, rate_valid, down_mbps, up_mbps FROM telemetry_samples "
+                "WHERE link_id = ? AND timestamp >= ? AND timestamp <= ? "
+                "ORDER BY timestamp DESC LIMIT 250", (link_id, now - 120, now)).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    return [{"timestamp": row["timestamp"], **{
+        key: row[key] if row["rate_valid"] and isinstance(row[key], (int, float))
+             and math.isfinite(row[key]) and row[key] >= 0 else None
+        for key in ("down_mbps", "up_mbps")}} for row in reversed(rows)]
+
+
 def showroom_session_snapshot():
     """Publish only presentation data, never configuration, addresses or secrets."""
     now = time.time()
@@ -10036,6 +10064,7 @@ def showroom_session_snapshot():
             "upload_limit_mbit": state["effective"].get("upload_mbit"),
             "sample_timestamp": sample["timestamp"] if sample else None,
             "traffic_available": fresh,
+            "history": showroom_traffic_history(state["id"], now),
             "down_mbps": sample.get("down_mbps") if fresh else None,
             "up_mbps": sample.get("up_mbps") if fresh else None,
         })
@@ -10289,6 +10318,7 @@ def showroom_outcome(diagnosis, site_plan):
             # Each traffic group's own sub-score and sentence, under the overall experience tiles.
             "groups": dem.get("experience_groups") or [],
             "user_impact": " ".join(showcase_summary.application_impact(dem)),
+            "user_effects": showcase_summary.user_effects(dem),
         },
         "findings": [{
             "severity": item.get("severity"), "source": item.get("source"), "title": showroom_text(item.get("title")),
@@ -10391,13 +10421,10 @@ def impairment_text(link):
     fault = link.get("fault") or "normal"
     if fault != "normal":
         return FAULT_WORDS.get(fault, fault.replace("_", " ").capitalize() + " injected")
-    quality = link.get("quality")
-    if quality is None or quality >= 100:
-        return "No impairment"
     parts = [f"{link['delay_ms']:g} ms delay" if link.get("delay_ms") else None,
+             f"{link['jitter_ms']:g} ms jitter" if link.get("jitter_ms") else None,
              f"{link['loss_pct']:g}% loss" if link.get("loss_pct") else None]
-    parts = [part for part in parts if part]
-    return f"Impaired to {quality:g}% quality" + (": " + ", ".join(parts) if parts else "")
+    return " · ".join(part for part in parts if part) or "No impairment"
 
 
 def cause_text(kinds, link):
@@ -10607,3 +10634,4 @@ install_traffic_controls(app, sys.modules[__name__])
 
 if __name__ == "__main__":
     run_servers()
+
